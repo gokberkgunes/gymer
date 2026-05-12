@@ -28,18 +28,18 @@ SET_FIELDS = [
 DEFAULT_WORKOUTS = [
     (
         "A",
-        "Workout A",
-        ["Leg Press", "SLD", "Leg Curl", "Calf Press"],
+        "Legs",
+        ["Leg Press", "Stiff-Legged Deadlift", "Leg Curl", "Calf Press"],
     ),
     (
         "B",
-        "Workout B",
-        ["Lat Pulldown", "Machine Row", "Lying Biceps Curls" ],
+        "Pull",
+        ["Lat Pulldown", "Machine Row", "Lying Biceps Curls", "Forearm Curl" ],
     ),
     (
         "C",
-        "Workout C",
-        ["Incline Bench", "Overhead Cable Triceps", "Lateral Raise"],
+        "Push",
+        ["Incline Bench Press", "Overhead Triceps Extension", "Lateral Raise"],
     ),
 ]
 
