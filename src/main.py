@@ -176,6 +176,9 @@ class RepsApp:
                 exercises=[field.value for field in exercise_fields.controls],
             )
             self.show_home()
+        def delete(e):
+            storage.delete_workout(workout_id)
+            self.show_home()
 
         self.set_view(
             [
@@ -189,7 +192,19 @@ class RepsApp:
                 ft.Text("Exercises", size=18, weight=ft.FontWeight.BOLD),
                 exercise_fields,
                 ft.OutlinedButton("Add exercise", on_click=lambda e: add_exercise_field()),
-                ft.FilledButton("Save", on_click=save),
+
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.FilledButton("Save", on_click=save),
+                        ft.FilledButton(
+                            "Delete",
+                            on_click=delete,
+                            color=ft.Colors.WHITE,    # Text color
+                            bgcolor=ft.Colors.RED_700  # Button background color
+                        ),
+                    ]
+                )
             ]
         )
 

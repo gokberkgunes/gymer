@@ -90,6 +90,11 @@ def read_workouts():
     ensure_data()
     return _read_csv(WORKOUTS_FILE)
 
+def read_exercises():
+    ensure_data()
+    return _read_csv(WORKOUT_EXERCISES_FILE)
+
+
 
 def read_workout(workout_id):
     ensure_data()
@@ -157,6 +162,18 @@ def create_workout(name=""):
 
     return workout_id
 
+def delete_workout(target_id):
+    ensure_data()
+    workouts = read_workouts()
+
+    # Delete line
+    workouts = [w for w in workouts if w['workout_id'] != target_id]
+    _write_csv(WORKOUTS_FILE, WORKOUT_FIELDS, workouts)
+
+    # Delete saved workouts from history.
+    all_exercises = read_exercises()
+    filtered_exercises = [e for e in all_exercises if e['workout_id'] != target_id]
+    _write_csv(WORKOUT_EXERCISES_FILE, EXERCISE_FIELDS, filtered_exercises)
 
 
 
