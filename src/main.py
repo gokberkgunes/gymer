@@ -7,16 +7,74 @@ class RepsApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.page.title = "GYMER"
-        self.page.scroll = None #ft.ScrollMode.AUTO
+        self.page.scroll = None
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.window_width = 430
         self.page.window_height = 760
 
-        self.current_workout = None
+        self.active_workout = storage.load_active_workout()
         self.set_controls = []
+        self.selected_tab = 0
 
-        storage.ensure_data()
-        self.show_home()
+        self.page.navigation_bar = ft.NavigationBar(
+            selected_index=0,
+            indicator_shape=ft.RoundedRectangleBorder(radius=0),
+            destinations=[
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.FITNESS_CENTER_OUTLINED,
+                    selected_icon=ft.Icons.FITNESS_CENTER,
+                    label="Workout",
+                ),
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.EDIT_OUTLINED,
+                    selected_icon=ft.Icons.EDIT,
+                    label="Manage",
+                ),
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.SETTINGS_OUTLINED,
+                    selected_icon=ft.Icons.SETTINGS,
+                    label="Settings",
+                ),
+            ],
+            on_change=self.change_tab,
+        )
+
+        self.show_workout_tab()
+
+    # ------------------------------------------------------------------
+    # STYLE HELPERS
+    # ------------------------------------------------------------------
+
+    def square_style(self):
+        return ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=0),
+        )
+
+    def filled_button(self, text, on_click=None, expand=False, **kwargs):
+        return ft.FilledButton(
+            content=text,
+            on_click=on_click,
+            expand=expand,
+            style=self.square_style(),
+            **kwargs,
+        )
+
+    def outlined_button(self, text, on_click=None, expand=False, **kwargs):
+        return ft.OutlinedButton(
+            content=text,
+            on_click=on_click,
+            expand=expand,
+            style=self.square_style(),
+            **kwargs,
+        )
+
+    def text_field(self, **kwargs):
+        kwargs.setdefault("border_radius", 0)
+        return ft.TextField(**kwargs)
+
+    # ------------------------------------------------------------------
+    # PAGE / NAVIGATION
+    # ------------------------------------------------------------------
 
     def set_view(self, controls, footer=None):
         self.page.controls.clear()
@@ -33,130 +91,296 @@ class RepsApp:
         )
 
         page_controls = [content]
+
         if footer is not None:
             page_controls.append(
                 ft.Container(
                     content=footer,
-                    padding=ft.Padding(left=20, top=20, right=20, bottom=20),
+                    padding=ft.Padding(left=20, top=10, right=20, bottom=14),
                 )
             )
+
         self.page.add(
             ft.Column(
                 controls=page_controls,
+                spacing=0,
                 expand=True,
-                spacing=0
             )
         )
+
         self.page.update()
 
-    def show_home(self):
-        rows = []
-        for workout in storage.read_workouts():
-            rows.append(self.workout_row(workout))
+    def change_tab(self, e):
+        # Save entered values before leaving an active workout screen.
+        if self.active_workout and self.set_controls:
+            self.capture_active_controls()
 
-        self.set_view(
-            [
-                *rows,
-                ft.Divider(),
-            ],
-            footer= ft.FilledButton("Add Workout", on_click=lambda e: self.add_workout()),
+        self.selected_tab = e.control.selected_index
+
+        if self.selected_tab == 0:
+            self.show_workout_tab()
+        elif self.selected_tab == 1:
+            self.show_manage()
+        else:
+            self.show_settings()
+
+    def go_to_tab(self, index):
+        self.selected_tab = index
+        self.page.navigation_bar.selected_index = index
+
+        if index == 0:
+            self.show_workout_tab()
+        elif index == 1:
+            self.show_manage()
+        else:
+            self.show_settings()
+
+    def notify(self, message):
+        self.page.show_dialog(
+            ft.SnackBar(
+                content=ft.Text(message),
+            )
         )
 
-    def workout_row(self, workout):
-        workout_id = workout["workout_id"]
-        name = workout["name"]
+    # ------------------------------------------------------------------
+    # WORKOUT TAB
+    # ------------------------------------------------------------------
 
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Text(name, size=30, weight=ft.FontWeight.BOLD, expand=True),
-                    ft.FilledButton("Start", on_click=lambda e: self.show_workout(workout_id)),
-                    ft.OutlinedButton("Edit", on_click=lambda e: self.show_edit(workout_id)),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            padding=ft.Padding(left=0, top=8, right=0, bottom=10),
-        )
+    def show_workout_tab(self):
+        self.page.navigation_bar.selected_index = 0
 
-    def add_workout(self):
-        workout_id = storage.create_workout("")
-        self.show_edit(workout_id)
+        if self.active_workout:
+            self.show_active_workout()
+        else:
+            self.show_saved_workouts()
 
-    def show_workout(self, workout_id):
+    def show_saved_workouts(self):
+        controls = [
+            ft.Text("Workout", size=30, weight=ft.FontWeight.BOLD),
+            ft.Text("Choose a workout to start."),
+        ]
+
+        workouts = storage.read_workouts()
+
+        if not workouts:
+            controls.append(ft.Text("No workouts yet. Create one from Manage."))
+
+        for workout in workouts:
+            workout_id = workout["workout_id"]
+
+            controls.append(
+                ft.Container(
+                    padding=ft.Padding(left=0, top=8, right=0, bottom=8),
+                    content=ft.Row(
+                        controls=[
+                            ft.Text(
+                                workout["name"],
+                                size=24,
+                                weight=ft.FontWeight.BOLD,
+                                expand=True,
+                            ),
+                            self.filled_button(
+                                "Start",
+                                on_click=lambda e, wid=workout_id: self.start_workout(wid),
+                            ),
+                        ],
+                    ),
+                )
+            )
+
+        recent = storage.recent_sessions(limit=5)
+
+        if recent:
+            controls.extend(
+                [
+                    ft.Divider(),
+                    ft.Text("Recent", size=18, weight=ft.FontWeight.BOLD),
+                ]
+            )
+
+            for session in recent:
+                date = session["date"].replace("T", " ")[:16]
+                controls.append(
+                    ft.Row(
+                        controls=[
+                            ft.Text(session["workout_name"], expand=True),
+                            ft.Text(f'{session["set_count"]} sets'),
+                            ft.Text(date, size=11),
+                        ],
+                    )
+                )
+
+        self.set_view(controls)
+
+    def start_workout(self, workout_id):
         workout = storage.read_workout(workout_id)
-        self.current_workout = workout
+
+        if workout is None:
+            self.notify("Workout not found.")
+            return
+
+        self.active_workout = storage.build_active_workout(workout)
+        storage.save_active_workout(self.active_workout)
+        self.show_active_workout()
+
+    def show_active_workout(self):
+        if not self.active_workout:
+            self.show_saved_workouts()
+            return
+
         self.set_controls = []
 
         controls = [
             ft.Row(
                 controls=[
-                    ft.FilledIconButton(icon=ft.Icons.ARROW_BACK, width=50, on_click=lambda e: self.show_home()),
-                    ft.Divider(),
-                    ft.Text(f" {workout['name']}", size=26, weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        self.active_workout["workout_name"],
+                        size=28,
+                        weight=ft.FontWeight.BOLD,
+                        expand=True,
+                    ),
+                    ft.Text("ACTIVE", weight=ft.FontWeight.BOLD),
                 ]
-            ),
+            )
         ]
 
-        for exercise in workout["exercises"]:
-            controls.extend(self.exercise_block(exercise))
+        grouped = {}
+        for row in self.active_workout["rows"]:
+            grouped.setdefault(row["exercise_name"], []).append(row)
+
+        for exercise_name, rows in grouped.items():
+            controls.extend(self.active_exercise_block(exercise_name, rows))
 
         footer = ft.Row(
-                controls = [
-                    ft.FilledButton("Save Workout", on_click=self.save_current_workout),
-                    ft.OutlinedButton("Cancel", on_click=lambda e: self.show_home()),
-                ],
-                spacing = 10,
+            controls=[
+                self.filled_button(
+                    "Save Workout",
+                    on_click=self.finish_workout,
+                    expand=True,
+                ),
+                self.outlined_button(
+                    "Discard",
+                    on_click=self.discard_workout,
+                ),
+            ],
+            spacing=10,
         )
 
         self.set_view(controls, footer=footer)
 
-    def exercise_block(self, exercise_name):
-        rows_column = ft.Column(spacing=6)
+    def active_exercise_block(self, exercise_name, initial_rows):
+        rows_column = ft.Column(spacing=8)
+        exercise_items = []
 
-        def add_set_row(e=None):
-            set_number = len(rows_column.controls) + 1
-            weight = ft.TextField(label="Weight", width=100, dense=True)
-            reps = ft.TextField(label="Reps", width=72, dense=True)
-            rir = ft.TextField(label="RIR", width=72, dense=True)
-            note = ft.TextField(label="Note", expand=True, dense=True)
+        def make_row(row_data):
+            set_number = len(exercise_items) + 1
 
-            self.set_controls.append(
-                {
-                    "exercise_name": exercise_name,
-                    "set_number": set_number,
-                    "weight": weight,
-                    "reps": reps,
-                    "rir": rir,
-                    "note": note,
-                }
+            weight = self.text_field(
+                label="Weight",
+                value=row_data.get("weight", ""),
+                width=92,
+                dense=True,
             )
+
+            reps = self.text_field(
+                label="Reps",
+                value=row_data.get("reps", ""),
+                width=68,
+                dense=True,
+            )
+
+            rir = self.text_field(
+                label="RIR",
+                value=row_data.get("rir", ""),
+                width=62,
+                dense=True,
+            )
+
+            note = self.text_field(
+                label="Note",
+                value=row_data.get("note", ""),
+                expand=True,
+                dense=True,
+            )
+
+            item = {
+                "exercise_name": exercise_name,
+                "set_number": set_number,
+                "weight": weight,
+                "reps": reps,
+                "rir": rir,
+                "note": note,
+            }
+
+            exercise_items.append(item)
+            self.set_controls.append(item)
+
+            # Save draft whenever the user changes a field.
+            for field in (weight, reps, rir, note):
+                field.on_change = lambda e: self.capture_active_controls()
 
             rows_column.controls.append(
                 ft.Row(
                     controls=[
-                        ft.Text(f"{set_number}", width=10, size=18),
+                        ft.Text(str(set_number), width=16),
                         weight,
                         reps,
                         rir,
                         note,
                     ],
-                    spacing=8,
+                    spacing=6,
                 )
             )
+
+        def add_set(e):
+            make_row({})
+            self.capture_active_controls()
             self.page.update()
 
-        add_button = ft.OutlinedButton("+", on_click=add_set_row)
-        add_set_row()
+        def remove_set(e):
+            if len(exercise_items) <= 1:
+                return
+
+            item = exercise_items.pop()
+            self.set_controls.remove(item)
+            rows_column.controls.pop()
+
+            self.renumber_controls()
+            self.capture_active_controls()
+            self.page.update()
+
+        for row in initial_rows:
+            make_row(row)
 
         return [
             ft.Text(exercise_name, size=19, weight=ft.FontWeight.BOLD),
             rows_column,
-            add_button,
+            ft.Row(
+                controls=[
+                    self.outlined_button("+ Set", on_click=add_set),
+                    self.outlined_button("- Set", on_click=remove_set),
+                ],
+                spacing=8,
+            ),
             ft.Divider(height=10),
         ]
 
-    def save_current_workout(self, e):
+    def renumber_controls(self):
+        counts = {}
+
+        for item in self.set_controls:
+            exercise_name = item["exercise_name"]
+            counts[exercise_name] = counts.get(exercise_name, 0) + 1
+            item["set_number"] = counts[exercise_name]
+
+    def capture_active_controls(self):
+        if not self.active_workout:
+            return
+
+        self.renumber_controls()
+
         rows = []
+
         for item in self.set_controls:
             rows.append(
                 {
@@ -169,19 +393,178 @@ class RepsApp:
                 }
             )
 
-        count = storage.append_session(self.current_workout, rows)
-        self.page.snack_bar = ft.SnackBar(ft.Text(f"Saved {count} set(s)."))
-        self.page.snack_bar.open = True
-        self.show_home()
+        self.active_workout["rows"] = rows
+        storage.save_active_workout(self.active_workout)
 
-    def show_edit(self, workout_id):
+    def finish_workout(self, e):
+        self.capture_active_controls()
+
+        workout = {
+            "workout_id": self.active_workout["workout_id"],
+            "name": self.active_workout["workout_name"],
+        }
+
+        count = storage.append_session(
+            workout,
+            self.active_workout["rows"],
+        )
+
+        if count == 0:
+            self.notify("Nothing was saved. Enter at least one set.")
+            return
+
+        storage.clear_active_workout()
+        self.active_workout = None
+        self.set_controls = []
+
+        self.notify(f"Saved {count} set(s).")
+        self.show_saved_workouts()
+
+    def discard_workout(self, e):
+        storage.clear_active_workout()
+        self.active_workout = None
+        self.set_controls = []
+        self.show_saved_workouts()
+
+    # ------------------------------------------------------------------
+    # MANAGE TAB
+    # ------------------------------------------------------------------
+
+    def show_manage(self):
+        self.page.navigation_bar.selected_index = 1
+
+        controls = [
+            ft.Text("Manage", size=30, weight=ft.FontWeight.BOLD),
+            ft.Text("Create or edit workout templates."),
+            self.filled_button(
+                "New Workout",
+                on_click=self.create_workout,
+            ),
+            ft.Divider(),
+        ]
+
+        for workout in storage.read_workouts():
+            workout_id = workout["workout_id"]
+
+            controls.append(
+                ft.Row(
+                    controls=[
+                        ft.Text(
+                            workout["name"],
+                            size=22,
+                            weight=ft.FontWeight.BOLD,
+                            expand=True,
+                        ),
+                        self.outlined_button(
+                            "Edit",
+                            on_click=lambda e, wid=workout_id: self.show_edit(wid),
+                        ),
+                    ]
+                )
+            )
+
+        self.set_view(controls)
+
+    def create_workout(self, e):
+        workout_id = storage.create_workout("New Workout")
+        self.show_edit(workout_id, is_new=True)
+
+    def show_edit(self, workout_id, is_new=False):
         workout = storage.read_workout(workout_id)
-        name_field = ft.TextField(label="Workout name", value=workout["name"])
-        exercise_fields = ft.Column(spacing=8)
 
-        def add_exercise_field(value=""):
-            field = ft.TextField(label="Exercise", value=value, expand=True)
-            exercise_fields.controls.append(field)
+        if workout is None:
+            self.show_manage()
+            return
+
+        settings = storage.read_settings()
+
+        name_field = self.text_field(
+            label="Workout name",
+            value=workout["name"],
+        )
+
+        exercise_fields = ft.Column(spacing=12)
+        exercise_edit_rows = []
+
+        def remove_exercise(row_data, container):
+            if row_data in exercise_edit_rows:
+                exercise_edit_rows.remove(row_data)
+
+            if container in exercise_fields.controls:
+                exercise_fields.controls.remove(container)
+
+            self.page.update()
+
+        def add_exercise_field(exercise=None):
+            exercise = exercise or {
+                "exercise_name": "",
+                "target_sets": settings.get("default_sets", "3"),
+                "default_weight": "",
+                "default_reps": "",
+            }
+
+            name = self.text_field(
+                label="Exercise",
+                value=exercise.get("exercise_name", ""),
+                expand=True,
+                dense=True,
+            )
+
+            sets = self.text_field(
+                label="Sets",
+                value=exercise.get("target_sets", settings.get("default_sets", "3")),
+                width=65,
+                dense=True,
+            )
+
+            weight = self.text_field(
+                label="Start weight",
+                value=exercise.get("default_weight", ""),
+                width=105,
+                dense=True,
+            )
+
+            reps = self.text_field(
+                label="Start reps",
+                value=exercise.get("default_reps", ""),
+                width=90,
+                dense=True,
+            )
+
+            row_data = {
+                "name": name,
+                "sets": sets,
+                "weight": weight,
+                "reps": reps,
+            }
+
+            container = ft.Container(
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                name,
+                                self.outlined_button(
+                                    "×",
+                                    on_click=lambda e: remove_exercise(row_data, container),
+                                ),
+                            ]
+                        ),
+                        ft.Row(
+                            controls=[
+                                sets,
+                                weight,
+                                reps,
+                            ],
+                            spacing=8,
+                        ),
+                    ],
+                    spacing=6,
+                )
+            )
+
+            exercise_edit_rows.append(row_data)
+            exercise_fields.controls.append(container)
             self.page.update()
 
         for exercise in workout["exercises"]:
@@ -191,45 +574,136 @@ class RepsApp:
             storage.save_workout(
                 workout_id=workout_id,
                 name=name_field.value,
-                exercises=[field.value for field in exercise_fields.controls],
+                exercises=[
+                    {
+                        "exercise_name": row["name"].value or "",
+                        "target_sets": row["sets"].value or "",
+                        "default_weight": row["weight"].value or "",
+                        "default_reps": row["reps"].value or "",
+                    }
+                    for row in exercise_edit_rows
+                ],
             )
-            self.show_home()
+
+            self.show_manage()
+
         def delete(e):
+            if (
+                self.active_workout
+                and self.active_workout["workout_id"] == workout_id
+            ):
+                self.notify("Finish or discard the active workout before deleting it.")
+                return
+
             storage.delete_workout(workout_id)
-            self.show_home()
+            self.show_manage()
 
+        controls = [
+            ft.Text(
+                "New Workout" if is_new else "Edit Workout",
+                size=28,
+                weight=ft.FontWeight.BOLD,
+            ),
+            name_field,
+            ft.Text("Exercises", size=18, weight=ft.FontWeight.BOLD),
+            exercise_fields,
+            self.outlined_button(
+                "+ Exercise",
+                on_click=lambda e: add_exercise_field(),
+            ),
+        ]
 
+        footer_controls = [
+            self.filled_button(
+                "Save",
+                on_click=save,
+                expand=True,
+            ),
+        ]
+
+        if not is_new:
+            footer_controls.append(
+                ft.FilledButton(
+                    content="Delete",
+                    on_click=delete,
+                    color=ft.Colors.WHITE,
+                    bgcolor=ft.Colors.RED_700,
+                    style=self.square_style(),
+                )
+            )
 
         footer = ft.Row(
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=footer_controls,
+            spacing=10,
+        )
+
+        self.set_view(controls, footer=footer)
+
+    # ------------------------------------------------------------------
+    # SETTINGS TAB
+    # ------------------------------------------------------------------
+
+    def show_settings(self):
+        self.page.navigation_bar.selected_index = 2
+
+        settings = storage.read_settings()
+        unit = settings.get("unit", "kg")
+
+        default_sets = self.text_field(
+            label="Default sets for new exercises",
+            value=settings.get("default_sets", "3"),
+            width=170,
+            dense=True,
+        )
+
+        def set_unit(new_unit):
+            settings["unit"] = new_unit
+            storage.save_settings(settings)
+            self.show_settings()
+
+        def save(e):
+            value = (default_sets.value or "").strip()
+
+            if not value.isdigit() or int(value) < 1:
+                self.notify("Default sets must be a positive whole number.")
+                return
+
+            settings["default_sets"] = value
+            storage.save_settings(settings)
+            self.notify("Settings saved.")
+            self.show_settings()
+
+        unit_row = ft.Row(
             controls=[
-                ft.FilledButton("Save", on_click=save),
-                ft.FilledButton(
-                    "Delete",
-                    on_click=delete,
-                    color=ft.Colors.WHITE,    # Text color
-                    bgcolor=ft.Colors.RED_700  # Button color
+                (
+                    self.filled_button("kg", on_click=lambda e: set_unit("kg"))
+                    if unit == "kg"
+                    else self.outlined_button("kg", on_click=lambda e: set_unit("kg"))
                 ),
-            ]
-        )
-
-        self.set_view(
-            [
-                ft.Row(
-                    controls=[
-                        ft.IconButton(icon=ft.Icons.ARROW_BACK, on_click=lambda e: self.show_home()),
-                        ft.Text("Edit workout", size=26, weight=ft.FontWeight.BOLD),
-                    ]
+                (
+                    self.filled_button("lb", on_click=lambda e: set_unit("lb"))
+                    if unit == "lb"
+                    else self.outlined_button("lb", on_click=lambda e: set_unit("lb"))
                 ),
-                name_field,
-                ft.Text("Exercises", size=18, weight=ft.FontWeight.BOLD),
-                exercise_fields,
-                ft.OutlinedButton("Add exercise", on_click=lambda e: add_exercise_field()),
-
-
             ],
-            footer=footer,
+            spacing=8,
         )
+
+        controls = [
+            ft.Text("Settings", size=30, weight=ft.FontWeight.BOLD),
+            ft.Text("Units", size=18, weight=ft.FontWeight.BOLD),
+            unit_row,
+            ft.Divider(),
+            ft.Text("Workout defaults", size=18, weight=ft.FontWeight.BOLD),
+            default_sets,
+            self.filled_button("Save Settings", on_click=save),
+            ft.Divider(),
+            ft.Text("Data", size=18, weight=ft.FontWeight.BOLD),
+            ft.Text(str(storage.data_path()), size=12),
+            ft.Text("Workout history is kept when a workout template is deleted.", size=12),
+        ]
+
+        self.set_view(controls)
 
 
 def main(page: ft.Page):
@@ -237,4 +711,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
