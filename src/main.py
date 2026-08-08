@@ -7,7 +7,7 @@ class RepsApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.page.title = "GYMER"
-        self.page.scroll = ft.ScrollMode.AUTO
+        self.page.scroll = None #ft.ScrollMode.AUTO
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.window_width = 430
         self.page.window_height = 760
@@ -18,13 +18,33 @@ class RepsApp:
         storage.ensure_data()
         self.show_home()
 
-    def set_view(self, controls):
+    def set_view(self, controls, footer=None):
         self.page.controls.clear()
-        self.page.add(
-            ft.Container(
-                content=ft.Column(controls=controls, spacing=14, expand=True),
-                padding=ft.Padding(left=20, top=20, right=20, bottom=20),
+
+        content = ft.Container(
+            content=ft.Column(
+                controls=controls,
+                spacing=14,
                 expand=True,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            padding=ft.Padding(left=20, top=20, right=20, bottom=20),
+            expand=True,
+        )
+
+        page_controls = [content]
+        if footer is not None:
+            page_controls.append(
+                ft.Container(
+                    content=footer,
+                    padding=ft.Padding(left=20, top=20, right=20, bottom=20),
+                )
+            )
+        self.page.add(
+            ft.Column(
+                controls=page_controls,
+                expand=True,
+                spacing=0
             )
         )
         self.page.update()
@@ -38,8 +58,8 @@ class RepsApp:
             [
                 *rows,
                 ft.Divider(),
-                ft.FilledButton("Add Workout", on_click=lambda e: self.add_workout()),
-            ]
+            ],
+            footer= ft.FilledButton("Add Workout", on_click=lambda e: self.add_workout()),
         )
 
     def workout_row(self, workout):
@@ -80,17 +100,15 @@ class RepsApp:
         for exercise in workout["exercises"]:
             controls.extend(self.exercise_block(exercise))
 
-        controls.append(
-            ft.Row(
+        footer = ft.Row(
                 controls = [
                     ft.FilledButton("Save Workout", on_click=self.save_current_workout),
                     ft.OutlinedButton("Cancel", on_click=lambda e: self.show_home()),
                 ],
                 spacing = 10,
-            )
         )
 
-        self.set_view(controls)
+        self.set_view(controls, footer=footer)
 
     def exercise_block(self, exercise_name):
         rows_column = ft.Column(spacing=6)
@@ -180,6 +198,21 @@ class RepsApp:
             storage.delete_workout(workout_id)
             self.show_home()
 
+
+
+        footer = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                ft.FilledButton("Save", on_click=save),
+                ft.FilledButton(
+                    "Delete",
+                    on_click=delete,
+                    color=ft.Colors.WHITE,    # Text color
+                    bgcolor=ft.Colors.RED_700  # Button color
+                ),
+            ]
+        )
+
         self.set_view(
             [
                 ft.Row(
@@ -193,19 +226,9 @@ class RepsApp:
                 exercise_fields,
                 ft.OutlinedButton("Add exercise", on_click=lambda e: add_exercise_field()),
 
-                ft.Row(
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[
-                        ft.FilledButton("Save", on_click=save),
-                        ft.FilledButton(
-                            "Delete",
-                            on_click=delete,
-                            color=ft.Colors.WHITE,    # Text color
-                            bgcolor=ft.Colors.RED_700  # Button background color
-                        ),
-                    ]
-                )
-            ]
+
+            ],
+            footer=footer,
         )
 
 
