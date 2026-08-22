@@ -136,6 +136,138 @@ class HistoryMixin:
             root_back_to_active=(workout_id is None),
         )
 
+    def show_exercise_history(self, exercise_name, back_to_active=False):
+        """Show completed history for one exercise without leaving the workout flow."""
+        exercise_name = str(exercise_name or "").strip()
+        if not exercise_name:
+            return
+
+        if back_to_active and self.active_workout and self.set_controls:
+            # Preserve anything typed into the running workout before replacing
+            # its controls with the history screen.
+            self.capture_active_controls()
+
+        if back_to_active:
+            self.selected_tab = 0
+            self.page.navigation_bar.selected_index = 0
+            back_action = self.show_active_workout
+        else:
+            self.selected_tab = 1
+            self.page.navigation_bar.selected_index = 1
+            back_action = self.show_workout_history
+
+        sessions = storage.exercise_sessions(exercise_name, limit=100)
+
+        controls = [
+            ft.Row(
+                controls=[
+                    ft.IconButton(
+                        icon=ft.Icons.ARROW_BACK,
+                        tooltip="Back",
+                        on_click=lambda e: back_action(),
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text(
+                                exercise_name,
+                                size=self.fs(23),
+                                weight=ft.FontWeight.BOLD,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                "Exercise History",
+                                size=self.fs(11),
+                                color=ft.Colors.GREY_500,
+                            ),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        ]
+
+        if not sessions:
+            controls.append(
+                ft.Text(
+                    "No completed history for this exercise yet.",
+                    color=ft.Colors.GREY_500,
+                )
+            )
+        else:
+            for session in sessions:
+                set_lines = []
+                for row in session.get("rows", []):
+                    weight = str(row.get("weight", "") or "").strip() or "—"
+                    unit = str(row.get("weight_unit", "") or "").strip()
+                    reps = str(row.get("reps", "") or "").strip() or "—"
+                    rir = str(row.get("rir", "") or "").strip()
+                    set_type = str(row.get("set_type", "Normal") or "Normal").strip()
+
+                    text = f"{weight}{(' ' + unit) if unit else ''} × {reps}"
+                    if rir:
+                        text += f" · {rir} RIR"
+                    if set_type.casefold() not in {"normal", "straight"}:
+                        text += f" · {set_type}"
+                    set_lines.append(text)
+
+                controls.append(
+                    ft.Container(
+                        width=float("inf"),
+                        padding=ft.Padding(
+                            left=self.ui(10),
+                            top=self.ui(8),
+                            right=self.ui(10),
+                            bottom=self.ui(8),
+                        ),
+                        border=ft.Border.all(1, ft.Colors.GREY_700),
+                        border_radius=self.rounding(),
+                        content=ft.Column(
+                            controls=[
+                                ft.Row(
+                                    controls=[
+                                        ft.Text(
+                                            session.get("workout_name", "Workout") or "Workout",
+                                            weight=ft.FontWeight.BOLD,
+                                            expand=True,
+                                            max_lines=1,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                        ),
+                                        ft.Text(
+                                            self.format_recent_datetime(
+                                                session.get("date", ""),
+                                                include_time=False,
+                                            ),
+                                            size=self.fs(11),
+                                            color=ft.Colors.GREY_500,
+                                        ),
+                                    ],
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                *[
+                                    ft.Text(
+                                        line,
+                                        size=self.fs(12),
+                                        max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                    )
+                                    for line in set_lines
+                                ],
+                            ],
+                            spacing=self.ui(3),
+                            tight=True,
+                        ),
+                    )
+                )
+
+        self.set_view(
+            controls,
+            back_action=back_action,
+            hide_active_return_bar=back_to_active,
+        )
+
     def show_history_session(
         self,
         session_id,

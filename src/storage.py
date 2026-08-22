@@ -313,7 +313,6 @@ DEFAULT_SETTINGS = {
     "backspace_moves_to_previous_set": "0",
     "advanced_mode": "0",
     "require_previous_sets_completed": "0",
-    "timer_tap_action": "switch",
     "default_timer_display_mode": "elapsed",
     # JSON map: cycle_id -> calibrated workout/exercise placements.
     # A repeated exercise in another workout calibrates independently.
@@ -1140,7 +1139,7 @@ def _latest_by_set_number(rows):
         if set_number not in latest:
             latest[set_number] = {
                 "weight": row.get("weight", ""),
-                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+                "weight_unit": row.get("weight_unit", default_unit) or default_unit,
                 "reps": row.get("reps", ""),
                 "rir": row.get("rir", ""),
                 "previous_weight": row.get("previous_weight", ""),
@@ -1462,7 +1461,6 @@ def ensure_data():
             settings.setdefault("backspace_moves_to_previous_set", "0")
             settings.setdefault("advanced_mode", "0")
             settings.setdefault("require_previous_sets_completed", "0")
-            settings.setdefault("timer_tap_action", "switch")
             settings.setdefault("default_timer_display_mode", "elapsed")
 
             # v27 removes completed-set hiding entirely. Drop the obsolete
@@ -1724,6 +1722,109 @@ def delete_catalog_exercise(name):
     ]
 
     _write_csv(EXERCISE_CATALOG_FILE, CATALOG_FIELDS, rows)
+
+
+def rename_exercise(old_name, new_name):
+    """Rename one exercise everywhere without splitting its history."""
+    ensure_data()
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not old_name or not new_name:
+        return False
+
+    old_key = old_name.casefold()
+    new_key = new_name.casefold()
+
+    # Do not silently merge two distinct exercises. Historical-only names count
+    # too, because merging them would corrupt progression/history semantics.
+    if new_key != old_key:
+        sources = (
+            _read_csv(EXERCISE_CATALOG_FILE),
+            _read_csv(EXERCISE_DETAILS_FILE),
+            _read_csv(WORKOUT_EXERCISES_FILE),
+            _read_csv(SETS_FILE),
+            _read_csv(ACTIVE_WORKOUT_FILE),
+        )
+        if any(
+            str(row.get("exercise_name", "") or "").strip().casefold() == new_key
+            for rows in sources
+            for row in rows
+        ):
+            return False
+
+    catalog = _read_csv(EXERCISE_CATALOG_FILE)
+    replaced_catalog = False
+    for row in catalog:
+        if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
+            row["exercise_name"] = new_name
+            replaced_catalog = True
+    if not replaced_catalog:
+        catalog.append({"exercise_name": new_name})
+    # Collapse any case-only duplicates and keep the catalog deterministic.
+    unique_catalog = {}
+    for row in catalog:
+        name = str(row.get("exercise_name", "") or "").strip()
+        if name:
+            unique_catalog[name.casefold()] = {"exercise_name": name}
+    catalog = sorted(unique_catalog.values(), key=lambda row: row["exercise_name"].casefold())
+    _write_csv(EXERCISE_CATALOG_FILE, CATALOG_FIELDS, catalog)
+
+    for path, fields in (
+        (EXERCISE_DETAILS_FILE, EXERCISE_DETAIL_FIELDS),
+        (WORKOUT_EXERCISES_FILE, EXERCISE_FIELDS),
+        (SETS_FILE, SET_FIELDS),
+        (ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS),
+    ):
+        rows = _read_csv(path)
+        changed = False
+        for row in rows:
+            if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
+                row["exercise_name"] = new_name
+                changed = True
+        if changed:
+            _write_csv(path, fields, rows)
+
+    # Calibration completion is keyed by exercise name in Settings. Preserve it
+    # across a rename so an already-calibrated exercise does not unexpectedly
+    # ask for calibration again.
+    settings = read_settings()
+    raw_seen = settings.get("mesocycle_intro_seen_exercises", "{}")
+    try:
+        seen = json.loads(raw_seen)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        seen = {}
+    seen_changed = False
+    if isinstance(seen, dict):
+        for placements in seen.values():
+            if not isinstance(placements, list):
+                continue
+            for placement in placements:
+                if isinstance(placement, dict):
+                    value = str(placement.get("exercise_name", "") or "").strip()
+                    if value.casefold() == old_key:
+                        placement["exercise_name"] = new_name
+                        seen_changed = True
+                elif isinstance(placement, str) and placement.strip().casefold() == old_key:
+                    # Legacy string-only placement cannot be changed in place by
+                    # reference, so normalize it below if encountered.
+                    seen_changed = True
+        if seen_changed:
+            normalized = {}
+            for cycle_id, placements in seen.items():
+                updated = []
+                for placement in placements if isinstance(placements, list) else []:
+                    if isinstance(placement, dict):
+                        updated.append(placement)
+                    elif isinstance(placement, str):
+                        value = placement.strip()
+                        updated.append(new_name if value.casefold() == old_key else value)
+                normalized[cycle_id] = updated
+            settings["mesocycle_intro_seen_exercises"] = json.dumps(
+                normalized, ensure_ascii=False
+            )
+            save_settings(settings)
+
+    return True
 
 
 def all_exercise_names():
@@ -2629,11 +2730,14 @@ def mesocycle_status(cycle=None, today=None):
         phase = "Build"
 
     try:
-        start_rir = float(cycle.get("start_rir", 3))
-        end_rir = float(cycle.get("end_rir", 1))
-        deload_rir = float(cycle.get("deload_rir", 4))
+        # RIR prescriptions are discrete by design. Older data may contain a
+        # decimal string, so normalize it once here and keep every downstream
+        # caller on integer RIR values.
+        start_rir = int(round(float(cycle.get("start_rir", 3))))
+        end_rir = int(round(float(cycle.get("end_rir", 1))))
+        deload_rir = int(round(float(cycle.get("deload_rir", 4))))
     except (TypeError, ValueError):
-        start_rir, end_rir, deload_rir = 3.0, 1.0, 4.0
+        start_rir, end_rir, deload_rir = 3, 1, 4
 
     if phase == "Deload":
         suggested_rir = deload_rir
@@ -2642,8 +2746,15 @@ def mesocycle_status(cycle=None, today=None):
             suggested_rir = end_rir
         else:
             position = min(current_microcycle, build_microcycles) - 1
-            frac = position / (build_microcycles - 1)
-            suggested_rir = start_rir + (end_rir - start_rir) * frac
+            if position <= 0:
+                suggested_rir = start_rir
+            elif position >= build_microcycles - 1:
+                # Always land exactly on the configured final-build RIR.
+                suggested_rir = end_rir
+            else:
+                direction = 1 if end_rir > start_rir else -1
+                distance = abs(end_rir - start_rir)
+                suggested_rir = start_rir + direction * min(position, distance)
     else:
         suggested_rir = start_rir
 
@@ -3829,6 +3940,61 @@ def workout_sessions(workout_id, limit=12):
                 break
 
     return list(sessions.values())
+
+
+def exercise_sessions(exercise_name, limit=100):
+    """Return completed history for one exercise, newest session first."""
+    ensure_data()
+
+    target = str(exercise_name or "").strip().casefold()
+    if not target:
+        return []
+
+    sessions = {}
+    order = []
+    default_unit = read_settings().get("unit", "kg")
+
+    # sets.csv is append-only by completed workout, so walking backward gives
+    # newest sessions first while still allowing us to sort set numbers below.
+    for row in reversed(_read_sets_cached()):
+        if str(row.get("exercise_name", "") or "").strip().casefold() != target:
+            continue
+        if row.get("completed", "1") == "0":
+            continue
+
+        session_id = str(row.get("session_id", "") or "").strip()
+        if not session_id:
+            continue
+
+        if session_id not in sessions:
+            if limit is not None and len(order) >= int(limit):
+                continue
+            sessions[session_id] = {
+                "session_id": session_id,
+                "date": row.get("date", ""),
+                "workout_id": row.get("workout_id", ""),
+                "workout_name": row.get("workout_name", ""),
+                "rows": [],
+            }
+            order.append(session_id)
+
+        sessions[session_id]["rows"].append(
+            {
+                "set_number": _positive_int(row.get("set_number"), 1),
+                "weight": row.get("weight", ""),
+                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+                "reps": row.get("reps", ""),
+                "rir": row.get("rir", ""),
+                "set_type": row.get("set_type", "Normal") or "Normal",
+            }
+        )
+
+    result = []
+    for session_id in order:
+        session = sessions[session_id]
+        session["rows"].sort(key=lambda item: item.get("set_number", 1))
+        result.append(session)
+    return result
 
 
 def data_path():

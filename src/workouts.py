@@ -497,138 +497,18 @@ class WorkoutMixin:
         self.show_active_workout_editor()
 
     def show_active_workout_editor(self, e=None):
+        """Open the same full workout editor used from the Workout list."""
         if not self.active_workout:
             self.show_saved_workouts()
             return
 
         if self.set_controls:
             self.capture_active_controls()
-        # The editor works directly on active_workout rows. Do not let stale
-        # controls from the workout screen overwrite session-only edits.
         self.set_controls = []
 
-        self.selected_tab = 0
-        self.page.navigation_bar.selected_index = 0
-
-        ordered = []
-        grouped = {}
-        for row in self.active_workout.get("rows", []):
-            name = row.get("exercise_name", "")
-            if name not in grouped:
-                grouped[name] = []
-                ordered.append(name)
-            grouped[name].append(row)
-
-        controls = [
-            ft.Text(
-                "Changes here affect only this workout session, not the saved template.",
-                size=self.fs(11),
-                color=ft.Colors.GREY_500,
-            )
-        ]
-
-        for name in ordered:
-            rows = grouped[name]
-            completed = sum(1 for row in rows if row.get("completed"))
-            controls.append(
-                ft.Container(
-                    width=float("inf"),
-                    padding=ft.Padding(left=self.ui(12), top=self.ui(10), right=self.ui(6), bottom=self.ui(10)),
-                    border=ft.Border.all(1, ft.Colors.with_opacity(0.28, self.foreground_color())),
-                    border_radius=self.rounding(),
-                    content=ft.Row(
-                        controls=[
-                            ft.Column(
-                                controls=[
-                                    ft.Text(
-                                        name,
-                                        size=self.fs(17),
-                                        weight=ft.FontWeight.BOLD,
-                                    ),
-                                    ft.Text(
-                                        f"{len(rows)} sets · {completed} completed",
-                                        size=self.fs(11),
-                                        color=ft.Colors.GREY_500,
-                                    ),
-                                ],
-                                spacing=0,
-                                expand=True,
-                            ),
-                            ft.IconButton(
-                                icon=ft.Icons.DELETE_OUTLINE,
-                                icon_color=ft.Colors.RED_400,
-                                tooltip="Remove from this session",
-                                on_click=lambda e, exercise=name: self.remove_exercise_from_active_workout(
-                                    exercise
-                                ),
-                            ),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                )
-            )
-
-        controls.append(
-            ft.Container(
-                width=float("inf"),
-                height=46,
-                bgcolor=ft.Colors.BLUE_700,
-                border_radius=self.rounding(),
-                alignment=ft.Alignment.CENTER,
-                ink=True,
-                on_click=lambda e: self.open_exercise_picker(
-                    self.add_exercise_to_active_workout
-                ),
-                content=ft.Row(
-                    controls=[
-                        ft.Icon(ft.Icons.ADD, color=ft.Colors.WHITE, size=20),
-                        ft.Text(
-                            "Add Exercise",
-                            color=ft.Colors.WHITE,
-                            weight=ft.FontWeight.BOLD,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=self.ui(6),
-                ),
-            )
-        )
-
-        header = ft.Container(
-            bgcolor=self.nav_surface_color(),
-            padding=ft.Padding(left=self.ui(12), top=self.ui(8), right=self.ui(12), bottom=self.ui(8)),
-            content=ft.Row(
-                controls=[
-                    ft.Text(
-                        "Edit Current Workout",
-                        size=self.fs(21),
-                        weight=ft.FontWeight.BOLD,
-                        expand=True,
-                    ),
-                    ft.Container(
-                        height=self.ui(40),
-                        padding=ft.Padding(left=self.ui(14), top=0, right=self.ui(14), bottom=0),
-                        bgcolor=ft.Colors.BLUE_700,
-                        border_radius=self.rounding(),
-                        alignment=ft.Alignment.CENTER,
-                        ink=True,
-                        on_click=lambda e: self.show_active_workout(),
-                        content=ft.Text(
-                            "Done",
-                            color=ft.Colors.WHITE,
-                            weight=ft.FontWeight.BOLD,
-                        ),
-                    ),
-                ],
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-        )
-
-        self.set_view(
-            controls,
-            header=header,
-            back_action=self.show_active_workout,
-            hide_active_return_bar=True,
+        self.show_edit(
+            self.active_workout.get("workout_id", ""),
+            return_to_active=True,
         )
 
     def show_active_workout(self):
@@ -831,10 +711,16 @@ class WorkoutMixin:
         latest_appropriate = context["latest_appropriate"]
         suggested_weight = context["suggested_weight"]
 
+        calibration_scale = self.fit_layout_scale(
+            designed_width=330,
+            outer_inset=58,
+            minimum=0.50,
+        )
+
         weight_field = self.text_field(
             value=suggested_weight,
             label="Weight",
-            width=self.ui(112),
+            width=112 * calibration_scale,
             dense=True,
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -843,7 +729,7 @@ class WorkoutMixin:
         reps_field = self.text_field(
             value="",
             label="Reps",
-            width=self.ui(92),
+            width=92 * calibration_scale,
             dense=True,
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -852,7 +738,7 @@ class WorkoutMixin:
         rir_field = self.text_field(
             value="",
             label="RIR",
-            width=self.ui(82),
+            width=82 * calibration_scale,
             dense=True,
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -935,11 +821,15 @@ class WorkoutMixin:
                 ft.Row(
                     controls=[
                         weight_field,
-                        ft.Text(unit, size=self.fs(11)),
+                        ft.Text(
+                            unit,
+                            size=11 * self.font_scale() * calibration_scale,
+                            no_wrap=True,
+                        ),
                         reps_field,
                         rir_field,
                     ],
-                    spacing=self.ui(6),
+                    spacing=6 * calibration_scale,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Text(
@@ -969,7 +859,7 @@ class WorkoutMixin:
 
             weight_value = float(weight_field.value)
             reps_value = int(float(reps_field.value))
-            rir_value = float(rir_field.value)
+            rir_value = int(float(rir_field.value))
 
             weight_text = progression.format_weight(weight_value)
             reps_text = str(reps_value)
@@ -1010,8 +900,8 @@ class WorkoutMixin:
             modal=True,
             title=ft.Text(f"Mesocycle calibration · {exercise_name}"),
             content=ft.Container(
-                width=min(self.ui(430), max(self.ui(280), float(getattr(self.page, "width", 430) or 430) - self.ui(28))),
-                height=self.ui(520),
+                width=self.dialog_width(preferred=430, horizontal_inset=28, minimum=250),
+                height=self.dialog_height(preferred=520, vertical_inset=170, minimum=250),
                 content=ft.Column(
                     controls=controls,
                     spacing=self.ui(10),
@@ -1164,6 +1054,116 @@ class WorkoutMixin:
             if unit_label is not None:
                 unit_label.visible = True
 
+    def show_exercise_rest_editor(self, exercise_name):
+        """Set one planned rest time for every set of an active exercise."""
+        if not self.active_workout:
+            return
+
+        if storage.active_cycle_locks().get("rest_timer_lock", False):
+            self.notify("Rest times are locked by the active mesocycle.")
+            return
+
+        if self.set_controls:
+            self.capture_active_controls()
+
+        rows = [
+            row
+            for row in self.active_workout.get("rows", [])
+            if row.get("exercise_name") == exercise_name
+        ]
+        if not rows:
+            return
+
+        rows.sort(key=lambda row: int(row.get("set_number", 0) or 0))
+        current_seconds = storage.parse_duration(
+            rows[0].get("rest_seconds", 180), default=180
+        )
+        rest_field = self.text_field(
+            label="Rest timer",
+            value=storage.format_duration(current_seconds),
+            width=self.ui(150),
+            dense=True,
+            text_align=ft.TextAlign.CENTER,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+        rest_field.hint_text = "3:00"
+
+        def focus_rest(e):
+            rest_field.value = str(
+                storage.parse_duration(rest_field.value, default=current_seconds)
+            )
+            self.page.update()
+
+        def blur_rest(e):
+            seconds = storage.parse_duration(
+                rest_field.value, default=current_seconds
+            )
+            rest_field.value = storage.format_duration(seconds)
+            self.page.update()
+
+        rest_field.on_focus = focus_rest
+        rest_field.on_blur = blur_rest
+
+        def save_rest_time(e):
+            seconds = storage.parse_duration(
+                rest_field.value, default=current_seconds
+            )
+            for row in rows:
+                set_number = int(row.get("set_number", 0) or 0)
+                row["rest_seconds"] = seconds
+
+                item = self.find_set_item(exercise_name, set_number)
+                active_timer_set = (
+                    self.timer_started_at is not None
+                    and self.timer_exercise_name == exercise_name
+                    and self.timer_set_number == set_number
+                )
+                if item is not None:
+                    item["rest_seconds"] = seconds
+                    label = item.get("timer_label")
+                    if label is not None and not active_timer_set:
+                        label.value = storage.format_duration(seconds)
+
+            if (
+                self.timer_started_at is not None
+                and self.timer_exercise_name == exercise_name
+            ):
+                self.timer_total_seconds = seconds
+
+            storage.save_active_workout(self.active_workout)
+            if self.timer_started_at is not None:
+                self.refresh_timer_display(update_page=False)
+            self.close_dialog(dialog)
+            self.page.update()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"Rest timer · {exercise_name}"),
+            content=ft.Container(
+                width=self.dialog_width(preferred=300, horizontal_inset=42, minimum=230),
+                content=ft.Column(
+                    controls=[
+                        ft.Text(
+                            "Applies to every set in this exercise.",
+                            size=self.fs(11),
+                            color=ft.Colors.GREY_500,
+                        ),
+                        rest_field,
+                    ],
+                    spacing=self.ui(8),
+                    tight=True,
+                ),
+            ),
+            actions=[
+                self.outlined_button(
+                    "Cancel", on_click=lambda e: self.close_dialog(dialog)
+                ),
+                self.filled_button("Save", on_click=save_rest_time),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(dialog)
+
     def active_exercise_block(self, exercise_name, initial_rows):
         rows_column = ft.Column(spacing=self.ui(self.set_spacing()))
         exercise_items = []
@@ -1249,6 +1249,7 @@ class WorkoutMixin:
             expand=True,
             max_lines=1,
             no_wrap=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
         )
 
         exercise_info_button = ft.Container(
@@ -1259,8 +1260,21 @@ class WorkoutMixin:
             tooltip=f"Open {exercise_name} details",
             on_click=lambda e: self.show_exercise_details(exercise_name),
             content=ft.Icon(
-                ft.Icons.INFO_OUTLINE,
+                ft.Icons.EDIT_OUTLINED,
                 size=self.ui(18),
+            ),
+        )
+
+        exercise_history_button = ft.IconButton(
+            icon=ft.Icons.HISTORY,
+            icon_size=self.ui(19),
+            width=self.ui(31),
+            height=self.ui(31),
+            padding=0,
+            tooltip=f"{exercise_name} history",
+            on_click=lambda e: self.show_exercise_history(
+                exercise_name,
+                back_to_active=True,
             ),
         )
 
@@ -1272,6 +1286,16 @@ class WorkoutMixin:
             padding=0,
             tooltip=f"{exercise_name} Rep Max Calculator",
             on_click=lambda e: self.open_exercise_rep_max(exercise_name),
+        )
+
+        rest_editor_button = ft.IconButton(
+            icon=ft.Icons.TIMER_OUTLINED,
+            icon_size=self.ui(19),
+            width=self.ui(31),
+            height=self.ui(31),
+            padding=0,
+            tooltip=f"Edit {exercise_name} rest timers",
+            on_click=lambda e: self.show_exercise_rest_editor(exercise_name),
         )
 
         substitute_button = ft.IconButton(
@@ -1289,12 +1313,36 @@ class WorkoutMixin:
                 collapse_icon,
                 exercise_name_control,
                 rep_max_button,
+                rest_editor_button,
+                exercise_history_button,
                 exercise_info_button,
                 notes_icon,
                 substitute_button,
             ],
             spacing=self.ui(2),
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        exercise_note_raw = str(
+            storage.read_exercise_details(exercise_name).get("note", "") or ""
+        ).strip()
+        exercise_note_short = (
+            exercise_note_raw
+            if len(exercise_note_raw) <= 20
+            else exercise_note_raw[:20].rstrip() + "…"
+        )
+        exercise_note = (
+            ft.Text(
+                exercise_note_short,
+                size=self.fs(10.5),
+                color=ft.Colors.GREEN_400,
+                weight=ft.FontWeight.W_600,
+                max_lines=1,
+                no_wrap=True,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+            if exercise_note_raw
+            else None
         )
 
         progression_recommendation = self.exercise_progression_recommendation(exercise_name)
@@ -1860,9 +1908,31 @@ class WorkoutMixin:
         )
         block_state["body"] = body
 
-        output = [heading]
-        output.extend([body, ft.Divider(height=self.ui(6))])
-        return output
+        heading_controls = [heading]
+        if exercise_note is not None:
+            heading_controls.append(
+                ft.Container(
+                    margin=ft.Margin(left=self.ui(31), top=0, right=0, bottom=0),
+                    padding=ft.Padding(
+                        left=self.ui(7),
+                        top=self.ui(2),
+                        right=self.ui(7),
+                        bottom=self.ui(2),
+                    ),
+                    border=ft.Border.all(1.5, ft.Colors.GREEN_600),
+                    border_radius=self.rounding(),
+                    bgcolor=ft.Colors.with_opacity(0.07, ft.Colors.GREEN_700),
+                    tooltip=exercise_note_raw,
+                    content=exercise_note,
+                )
+            )
+
+        heading_block = ft.Column(
+            controls=heading_controls,
+            spacing=self.ui(1),
+            tight=True,
+        )
+        return [heading_block, body, ft.Divider(height=self.ui(6))]
 
     def change_active_set_type(self, item, selected):
         item["set_type"] = selected
@@ -2395,6 +2465,8 @@ class WorkoutMixin:
                 str(workout_name or "Workout"),
                 size=self.fs(17),
                 weight=ft.FontWeight.W_600,
+                max_lines=2,
+                overflow=ft.TextOverflow.ELLIPSIS,
             ),
             ft.Text(
                 f"{int(saved_count or 0)} completed set(s)",
@@ -2410,11 +2482,31 @@ class WorkoutMixin:
         ]
 
         if muscle_counts:
+            try:
+                page_width = float(getattr(self.page, "width", 0) or 0)
+            except (TypeError, ValueError):
+                page_width = 0.0
+            if page_width <= 0:
+                page_width = 430.0
+
+            content_width = max(1.0, page_width - (2 * self.ui(self.PAGE_PADDING)))
+            if content_width < 250:
+                columns = 1
+            elif content_width < 365:
+                columns = 2
+            else:
+                columns = 3
+            card_gap = self.ui(7)
+            card_width = max(
+                self.ui(106),
+                (content_width - card_gap * (columns - 1)) / columns,
+            )
+
             cards = []
             for muscle, count in muscle_counts.items():
                 cards.append(
                     ft.Container(
-                        width=self.ui(118),
+                        width=card_width,
                         padding=ft.Padding(
                             left=self.ui(10),
                             top=self.ui(9),
@@ -2446,8 +2538,8 @@ class WorkoutMixin:
             controls.append(
                 ft.Row(
                     controls=cards,
-                    spacing=self.ui(7),
-                    run_spacing=self.ui(7),
+                    spacing=card_gap,
+                    run_spacing=card_gap,
                     wrap=True,
                 )
             )
@@ -2566,6 +2658,24 @@ class WorkoutMixin:
             back_action = self.show_active_workout if self.active_workout else self.show_exercise_database
 
         details = storage.read_exercise_details(exercise_name)
+
+        exercise_name_field = self.text_field(
+            label="Exercise name",
+            value=exercise_name,
+            dense=True,
+        )
+
+        def move_name_caret_to_end(e):
+            raw = str(exercise_name_field.value or "")
+            offset = len(raw)
+            exercise_name_field.selection = ft.TextSelection(
+                base_offset=offset,
+                extent_offset=offset,
+            )
+            exercise_name_field.update()
+
+        exercise_name_field.on_focus = move_name_caret_to_end
+
         primary_selected = set(
             storage.normalize_muscle_list(details.get("primary_muscles", ""))
         )
@@ -2574,6 +2684,13 @@ class WorkoutMixin:
         )
         secondary_selected -= primary_selected
 
+        exercise_note = self.text_field(
+            label="Note",
+            value=details.get("note", ""),
+            hint_text="e.g. rope handle, EZ bar",
+            dense=True,
+            max_lines=1,
+        )
         description = self.text_field(
             value=details.get("description", ""),
             hint_text="Exercise description",
@@ -2758,6 +2875,11 @@ class WorkoutMixin:
         secondary_grid = muscle_grid("secondary")
 
         def save(e):
+            new_exercise_name = str(exercise_name_field.value or "").strip()
+            if not new_exercise_name:
+                self.notify("Exercise name cannot be empty.")
+                return
+
             valid = self.normalize_numeric_control(
                 set_seconds,
                 kind="seconds",
@@ -2780,12 +2902,39 @@ class WorkoutMixin:
             else:
                 increment_kg = increment_override.value
 
+            old_exercise_name = exercise_name
+            renamed = new_exercise_name.casefold() != old_exercise_name.casefold() or new_exercise_name != old_exercise_name
+            if renamed and not storage.rename_exercise(
+                old_exercise_name, new_exercise_name
+            ):
+                self.notify("An exercise with that name already exists.")
+                return
+
+            if renamed:
+                old_key = old_exercise_name.casefold()
+
+                # Keep the live session and any one-shot workout-editor draft in
+                # sync with the persistent rename before returning to the caller.
+                if self.active_workout:
+                    for row in self.active_workout.get("rows", []):
+                        if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
+                            row["exercise_name"] = new_exercise_name
+                    if str(self.timer_exercise_name or "").strip().casefold() == old_key:
+                        self.timer_exercise_name = new_exercise_name
+                    storage.save_active_workout(self.active_workout)
+
+                draft = getattr(self, "workout_editor_draft", None)
+                if draft:
+                    for exercise in draft.get("exercises", []):
+                        if str(exercise.get("exercise_name", "") or "").strip().casefold() == old_key:
+                            exercise["exercise_name"] = new_exercise_name
+
             storage.save_exercise_details(
-                exercise_name,
+                new_exercise_name,
                 list(primary_selected),
                 list(secondary_selected),
                 description.value,
-                details.get("note", ""),
+                exercise_note.value,
                 set_seconds.value,
                 equipment_selected[0],
                 increment_lb,
@@ -2795,7 +2944,8 @@ class WorkoutMixin:
             back_action()
 
         controls = [
-            ft.Text(exercise_name, size=self.fs(28), weight=ft.FontWeight.BOLD),
+            exercise_name_field,
+            exercise_note,
             ft.Text("Description", size=self.fs(17), weight=ft.FontWeight.BOLD),
             description,
             ft.Text("Primary muscles", size=self.fs(17), weight=ft.FontWeight.BOLD),
