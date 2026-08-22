@@ -174,7 +174,7 @@ class UICoreMixin:
         value = locks.get("suggested_rir")
         if value is None:
             return None
-        return f"{float(value):.1f}".rstrip("0").rstrip(".")
+        return str(int(round(float(value))))
 
     def cycle_rir_lock_enabled(self):
         if self.cycle_rir_target() is None:
@@ -246,12 +246,6 @@ class UICoreMixin:
             self.advanced_mode_enabled()
             and self.settings.get("require_previous_sets_completed", "0") == "1"
         )
-
-    def timer_tap_action(self):
-        if not self.advanced_mode_enabled():
-            return "switch"
-        value = self.settings.get("timer_tap_action", "switch")
-        return value if value in {"switch", "hide"} else "switch"
 
     def default_timer_display_mode(self):
         if not self.advanced_mode_enabled():
@@ -415,7 +409,7 @@ class UICoreMixin:
         specs = {
             "weight": {"integer": False, "minimum": 0.000001, "maximum": 10000},
             "reps": {"integer": True, "minimum": 1, "maximum": 999},
-            "rir": {"integer": False, "minimum": 0, "maximum": 99},
+            "rir": {"integer": True, "minimum": 0, "maximum": 99},
             "rm": {"integer": True, "minimum": 1, "maximum": 999},
             "target_reps": {"integer": True, "minimum": 1, "maximum": 999},
             "count": {"integer": True, "minimum": 1, "maximum": 9999},

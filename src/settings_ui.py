@@ -130,7 +130,6 @@ class SettingsMixin:
             "require_previous_sets_completed",
             "0",
         )
-        timer_tap_action = self.settings.get("timer_tap_action", "switch")
         default_timer_display_mode = self.settings.get(
             "default_timer_display_mode",
             "elapsed",
@@ -458,18 +457,6 @@ class SettingsMixin:
                         compact_choice("Off", backspace_moves_to_previous_set == "0", "0", "backspace_moves_to_previous_set"),
                     ],
                     spacing=self.ui(8),
-                ),
-                ft.Text("Tap Floating Timer", weight=ft.FontWeight.BOLD),
-                ft.Row(
-                    controls=[
-                        advanced_choice("Switch view", timer_tap_action == "switch", "switch", "timer_tap_action", 120),
-                        advanced_choice("Hide", timer_tap_action == "hide", "hide", "timer_tap_action", 88),
-                    ],
-                    spacing=self.ui(8),
-                ),
-                ft.Text(
-                    "Hide dismisses the floating rest timer until the next rest timer starts; timing continues in the background.",
-                    size=self.fs(11),
                 ),
                 ft.Text("Default Rest Timer View", weight=ft.FontWeight.BOLD),
                 ft.Row(

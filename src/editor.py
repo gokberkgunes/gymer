@@ -24,11 +24,14 @@ class EditorMixin:
             is_new=True,
         )
 
-    def show_edit(self, workout_id, is_new=False):
+    def show_edit(self, workout_id, is_new=False, return_to_active=False):
         workout = storage.read_workout(workout_id)
 
         if workout is None:
-            self.show_saved_workouts()
+            if return_to_active and self.active_workout:
+                self.show_active_workout()
+            else:
+                self.show_saved_workouts()
             return
 
         settings = storage.read_settings()
@@ -39,7 +42,11 @@ class EditorMixin:
         # Returning from an exercise's pencil/details editor must not discard
         # unsaved workout edits. A one-shot in-memory draft is restored here.
         editor_draft = getattr(self, "workout_editor_draft", None)
-        if editor_draft and editor_draft.get("workout_id") == workout_id:
+        if (
+            editor_draft
+            and editor_draft.get("workout_id") == workout_id
+            and bool(editor_draft.get("return_to_active", False)) == bool(return_to_active)
+        ):
             workout = {
                 **workout,
                 "name": editor_draft.get("name", workout.get("name", "Workout")),
@@ -221,6 +228,7 @@ class EditorMixin:
                 )
             return {
                 "workout_id": workout_id,
+                "return_to_active": bool(return_to_active),
                 "name": name_field.value or workout.get("name", "Workout"),
                 "details": {
                     "description": workout_description.value or "",
@@ -241,7 +249,11 @@ class EditorMixin:
             self.workout_editor_draft = build_editor_draft()
             self.show_exercise_details(
                 exercise_name,
-                back_action=lambda: self.show_edit(workout_id, is_new=is_new),
+                back_action=lambda: self.show_edit(
+                    workout_id,
+                    is_new=is_new,
+                    return_to_active=return_to_active,
+                ),
             )
 
         def timing_breakdown():
@@ -666,37 +678,30 @@ class EditorMixin:
                     set_row["_reps_field"] = reps
                     set_row["_rest_field"] = rest
 
-                    # Dense TextFields reserve vertical room for the floating
-                    # label, so their *visible outline* is shorter than the
-                    # control's outer height.  Give set type the same row height
-                    # for alignment/touch area, but keep its visible box at the
-                    # same height as the outlined Weight/Reps/Rest boxes.
+                    # Match the full Weight/Reps/Rest footprint exactly. Using
+                    # a shorter nested outline made Normal/AMRAP visibly unlike
+                    # the neighboring fields on real phones.
                     type_button = ft.Container(
                         width=type_width,
                         height=field_height,
-                        alignment=ft.Alignment.TOP_CENTER,
-                        content=ft.Container(
-                            width=type_width,
-                            height=es(32),
-                            alignment=ft.Alignment.CENTER,
-                            padding=ft.Padding(
-                                left=es(5),
-                                top=0,
-                                right=es(5),
-                                bottom=0,
-                            ),
-                            border=ft.Border.all(1, self.accent_color()),
-                            border_radius=self.rounding(),
-                            ink=True,
-                            tooltip="Change set type",
-                            on_click=lambda e, target=set_row: choose_set_type(target),
-                            content=ft.Text(
-                                set_row.get("set_type", "Normal"),
-                                size=efs(11),
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                                text_align=ft.TextAlign.CENTER,
-                            ),
+                        alignment=ft.Alignment.CENTER,
+                        padding=ft.Padding(
+                            left=es(5),
+                            top=0,
+                            right=es(5),
+                            bottom=0,
+                        ),
+                        border=ft.Border.all(1, self.accent_color()),
+                        border_radius=self.rounding(),
+                        ink=True,
+                        tooltip="Change set type",
+                        on_click=lambda e, target=set_row: choose_set_type(target),
+                        content=ft.Text(
+                            set_row.get("set_type", "Normal"),
+                            size=efs(11),
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                            text_align=ft.TextAlign.CENTER,
                         ),
                     )
 
@@ -763,6 +768,30 @@ class EditorMixin:
                 )
                 row["name_button"] = name_button
 
+                exercise_note_raw = ""
+                if not is_placeholder:
+                    exercise_note_raw = str(
+                        storage.read_exercise_details(exercise_name).get("note", "") or ""
+                    ).strip()
+                exercise_note_short = (
+                    exercise_note_raw
+                    if len(exercise_note_raw) <= 20
+                    else exercise_note_raw[:20].rstrip() + "…"
+                )
+                exercise_note = (
+                    ft.Text(
+                        exercise_note_short,
+                        size=efs(10.5),
+                        color=ft.Colors.GREEN_400,
+                        weight=ft.FontWeight.W_600,
+                        max_lines=1,
+                        no_wrap=True,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    )
+                    if exercise_note_raw
+                    else None
+                )
+
                 # Reordering is intentionally arrow-only.  Drag-and-drop was
                 # removed completely so the exercise name and actions stay on
                 # one predictable row on every phone width.
@@ -800,6 +829,35 @@ class EditorMixin:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
 
+                header_controls = [header_row]
+                if exercise_note is not None:
+                    header_controls.append(
+                        ft.Container(
+                            padding=ft.Padding(
+                                left=es(7),
+                                top=es(2),
+                                right=es(7),
+                                bottom=es(2),
+                            ),
+                            border=ft.Border.all(1.5, ft.Colors.GREEN_600),
+                            border_radius=self.rounding(),
+                            bgcolor=ft.Colors.with_opacity(0.07, ft.Colors.GREEN_700),
+                            tooltip=exercise_note_raw,
+                            content=exercise_note,
+                        )
+                    )
+                header_block = ft.Column(
+                    controls=header_controls,
+                    spacing=es(1),
+                    tight=True,
+                )
+
+                set_rows_block = ft.Container(
+                    # Put the breathing room before set 1, not between every set.
+                    padding=ft.Padding(left=0, top=es(9), right=0, bottom=0),
+                    content=ft.Column(controls=set_controls, spacing=0),
+                )
+
                 card = ft.Container(
                     padding=ft.Padding(
                         left=es(8),
@@ -817,8 +875,8 @@ class EditorMixin:
                     border_radius=self.rounding(),
                     content=ft.Column(
                         controls=[
-                            header_row,
-                            ft.Column(controls=set_controls, spacing=es(6)),
+                            header_block,
+                            set_rows_block,
                             ft.Row(
                                 controls=[
                                     self.set_adjust_button(
@@ -835,7 +893,7 @@ class EditorMixin:
                                 spacing=es(7),
                             ),
                         ],
-                        spacing=es(8),
+                        spacing=es(5),
                     ),
                 )
                 exercise_fields.controls.append(card)
@@ -926,6 +984,29 @@ class EditorMixin:
                     }
                 )
 
+            if return_to_active and self.active_workout and self.active_workout.get("workout_id") == workout_id:
+                output_keys = {
+                    (str(exercise.get("exercise_name", "") or "").casefold(), set_number)
+                    for exercise in output_exercises
+                    for set_number, _ in enumerate(exercise.get("sets", []), start=1)
+                }
+                removed_completed = [
+                    row
+                    for row in self.active_workout.get("rows", [])
+                    if row.get("completed", False)
+                    and (
+                        str(row.get("exercise_name", "") or "").casefold(),
+                        int(row.get("set_number", 0) or 0),
+                    )
+                    not in output_keys
+                ]
+                if removed_completed:
+                    first = removed_completed[0]
+                    self.notify(
+                        f"{first.get('exercise_name', 'Exercise')}: completed sets cannot be removed or replaced while the workout is active."
+                    )
+                    return
+
             def commit_save():
                 self.workout_editor_draft = None
                 storage.save_workout(
@@ -942,7 +1023,96 @@ class EditorMixin:
                     workout_transition.value,
                     workout_session_overhead.value,
                 )
-                self.show_saved_workouts()
+
+                if (
+                    return_to_active
+                    and self.active_workout
+                    and self.active_workout.get("workout_id") == workout_id
+                ):
+                    old_rows = {
+                        (
+                            str(row.get("exercise_name", "") or "").casefold(),
+                            int(row.get("set_number", 0) or 0),
+                        ): dict(row)
+                        for row in self.active_workout.get("rows", [])
+                    }
+                    seed_cache = {}
+                    rebuilt_rows = []
+
+                    for exercise in output_exercises:
+                        exercise_name = str(exercise.get("exercise_name", "") or "").strip()
+                        if not exercise_name:
+                            continue
+
+                        key_name = exercise_name.casefold()
+                        if key_name not in seed_cache:
+                            seed_cache[key_name] = self.active_rows_for_added_exercise(
+                                exercise_name
+                            )
+                        seeds = seed_cache[key_name]
+
+                        for set_number, set_row in enumerate(
+                            exercise.get("sets", []), start=1
+                        ):
+                            key = (key_name, set_number)
+                            existing = old_rows.get(key)
+                            if existing is not None:
+                                active_row = dict(existing)
+                                active_row["exercise_name"] = exercise_name
+                                active_row["set_number"] = set_number
+                                active_row["rest_seconds"] = storage.parse_duration(
+                                    set_row.get("rest_seconds", default_rest),
+                                    default=default_rest,
+                                )
+                                active_row["set_type"] = (
+                                    set_row.get("set_type", "Normal") or "Normal"
+                                )
+
+                                template_weight = str(set_row.get("weight", "") or "")
+                                template_reps = str(set_row.get("reps", "") or "")
+                                if not str(active_row.get("weight", "") or "").strip() and template_weight:
+                                    active_row["previous_weight"] = template_weight
+                                if not str(active_row.get("reps", "") or "").strip() and template_reps:
+                                    active_row["previous_reps"] = template_reps
+                            else:
+                                if set_number <= len(seeds):
+                                    active_row = dict(seeds[set_number - 1])
+                                else:
+                                    active_row = {
+                                        "exercise_name": exercise_name,
+                                        "set_number": set_number,
+                                        "weight": "",
+                                        "reps": "",
+                                        "rir": "",
+                                        "previous_weight": str(set_row.get("weight", "") or ""),
+                                        "previous_reps": str(set_row.get("reps", "") or ""),
+                                        "previous_rir": "",
+                                        "last_week_reps": "",
+                                        "set_type": "Normal",
+                                        "note": "",
+                                        "completed": False,
+                                        "calibration_done": False,
+                                        "rest_seconds": default_rest,
+                                    }
+                                active_row["exercise_name"] = exercise_name
+                                active_row["set_number"] = set_number
+                                active_row["rest_seconds"] = storage.parse_duration(
+                                    set_row.get("rest_seconds", default_rest),
+                                    default=default_rest,
+                                )
+                                active_row["set_type"] = (
+                                    set_row.get("set_type", "Normal") or "Normal"
+                                )
+
+                            rebuilt_rows.append(active_row)
+
+                    self.active_workout["workout_name"] = name_field.value or workout.get("name", "Workout")
+                    self.active_workout["rows"] = rebuilt_rows
+                    storage.save_active_workout(self.active_workout)
+                    self.set_controls = []
+                    self.show_active_workout()
+                else:
+                    self.show_saved_workouts()
 
             if active_cycle and not is_new:
                 dialog = ft.AlertDialog(
@@ -969,6 +1139,17 @@ class EditorMixin:
             else:
                 commit_save()
 
+        def cancel_edit(e=None):
+            # Leave immediately without applying any editor changes. A newly
+            # created placeholder workout should not survive a deliberate Cancel.
+            self.workout_editor_draft = None
+            if is_new:
+                storage.delete_workout(workout_id)
+            if return_to_active and self.active_workout:
+                self.show_active_workout()
+            else:
+                self.show_saved_workouts()
+
         def delete(e):
             self.workout_editor_draft = None
             if self.active_workout and self.active_workout["workout_id"] == workout_id:
@@ -978,9 +1159,10 @@ class EditorMixin:
             self.show_saved_workouts()
 
         footer_controls = [
-            self.filled_button("Save", on_click=save, expand=True)
+            self.outlined_button("Cancel", on_click=cancel_edit, expand=True),
+            self.filled_button("Save", on_click=save, expand=True),
         ]
-        if not is_new:
+        if not is_new and not return_to_active:
             footer_controls.append(
                 ft.FilledButton(
                     content="Delete",
@@ -1065,6 +1247,7 @@ class EditorMixin:
                     expand=True,
                 ),
                 back_action=show_editor_view,
+                hide_active_return_bar=return_to_active,
             )
 
         time_link = ft.Container(
@@ -1146,7 +1329,8 @@ class EditorMixin:
             self.set_view(
                 top_controls,
                 footer=editor_footer,
-                back_action=self.show_saved_workouts,
+                back_action=cancel_edit,
+                hide_active_return_bar=return_to_active,
             )
 
         render_rows()

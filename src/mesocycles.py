@@ -51,7 +51,7 @@ class MesocycleMixin:
             else self.accent_color()
         )
         rir = status["suggested_rir"]
-        rir_text = f"RIR {rir:.1f}".replace(".0", "")
+        rir_text = f"RIR {int(round(float(rir)))}"
         schedule = storage.mesocycle_day_schedule(cycle.get("cycle_id", ""))
         today_workout_id = schedule.get(status.get("day_in_microcycle", 1), "")
         workout_names = {
@@ -1879,7 +1879,7 @@ class MesocycleMixin:
         rest_timer_lock.on_change = lambda e: save_cycle_flags()
 
         rir = status["suggested_rir"]
-        rir_text = f"{rir:.1f}".rstrip("0").rstrip(".")
+        rir_text = str(int(round(float(rir))))
         phase = status["phase"]
 
         status_box = ft.Container(
