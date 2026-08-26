@@ -136,6 +136,141 @@ class HistoryMixin:
             root_back_to_active=(workout_id is None),
         )
 
+    def show_exercise_history(self, exercise_name, back_to_active=False):
+        """Show completed history for one exercise without leaving the workout flow."""
+        exercise_name = str(exercise_name or "").strip()
+        if not exercise_name:
+            return
+
+        if back_to_active and self.active_workout and self.set_controls:
+            # Preserve anything typed into the running workout before replacing
+            # its controls with the history screen.
+            self.capture_active_controls()
+
+        if back_to_active:
+            self.selected_tab = 0
+            self.page.navigation_bar.selected_index = 0
+            back_action = self.show_active_workout
+        else:
+            self.selected_tab = 1
+            self.page.navigation_bar.selected_index = 1
+            back_action = self.show_workout_history
+
+        sessions = storage.exercise_sessions(exercise_name, limit=100)
+
+        controls = [
+            ft.Row(
+                controls=[
+                    ft.IconButton(
+                        icon=ft.Icons.ARROW_BACK,
+                        tooltip="Back",
+                        on_click=lambda e: back_action(),
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text(
+                                exercise_name,
+                                size=self.fs(23),
+                                weight=ft.FontWeight.BOLD,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                "Exercise History",
+                                size=self.fs(11),
+                                color=ft.Colors.GREY_500,
+                            ),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        ]
+
+        if not sessions:
+            controls.append(
+                ft.Text(
+                    "No completed history for this exercise yet.",
+                    color=ft.Colors.GREY_500,
+                )
+            )
+        else:
+            for session in sessions:
+                set_lines = []
+                for row in session.get("rows", []):
+                    raw_weight = str(row.get("weight", "") or "").strip()
+                    weight = self.format_weight_text(raw_weight) if raw_weight else "—"
+                    unit = str(row.get("weight_unit", "") or "").strip()
+                    reps = str(row.get("reps", "") or "").strip() or "—"
+                    rir = str(row.get("rir", "") or "").strip()
+                    set_type = str(row.get("set_type", "Normal") or "Normal").strip()
+
+                    text = (
+                        f"{weight}{(' ' + unit) if unit else ''} × {reps} reps"
+                    )
+                    if rir and not storage.is_warmup_set_type(set_type):
+                        text += f" · {rir} RIR"
+                    if not storage.is_straight_set_type(set_type):
+                        text += f" · {set_type}"
+                    set_lines.append(text)
+
+                controls.append(
+                    ft.Container(
+                        width=float("inf"),
+                        padding=ft.Padding(
+                            left=self.ui(10),
+                            top=self.ui(8),
+                            right=self.ui(10),
+                            bottom=self.ui(8),
+                        ),
+                        border=ft.Border.all(1, ft.Colors.GREY_700),
+                        border_radius=self.rounding(),
+                        content=ft.Column(
+                            controls=[
+                                ft.Row(
+                                    controls=[
+                                        ft.Text(
+                                            session.get("workout_name", "Workout") or "Workout",
+                                            weight=ft.FontWeight.BOLD,
+                                            expand=True,
+                                            max_lines=1,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                        ),
+                                        ft.Text(
+                                            self.format_recent_datetime(
+                                                session.get("date", ""),
+                                                include_time=False,
+                                            ),
+                                            size=self.fs(11),
+                                            color=ft.Colors.GREY_500,
+                                        ),
+                                    ],
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                *[
+                                    ft.Text(
+                                        line,
+                                        size=self.fs(12),
+                                        max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                    )
+                                    for line in set_lines
+                                ],
+                            ],
+                            spacing=self.ui(3),
+                            tight=True,
+                        ),
+                    )
+                )
+
+        self.set_view(
+            controls,
+            back_action=back_action,
+            hide_active_return_bar=back_to_active,
+        )
+
     def show_history_session(
         self,
         session_id,
@@ -171,12 +306,25 @@ class HistoryMixin:
             if name not in by_name:
                 group = {
                     "exercise_name": name,
+                    "training_method": "",
                     "sets": [],
                 }
                 by_name[name] = group
                 grouped.append(group)
 
             by_name[name]["sets"].append(dict(row))
+            if row.get("training_method"):
+                by_name[name]["training_method"] = storage.canonical_training_method(
+                    row.get("training_method")
+                )
+
+        for group in grouped:
+            group["training_method"] = storage.resolve_training_method(
+                group.get("training_method", ""), group.get("sets", [])
+            )
+            group["sets"] = storage.reconcile_method_sets(
+                group["training_method"], group.get("sets", [])
+            )
 
         controls_column = ft.Column(spacing=self.ui(12))
 
@@ -189,14 +337,33 @@ class HistoryMixin:
             group["exercise_name"] = selected
             render()
 
-        def choose_set_type(set_row):
+        def choose_set_type(group, set_row):
+            try:
+                row_index = group["sets"].index(set_row)
+            except ValueError:
+                row_index = 0
+            choices = storage.set_type_choices_for_method_row(
+                group.get("training_method", "Straight"),
+                group.get("sets", []),
+                row_index,
+            )
             self.open_set_type_picker(
                 set_row.get("set_type", "Normal"),
-                lambda selected: change_type(set_row, selected),
+                lambda selected: change_type(group, set_row, selected),
+                choices=choices,
             )
 
-        def change_type(set_row, selected):
+        def change_type(group, set_row, selected):
+            snapshot()
             set_row["set_type"] = selected
+            group["sets"] = storage.reconcile_method_sets(
+                group.get("training_method", "Straight"), group.get("sets", [])
+            )
+            for row in group["sets"]:
+                if not storage.method_set_uses_rir(
+                    group.get("training_method", "Straight"), row.get("set_type")
+                ):
+                    row["rir"] = ""
             render()
 
         def snapshot():
@@ -220,6 +387,10 @@ class HistoryMixin:
 
             if not group["sets"] and group in grouped:
                 grouped.remove(group)
+            elif group in grouped:
+                group["sets"] = storage.reconcile_method_sets(
+                    group.get("training_method", "Straight"), group.get("sets", [])
+                )
 
             render()
 
@@ -227,17 +398,24 @@ class HistoryMixin:
             snapshot()
 
             previous = group["sets"][-1] if group["sets"] else {}
+            method = group.get("training_method", "Straight")
+            next_type = storage.default_next_set_type(method, group.get("sets", []))
 
             group["sets"].append(
                 {
                     "weight": previous.get("weight", ""),
                     "reps": previous.get("reps", ""),
-                    "rir": previous.get("rir", ""),
-                    "set_type": previous.get("set_type", "Normal"),
+                    "rir": (
+                        previous.get("rir", "")
+                        if storage.method_set_uses_rir(method, next_type)
+                        else ""
+                    ),
+                    "set_type": next_type,
                     "note": "",
                     "completed": False,
                 }
             )
+            group["sets"] = storage.reconcile_method_sets(method, group["sets"])
 
             render()
 
@@ -246,6 +424,7 @@ class HistoryMixin:
                 grouped.append(
                     {
                         "exercise_name": name,
+                        "training_method": "Straight",
                         "sets": [
                             {
                                 "weight": "",
@@ -268,6 +447,7 @@ class HistoryMixin:
 
             for group in grouped:
                 exercise_name = group["exercise_name"]
+                training_method = group.get("training_method", "Straight")
                 note_containers = []
                 history_done = sum(
                     1 for row in group["sets"] if row.get("completed", True)
@@ -331,8 +511,18 @@ class HistoryMixin:
                         keyboard_type=ft.KeyboardType.NUMBER,
                         numeric_kind="reps",
                     )
+                    reps_display, _ = self.field_with_suffix(
+                        reps,
+                        self.SET_SMALL_WIDTH,
+                        "reps",
+                    )
+                    set_type = row.get("set_type", "Normal") or "Normal"
+                    warmup_set = storage.is_warmup_set_type(set_type)
+                    uses_rir = storage.method_set_uses_rir(training_method, set_type)
+                    if not uses_rir:
+                        row["rir"] = ""
                     rir = self.text_field(
-                        value=row.get("rir", ""),
+                        value=row.get("rir", "") if uses_rir else "",
                         hint_text="RIR",
                         width=self.SET_SMALL_WIDTH,
                         dense=True,
@@ -340,6 +530,14 @@ class HistoryMixin:
                         keyboard_type=ft.KeyboardType.NUMBER,
                         numeric_kind="rir",
                     )
+                    if not uses_rir:
+                        rir_display = ft.Container(width=0, visible=False)
+                    else:
+                        rir_display, _ = self.field_with_suffix(
+                            rir,
+                            self.SET_SMALL_WIDTH,
+                            "RIR",
+                        )
                     note = self.text_field(
                         value=row.get("note", ""),
                         hint_text="Note",
@@ -347,20 +545,22 @@ class HistoryMixin:
                         dense=True,
                     )
 
-                    self.chain_text_fields(weight, reps, rir)
+                    if uses_rir:
+                        self.chain_text_fields(weight, reps, rir)
+                    else:
+                        self.chain_text_fields(weight, reps)
 
                     row["weight_control"] = weight
                     row["reps_control"] = reps
                     row["rir_control"] = rir
                     row["note_control"] = note
 
-                    set_type = row.get("set_type", "Normal") or "Normal"
                     type_button = self.active_set_type_button(
                         set_type,
                         index,
                     )
                     type_button.on_click = (
-                        lambda e, target=row: choose_set_type(target)
+                        lambda e, g=group, target=row: choose_set_type(g, target)
                     )
 
                     note_container = ft.Container(
@@ -379,7 +579,9 @@ class HistoryMixin:
                         bool(row.get("completed", True))
                     )
 
-                    def toggle_history_done(e, target=row, button=done_button):
+                    def toggle_history_done(
+                        e, target=row, button=done_button, method=training_method
+                    ):
                         making_complete = not bool(target.get("completed", True))
 
                         if making_complete:
@@ -387,7 +589,12 @@ class HistoryMixin:
                                 target.get("weight_control"),
                                 target.get("reps_control"),
                             ]
-                            if self.track_rir_enabled():
+                            if (
+                                self.track_rir_enabled()
+                                and storage.method_set_uses_rir(
+                                    method, target.get("set_type")
+                                )
+                            ):
                                 required.append(target.get("rir_control"))
 
                             missing = [
@@ -427,8 +634,8 @@ class HistoryMixin:
                                     controls=[
                                         type_button,
                                         weight_display,
-                                        reps,
-                                        rir,
+                                        reps_display,
+                                        rir_display,
                                         ft.Container(expand=True),
                                         done_button,
                                         delete_set,
@@ -509,6 +716,19 @@ class HistoryMixin:
             hint_text="Workout name",
             dense=True,
         )
+        try:
+            workout_date_value = datetime.fromisoformat(
+                str(session.get("date", "") or "")
+            ).date().isoformat()
+        except (TypeError, ValueError):
+            workout_date_value = str(session.get("date", "") or "")[:10]
+
+        workout_date = self.text_field(
+            label="Workout date",
+            value=workout_date_value,
+            hint_text="YYYY-MM-DD",
+            dense=True,
+        )
 
         def save(e):
             numeric_valid = True
@@ -519,6 +739,10 @@ class HistoryMixin:
                         ("reps_control", "reps"),
                         ("rir_control", "rir"),
                     ):
+                        if kind == "rir" and not storage.method_set_uses_rir(
+                            group.get("training_method", "Straight"), row.get("set_type")
+                        ):
+                            continue
                         field = row.get(key)
                         if field is not None and not self.normalize_numeric_control(
                             field,
@@ -530,6 +754,16 @@ class HistoryMixin:
                 self.page.update()
                 return
 
+            requested_date = str(workout_date.value or "").strip()
+            try:
+                requested_date = datetime.fromisoformat(requested_date).date().isoformat()
+            except (TypeError, ValueError):
+                self.mark_field_invalid(workout_date)
+                self.notify("Workout date must use YYYY-MM-DD.")
+                self.page.update()
+                return
+            self.clear_field_invalid(workout_date)
+
             snapshot()
             rows = []
 
@@ -540,8 +774,16 @@ class HistoryMixin:
                             "exercise_name": group["exercise_name"],
                             "weight": row.get("weight", ""),
                             "reps": row.get("reps", ""),
-                            "rir": row.get("rir", ""),
+                            "rir": (
+                                row.get("rir", "")
+                                if storage.method_set_uses_rir(
+                                    group.get("training_method", "Straight"),
+                                    row.get("set_type"),
+                                )
+                                else ""
+                            ),
                             "set_type": row.get("set_type", "Normal"),
+                            "training_method": group.get("training_method", "Straight"),
                             "note": row.get("note", ""),
                             "completed": bool(row.get("completed", True)),
                         }
@@ -551,6 +793,7 @@ class HistoryMixin:
                 session_id,
                 workout_name.value,
                 rows,
+                session_date=requested_date,
             )
 
             self.notify(f"Saved {count} historical set(s).")
@@ -630,6 +873,7 @@ class HistoryMixin:
         self.set_view(
             [
                 workout_name,
+                workout_date,
                 controls_column,
             ],
             header=header,

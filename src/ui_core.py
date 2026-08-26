@@ -174,7 +174,7 @@ class UICoreMixin:
         value = locks.get("suggested_rir")
         if value is None:
             return None
-        return f"{float(value):.1f}".rstrip("0").rstrip(".")
+        return str(int(round(float(value))))
 
     def cycle_rir_lock_enabled(self):
         if self.cycle_rir_target() is None:
@@ -246,12 +246,6 @@ class UICoreMixin:
             self.advanced_mode_enabled()
             and self.settings.get("require_previous_sets_completed", "0") == "1"
         )
-
-    def timer_tap_action(self):
-        if not self.advanced_mode_enabled():
-            return "switch"
-        value = self.settings.get("timer_tap_action", "switch")
-        return value if value in {"switch", "hide"} else "switch"
 
     def default_timer_display_mode(self):
         if not self.advanced_mode_enabled():
@@ -415,7 +409,7 @@ class UICoreMixin:
         specs = {
             "weight": {"integer": False, "minimum": 0.000001, "maximum": 10000},
             "reps": {"integer": True, "minimum": 1, "maximum": 999},
-            "rir": {"integer": False, "minimum": 0, "maximum": 99},
+            "rir": {"integer": True, "minimum": 0, "maximum": 99},
             "rm": {"integer": True, "minimum": 1, "maximum": 999},
             "target_reps": {"integer": True, "minimum": 1, "maximum": 999},
             "count": {"integer": True, "minimum": 1, "maximum": 9999},
@@ -471,8 +465,33 @@ class UICoreMixin:
             return None
         return value
 
+    def format_weight_text(self, value):
+        """Hide tiny unit-conversion drift without changing real precision."""
+        text = self.logical_text_value(value)
+        if not text:
+            return ""
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return text
+        if not math.isfinite(number):
+            return text
+
+        # Two-decimal kg/lb persistence can turn common .0/.5 gym loads into
+        # x.99/x.01 or x.49/x.51 after round trips. Only snap within 0.011,
+        # small enough to target that conversion noise rather than normal input.
+        half_step = round(number * 2.0) / 2.0
+        if abs(number - half_step) <= 0.0110001:
+            number = half_step
+
+        if abs(number - round(number)) < 1e-9:
+            return str(int(round(number)))
+        return f"{number:.2f}".rstrip("0").rstrip(".")
+
     def format_numeric_value(self, value, kind="number"):
         spec = self.numeric_kind_spec(kind)
+        if kind == "weight":
+            return self.format_weight_text(value)
         if spec["integer"]:
             if abs(value - round(value)) > 1e-9:
                 return None
@@ -759,8 +778,17 @@ class UICoreMixin:
         numeric_kind="number",
     ):
         """Typed value starts left; previous/placeholder value stays centered."""
-        value = str(value or "")
-        previous = str(previous or "")
+        if numeric_kind == "weight":
+            value = self.format_weight_text(value)
+            previous = self.format_weight_text(previous)
+        else:
+            value = str(value or "")
+            previous = str(previous or "")
+
+        if suffix_text is None and numeric_kind == "reps":
+            suffix_text = "reps"
+        elif suffix_text is None and numeric_kind == "rir":
+            suffix_text = "RIR"
         width = self.ui(width)
         numeric_text_size = self.fs(15)
 
@@ -913,6 +941,8 @@ class UICoreMixin:
 
     def text_field(self, **kwargs):
         numeric_kind = kwargs.pop("numeric_kind", None)
+        if numeric_kind == "weight" and "value" in kwargs:
+            kwargs["value"] = self.format_weight_text(kwargs.get("value", ""))
         kwargs.setdefault("border_radius", self.rounding())
         kwargs.setdefault("border_color", self.field_border_color())
         kwargs.setdefault(
@@ -987,38 +1017,54 @@ class UICoreMixin:
 
             current.on_submit = advance
 
-    def weight_field_with_unit(self, field, width):
-        unit_label = ft.Text(
-            self.settings.get("unit", "kg"),
-            size=self.fs(10),
+    def field_with_suffix(self, field, width, suffix_text):
+        suffix_label = ft.Text(
+            suffix_text,
+            size=self.fs(9.5),
             weight=ft.FontWeight.W_500,
             color=ft.Colors.GREY_500,
             visible=bool((field.value or "").strip()),
+        )
+
+        # Reserve a small right-hand slot so the value never paints underneath
+        # kg/lb/reps/RIR on compact history rows.
+        field.content_padding = ft.Padding(
+            left=self.ui(8),
+            top=self.ui(8),
+            right=self.ui(30),
+            bottom=self.ui(8),
         )
 
         wrapper = ft.Stack(
             controls=[
                 field,
                 ft.Container(
-                    right=self.ui(7),
+                    right=self.ui(6),
                     top=0,
                     bottom=0,
                     alignment=ft.Alignment.CENTER,
                     ignore_interactions=True,
-                    content=unit_label,
+                    content=suffix_label,
                 ),
             ],
             width=width,
         )
 
-        def sync_unit(e):
-            unit_label.visible = bool((field.value or "").strip())
+        def sync_suffix(e):
+            suffix_label.visible = bool((field.value or "").strip())
             if (field.value or "").strip():
                 self.clear_field_invalid(field)
             self.page.update()
 
-        field.on_change = sync_unit
-        return wrapper, unit_label
+        field.on_change = sync_suffix
+        return wrapper, suffix_label
+
+    def weight_field_with_unit(self, field, width):
+        return self.field_with_suffix(
+            field,
+            width,
+            self.settings.get("unit", "kg"),
+        )
 
     def color_swatch(self, name, color, selected, on_click):
         return ft.Container(
@@ -1234,6 +1280,7 @@ class UICoreMixin:
     def active_set_type_label(self, set_type):
         labels = {
             "Normal": "Straight",
+            "Straight (Normal)": "Straight",
             "Warm-up": "Warmup",
             "Top Set": "Top",
             "Back-off": "Backoff",
@@ -1243,6 +1290,8 @@ class UICoreMixin:
             "Mechanical Drop Set": "Mech Drop",
             "Rest-Pause": "RestPause",
             "Myo-Reps": "Myo",
+            "Activation": "Activate",
+            "Myo-set": "Myo",
             "Myo-Rep Match": "MyoMatch",
             "Cluster Set": "Cluster",
             "Paused": "Paused",

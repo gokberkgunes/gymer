@@ -38,7 +38,9 @@ class TimerMixin:
             border_radius=self.rounding(),
             alignment=ft.Alignment.CENTER_LEFT,
             ink=True,
+            tooltip="Tap: active workout · Hold: countdown",
             on_click=lambda e: self.handle_floating_timer_tap(),
+            on_long_press=lambda e: self.handle_floating_timer_hold(),
             content=ft.Column(
                 controls=[
                     self.timer_name_text,
@@ -78,25 +80,17 @@ class TimerMixin:
         return f"{sign}{minutes}:{seconds:02d}"
 
     def handle_floating_timer_tap(self):
-        if self.timer_started_at is None:
+        """The floating rest timer is the global shortcut back to the workout."""
+        if self.timer_started_at is None or not self.active_workout:
             return
-        if self.timer_tap_action() == "hide":
-            self.timer_popup_dismissed = True
-            self.timer_popup.visible = False
-            self.page.update()
-            return
-        self.toggle_timer_display_mode()
+        self.return_to_active_workout_from_root()
 
-    def toggle_timer_display_mode(self):
+    def handle_floating_timer_hold(self):
+        """Long-press the floating timer to view the remaining countdown."""
         if self.timer_started_at is None:
             return
-        self.timer_display_mode = (
-            "countdown"
-            if self.timer_display_mode == "elapsed"
-            else "elapsed"
-        )
-        self.refresh_timer_display()
-        self.page.update()
+        self.timer_display_mode = "countdown"
+        self.refresh_timer_display(update_page=True)
 
     def reset_inline_timer_item(self, item):
         if not item:
@@ -200,6 +194,9 @@ class TimerMixin:
         remaining = self.timer_total_seconds - elapsed
         overdue = remaining <= 0 and elapsed >= self.timer_total_seconds
 
+        # The floating timer remains visible across the app while the rest
+        # period is active. It is the single global return control; no separate
+        # bottom timer bar is rendered.
         self.timer_popup.visible = (
             self.floating_timer_enabled()
             and not self.timer_popup_dismissed

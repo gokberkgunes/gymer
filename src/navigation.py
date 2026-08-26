@@ -109,6 +109,8 @@ class NavigationMixin:
 
         self.native_back_action = back_action
         self.workout_clock_visible = workout_clock
+        if self.timer_started_at is not None:
+            self.refresh_timer_display(update_page=False)
 
         # Android system Back must not auto-pop when this screen has an
         # in-app parent. Flet then raises on_confirm_pop, where we perform the
@@ -163,10 +165,16 @@ class NavigationMixin:
 
         page_controls.append(content)
 
-        # Keep an in-progress workout globally reachable even while the user is
-        # browsing another tab or a nested editor.  This is intentionally not
-        # shown on the active workout itself.
-        if self.active_workout and not hide_active_return_bar:
+        # Keep an in-progress workout globally reachable when no rest timer is
+        # running. During a rest period the floating timer itself is the return
+        # control, so there is deliberately no second timer/ACTIVE bar below the
+        # page.
+        if (
+            self.active_workout
+            and not workout_clock
+            and not hide_active_return_bar
+            and self.timer_started_at is None
+        ):
             page_controls.append(self.active_workout_return_bar())
 
         if footer is not None:
@@ -496,11 +504,30 @@ class NavigationMixin:
             add_new=storage.add_catalog_exercise,
         )
 
-    def open_set_type_picker(self, current, on_select):
+    def open_set_type_picker(self, current, on_select, choices=None):
+        if choices is None:
+            source = lambda query: storage.set_types(query)
+        else:
+            allowed = [storage.display_set_type(value) for value in choices]
+
+            def source(query):
+                query = str(query or "").strip().casefold()
+                if not query:
+                    return list(allowed)
+                return [value for value in allowed if query in value.casefold()]
+
         self.open_name_picker(
-            "Set type",
-            lambda query: storage.set_types(query),
-            on_select,
+            "Set role",
+            source,
+            lambda selected: on_select(storage.canonical_set_type(selected)),
+            allow_new=False,
+        )
+
+    def open_training_method_picker(self, current, on_select):
+        self.open_name_picker(
+            "Training method",
+            lambda query: storage.training_methods(query),
+            lambda selected: on_select(storage.canonical_training_method(selected)),
             allow_new=False,
         )
 

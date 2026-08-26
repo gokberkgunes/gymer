@@ -55,6 +55,7 @@ EXERCISE_FIELDS = [
     "default_weight_unit",
     "default_reps",
     "rest_seconds",
+    "training_method",
 ]
 
 TEMPLATE_SET_FIELDS = [
@@ -82,6 +83,7 @@ SET_FIELDS = [
     "reps",
     "rir",
     "set_type",
+    "training_method",
     "note",
     "completed",
 ]
@@ -148,6 +150,7 @@ ACTIVE_FIELDS = [
     "previous_rir",
     "last_week_reps",
     "set_type",
+    "training_method",
     "note",
     "completed",
     "calibration_done",
@@ -313,7 +316,6 @@ DEFAULT_SETTINGS = {
     "backspace_moves_to_previous_set": "0",
     "advanced_mode": "0",
     "require_previous_sets_completed": "0",
-    "timer_tap_action": "switch",
     "default_timer_display_mode": "elapsed",
     # JSON map: cycle_id -> calibrated workout/exercise placements.
     # A repeated exercise in another workout calibrates independently.
@@ -335,6 +337,8 @@ DEFAULT_SET_TYPES = [
     "Mechanical Drop Set",
     "Rest-Pause",
     "Myo-Reps",
+    "Activation",
+    "Myo-set",
     "Myo-Rep Match",
     "Cluster Set",
     "Paused",
@@ -342,6 +346,38 @@ DEFAULT_SET_TYPES = [
     "Partial",
     "Burnout",
 ]
+
+# Training method belongs to an exercise *inside a workout*.  Set type is now a
+# role/segment inside that method, so incompatible combinations can be blocked.
+TRAINING_METHODS = [
+    "Straight",
+    "AMRAP",
+    "Myo-Reps",
+    "Rest-Pause",
+    "Drop Set",
+    "Mechanical Drop Set",
+    "Cluster",
+    "Myo-Rep Match",
+]
+
+METHOD_SET_TYPES = {
+    "Straight": ["Normal", "Warm-up", "Top Set", "Back-off"],
+    "AMRAP": ["Warm-up", "AMRAP"],
+    "Myo-Reps": ["Warm-up", "Activation", "Myo-set"],
+    "Rest-Pause": ["Warm-up", "Activation", "Rest-Pause"],
+    "Drop Set": ["Warm-up", "Activation", "Drop Set"],
+    "Mechanical Drop Set": ["Warm-up", "Activation", "Mechanical Drop Set"],
+    "Cluster": ["Warm-up", "Cluster Set"],
+    "Myo-Rep Match": ["Warm-up", "Activation", "Myo-Rep Match"],
+}
+
+ACTIVATION_FOLLOWUP = {
+    "Myo-Reps": "Myo-set",
+    "Rest-Pause": "Rest-Pause",
+    "Drop Set": "Drop Set",
+    "Mechanical Drop Set": "Mechanical Drop Set",
+    "Myo-Rep Match": "Myo-Rep Match",
+}
 
 DEFAULT_WORKOUTS = [
     (
@@ -951,8 +987,15 @@ def convert_weight_value(value, from_unit, to_unit):
     elif from_unit == "lb" and to_unit == "kg":
         number /= KG_TO_LB
 
-    # Two decimals preserves the conversion accurately without filling workout
-    # fields with long floating-point values.
+    # Repeated kg <-> lb conversions can drift a familiar gym load by one cent
+    # because the persisted value is intentionally limited to two decimals
+    # (for example 260 lb -> kg -> 259.99 lb). If the converted result is
+    # already within about one hundredth of a half-unit increment, snap that
+    # rounding noise away. Values that are genuinely more precise remain untouched.
+    half_step = round(number * 2.0) / 2.0
+    if abs(number - half_step) <= 0.0110001:
+        number = half_step
+
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
@@ -1130,6 +1173,7 @@ def _initial_catalog_names():
 
 def _latest_by_set_number(rows):
     latest = {}
+    default_unit = read_settings().get("unit", "kg")
 
     for row in reversed(rows):
         try:
@@ -1140,9 +1184,16 @@ def _latest_by_set_number(rows):
         if set_number not in latest:
             latest[set_number] = {
                 "weight": row.get("weight", ""),
-                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+                "weight_unit": row.get("weight_unit", default_unit) or default_unit,
                 "reps": row.get("reps", ""),
-                "rir": row.get("rir", ""),
+                "rir": (
+                    row.get("rir", "")
+                    if method_set_uses_rir(
+                        row.get("training_method", "Straight"),
+                        row.get("set_type", "Normal"),
+                    )
+                    else ""
+                ),
                 "previous_weight": row.get("previous_weight", ""),
                 "previous_reps": row.get("previous_reps", ""),
                 "previous_rir": row.get("previous_rir", ""),
@@ -1379,6 +1430,7 @@ def ensure_data():
                         "default_weight_unit": read_settings().get("unit", "kg"),
                         "default_reps": "",
                         "rest_seconds": "180",
+                        "training_method": "Straight",
                     }
                 )
 
@@ -1393,6 +1445,7 @@ def ensure_data():
                 "default_weight_unit": read_settings().get("unit", "kg"),
                 "default_reps": "",
                 "rest_seconds": "180",
+                "training_method": "",
             },
         )
 
@@ -1408,6 +1461,7 @@ def ensure_data():
                 "weight_unit": read_settings().get("unit", "kg"),
                 "cycle_id": "",
                 "cycle_microcycle": "",
+                "training_method": "",
             },
         )
 
@@ -1462,7 +1516,6 @@ def ensure_data():
             settings.setdefault("backspace_moves_to_previous_set", "0")
             settings.setdefault("advanced_mode", "0")
             settings.setdefault("require_previous_sets_completed", "0")
-            settings.setdefault("timer_tap_action", "switch")
             settings.setdefault("default_timer_display_mode", "elapsed")
 
             # v27 removes completed-set hiding entirely. Drop the obsolete
@@ -1512,6 +1565,7 @@ def ensure_data():
                 "previous_reps": "",
                 "previous_rir": "",
                 "last_week_reps": "",
+                "training_method": "",
                 "started_at": "",
             },
         )
@@ -1726,6 +1780,109 @@ def delete_catalog_exercise(name):
     _write_csv(EXERCISE_CATALOG_FILE, CATALOG_FIELDS, rows)
 
 
+def rename_exercise(old_name, new_name):
+    """Rename one exercise everywhere without splitting its history."""
+    ensure_data()
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not old_name or not new_name:
+        return False
+
+    old_key = old_name.casefold()
+    new_key = new_name.casefold()
+
+    # Do not silently merge two distinct exercises. Historical-only names count
+    # too, because merging them would corrupt progression/history semantics.
+    if new_key != old_key:
+        sources = (
+            _read_csv(EXERCISE_CATALOG_FILE),
+            _read_csv(EXERCISE_DETAILS_FILE),
+            _read_csv(WORKOUT_EXERCISES_FILE),
+            _read_csv(SETS_FILE),
+            _read_csv(ACTIVE_WORKOUT_FILE),
+        )
+        if any(
+            str(row.get("exercise_name", "") or "").strip().casefold() == new_key
+            for rows in sources
+            for row in rows
+        ):
+            return False
+
+    catalog = _read_csv(EXERCISE_CATALOG_FILE)
+    replaced_catalog = False
+    for row in catalog:
+        if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
+            row["exercise_name"] = new_name
+            replaced_catalog = True
+    if not replaced_catalog:
+        catalog.append({"exercise_name": new_name})
+    # Collapse any case-only duplicates and keep the catalog deterministic.
+    unique_catalog = {}
+    for row in catalog:
+        name = str(row.get("exercise_name", "") or "").strip()
+        if name:
+            unique_catalog[name.casefold()] = {"exercise_name": name}
+    catalog = sorted(unique_catalog.values(), key=lambda row: row["exercise_name"].casefold())
+    _write_csv(EXERCISE_CATALOG_FILE, CATALOG_FIELDS, catalog)
+
+    for path, fields in (
+        (EXERCISE_DETAILS_FILE, EXERCISE_DETAIL_FIELDS),
+        (WORKOUT_EXERCISES_FILE, EXERCISE_FIELDS),
+        (SETS_FILE, SET_FIELDS),
+        (ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS),
+    ):
+        rows = _read_csv(path)
+        changed = False
+        for row in rows:
+            if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
+                row["exercise_name"] = new_name
+                changed = True
+        if changed:
+            _write_csv(path, fields, rows)
+
+    # Calibration completion is keyed by exercise name in Settings. Preserve it
+    # across a rename so an already-calibrated exercise does not unexpectedly
+    # ask for calibration again.
+    settings = read_settings()
+    raw_seen = settings.get("mesocycle_intro_seen_exercises", "{}")
+    try:
+        seen = json.loads(raw_seen)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        seen = {}
+    seen_changed = False
+    if isinstance(seen, dict):
+        for placements in seen.values():
+            if not isinstance(placements, list):
+                continue
+            for placement in placements:
+                if isinstance(placement, dict):
+                    value = str(placement.get("exercise_name", "") or "").strip()
+                    if value.casefold() == old_key:
+                        placement["exercise_name"] = new_name
+                        seen_changed = True
+                elif isinstance(placement, str) and placement.strip().casefold() == old_key:
+                    # Legacy string-only placement cannot be changed in place by
+                    # reference, so normalize it below if encountered.
+                    seen_changed = True
+        if seen_changed:
+            normalized = {}
+            for cycle_id, placements in seen.items():
+                updated = []
+                for placement in placements if isinstance(placements, list) else []:
+                    if isinstance(placement, dict):
+                        updated.append(placement)
+                    elif isinstance(placement, str):
+                        value = placement.strip()
+                        updated.append(new_name if value.casefold() == old_key else value)
+                normalized[cycle_id] = updated
+            settings["mesocycle_intro_seen_exercises"] = json.dumps(
+                normalized, ensure_ascii=False
+            )
+            save_settings(settings)
+
+    return True
+
+
 def all_exercise_names():
     return catalog_exercises()
 
@@ -1733,26 +1890,31 @@ def all_exercise_names():
 def set_types(query="", mode=None):
     ensure_data()
     values = [
-        row.get("set_type", "")
+        display_set_type(row.get("set_type", ""))
         for row in _read_csv(SET_TYPES_FILE)
     ]
+    # Built-ins are merged at read time so newly introduced structural roles
+    # (for example Activation/Myo-set) appear without rewriting user CSVs.
+    values.extend(display_set_type(value) for value in DEFAULT_SET_TYPES)
+    # Deduplicate aliases such as legacy Normal / Straight while preserving order.
+    values = list(dict.fromkeys(value for value in values if value))
     return filter_names(values, query, mode)
 
 
 def set_type_contains(name):
-    key = (name or "").strip().casefold()
+    key = canonical_set_type(name).casefold()
     if not key:
         return False
 
     return any(
-        value.casefold() == key
-        for value in set_types()
+        canonical_set_type(row.get("set_type", "")).casefold() == key
+        for row in _read_csv(SET_TYPES_FILE)
     )
 
 
 def add_set_type(name):
     ensure_data()
-    name = (name or "").strip()
+    name = canonical_set_type(name)
 
     if not name or set_type_contains(name):
         return False
@@ -1770,12 +1932,12 @@ def delete_set_type(name):
     Existing templates/history keep their stored text.
     """
     ensure_data()
-    key = (name or "").strip().casefold()
+    key = canonical_set_type(name).casefold()
 
     rows = [
         row
         for row in _read_csv(SET_TYPES_FILE)
-        if row.get("set_type", "").strip().casefold() != key
+        if canonical_set_type(row.get("set_type", "")).casefold() != key
     ]
 
     _write_csv(SET_TYPES_FILE, SET_TYPE_FIELDS, rows)
@@ -2061,12 +2223,209 @@ def _row_completed(row):
     return str(value or "1").strip().casefold() not in {"0", "false", "no", "off"}
 
 
+def canonical_training_method(value):
+    raw = str(value or "").strip()
+    key = raw.casefold()
+    aliases = {
+        "": "Straight",
+        "normal": "Straight",
+        "straight (normal)": "Straight",
+        "straight": "Straight",
+        "cluster set": "Cluster",
+        "cluster": "Cluster",
+        "myoreps": "Myo-Reps",
+        "myo reps": "Myo-Reps",
+        "myo-reps": "Myo-Reps",
+        "myorep match": "Myo-Rep Match",
+        "myo rep match": "Myo-Rep Match",
+    }
+    if key in aliases:
+        return aliases[key]
+    for method in TRAINING_METHODS:
+        if method.casefold() == key:
+            return method
+    return "Straight"
+
+
+def infer_training_method(set_rows):
+    types = [canonical_set_type(row.get("set_type", "Normal")) for row in (set_rows or [])]
+    work = [value for value in types if not is_warmup_set_type(value)]
+    lowered = {value.casefold() for value in work}
+    if "myo-set" in lowered or "myo-reps" in lowered:
+        return "Myo-Reps"
+    if "myo-rep match" in lowered:
+        return "Myo-Rep Match"
+    if "rest-pause" in lowered:
+        return "Rest-Pause"
+    if "mechanical drop set" in lowered:
+        return "Mechanical Drop Set"
+    if "drop set" in lowered:
+        return "Drop Set"
+    if "cluster set" in lowered:
+        return "Cluster"
+    if work and all(value.casefold() == "amrap" for value in work):
+        return "AMRAP"
+    return "Straight"
+
+
+def resolve_training_method(value, set_rows=None):
+    raw = str(value or "").strip()
+    if raw:
+        return canonical_training_method(raw)
+    return infer_training_method(set_rows or [])
+
+
+def training_methods(query=""):
+    query = str(query or "").strip().casefold()
+    if not query:
+        return list(TRAINING_METHODS)
+    return [name for name in TRAINING_METHODS if query in name.casefold()]
+
+
+def allowed_set_types_for_method(method):
+    method = canonical_training_method(method)
+    return list(METHOD_SET_TYPES.get(method, METHOD_SET_TYPES["Straight"]))
+
+
+def set_type_choices_for_method_row(method, set_rows, row_index):
+    method = canonical_training_method(method)
+    prior_work = any(
+        not is_warmup_set_type(row.get("set_type", "Normal"))
+        for row in (set_rows or [])[:max(0, int(row_index))]
+    )
+
+    if method in ACTIVATION_FOLLOWUP:
+        if prior_work:
+            return [ACTIVATION_FOLLOWUP[method]]
+        return ["Warm-up", "Activation"]
+
+    allowed = allowed_set_types_for_method(method)
+    if prior_work:
+        allowed = [value for value in allowed if not is_warmup_set_type(value)]
+    return allowed
+
+
+def default_next_set_type(method, set_rows=None):
+    method = canonical_training_method(method)
+    rows = set_rows or []
+    if method in ACTIVATION_FOLLOWUP:
+        has_work = any(not is_warmup_set_type(row.get("set_type", "Normal")) for row in rows)
+        return ACTIVATION_FOLLOWUP[method] if has_work else "Activation"
+    if method == "AMRAP":
+        return "AMRAP"
+    if method == "Cluster":
+        return "Cluster Set"
+    return "Normal"
+
+
+def reconcile_method_sets(method, set_rows):
+    """Return rows whose set roles are valid for the selected exercise method."""
+    method = canonical_training_method(method)
+    output = [dict(row) for row in (set_rows or [])]
+    work_seen = False
+    for row in output:
+        current = canonical_set_type(row.get("set_type", "Normal"))
+        if is_warmup_set_type(current) and not work_seen:
+            row["set_type"] = "Warm-up"
+            continue
+
+        if method == "Straight":
+            row["set_type"] = current if current in {"Normal", "Top Set", "Back-off"} else "Normal"
+        elif method == "AMRAP":
+            row["set_type"] = "AMRAP"
+        elif method == "Cluster":
+            row["set_type"] = "Cluster Set"
+        elif method in ACTIVATION_FOLLOWUP:
+            row["set_type"] = "Activation" if not work_seen else ACTIVATION_FOLLOWUP[method]
+        else:
+            row["set_type"] = "Normal"
+        work_seen = True
+    return output
+
+
+def validate_method_sets(method, set_rows):
+    method = canonical_training_method(method)
+    rows = set_rows or []
+    work = [row for row in rows if not is_warmup_set_type(row.get("set_type", "Normal"))]
+    if not work:
+        return False, "Add at least one working set."
+    reconciled = reconcile_method_sets(method, rows)
+    current = [canonical_set_type(row.get("set_type", "Normal")) for row in rows]
+    expected = [canonical_set_type(row.get("set_type", "Normal")) for row in reconciled]
+    if current != expected:
+        return False, f"{method} has an invalid set sequence."
+    return True, ""
+
+
+def method_set_uses_rir(method, set_type):
+    """Whether this exercise method meaningfully records RIR for this row."""
+    method = canonical_training_method(method)
+    if is_warmup_set_type(set_type):
+        return False
+    # AMRAP/activation-based/cluster methods encode effort through their method
+    # and segment performance rather than a per-segment RIR entry.
+    return method == "Straight"
+
+
+def method_calibration_anchor(method, set_type):
+    """Return True when this row is the method's strength/progression anchor."""
+    method = canonical_training_method(method)
+    set_type = canonical_set_type(set_type)
+    if is_warmup_set_type(set_type):
+        return False
+    if method == "Straight":
+        return set_type == "Normal"
+    if method == "AMRAP":
+        return set_type == "AMRAP"
+    if method == "Cluster":
+        return set_type == "Cluster Set"
+    if method in ACTIVATION_FOLLOWUP:
+        return set_type == "Activation"
+    return False
+
+
+def method_progression_managed_set(method, set_type):
+    """Whether the method progression engine owns load guidance for this row."""
+    method = canonical_training_method(method)
+    set_type = canonical_set_type(set_type)
+    if is_warmup_set_type(set_type):
+        return False
+    if method == "Straight":
+        # Top/back-off remain deliberately user-authored until they receive a
+        # dedicated role algorithm; ordinary Straight rows keep the 8-12 engine.
+        return set_type == "Normal"
+    return set_type in allowed_set_types_for_method(method)
+
+
+def canonical_set_type(value):
+    """Normalize presentation aliases without rewriting stored legacy history."""
+    text = str(value or "").strip()
+    if text.casefold() in {"normal", "straight", "straight (normal)"}:
+        return "Normal"
+    return text
+
+
+def display_set_type(value):
+    """User-facing name for a stored set type."""
+    canonical = canonical_set_type(value)
+    return "Straight (Normal)" if canonical == "Normal" else canonical
+
+
+def is_straight_set_type(value):
+    return canonical_set_type(value) == "Normal"
+
+
+def is_warmup_set_type(value):
+    """Return True for every supported spelling of the warm-up set type."""
+    set_type = str(value or "").strip().casefold()
+    return set_type in {"warm-up", "warmup", "warm up"}
+
+
 def is_hypertrophy_working_set(row):
     """Return True for a completed set that should count toward weekly volume."""
     if not _row_completed(row):
         return False
-    set_type = str(row.get("set_type", "Normal") or "Normal").strip().casefold()
-    return set_type not in {"warm-up", "warmup", "warm up"}
+    return not is_warmup_set_type(row.get("set_type", "Normal"))
 
 
 def completed_primary_muscle_set_counts(rows, *, report_groups=False):
@@ -2333,39 +2692,55 @@ def _mesocycle_intro_seen_map():
                         {
                             "workout_id": workout_id,
                             "exercise_name": exercise_name,
+                            "training_method": canonical_training_method(
+                                placement.get("training_method", "Straight")
+                            ),
                         }
                     )
             elif isinstance(placement, str) and placement.strip():
                 # Older builds tracked only exercise name. Do not let that global
                 # state suppress the new per-workout calibration requirement.
                 normalized.append(
-                    {"workout_id": "", "exercise_name": placement.strip()}
+                    {
+                        "workout_id": "",
+                        "exercise_name": placement.strip(),
+                        "training_method": "Straight",
+                    }
                 )
         output[str(cycle_id)] = normalized
     return output
 
 
-def mesocycle_intro_seen(cycle_id, workout_id, exercise_name):
+def mesocycle_intro_seen(
+    cycle_id, workout_id, exercise_name, training_method="Straight"
+):
     cycle_id = str(cycle_id or "").strip()
     workout_key = str(workout_id or "").strip().casefold()
     exercise_key = str(exercise_name or "").strip().casefold()
+    method_key = canonical_training_method(training_method).casefold()
     if not cycle_id or not workout_key or not exercise_key:
         return False
 
     for placement in _mesocycle_intro_seen_map().get(cycle_id, []):
+        placement_method = canonical_training_method(
+            placement.get("training_method", "Straight")
+        ).casefold()
         if (
             str(placement.get("workout_id", "")).strip().casefold() == workout_key
-            and str(placement.get("exercise_name", "")).strip().casefold()
-            == exercise_key
+            and str(placement.get("exercise_name", "")).strip().casefold() == exercise_key
+            and placement_method == method_key
         ):
             return True
     return False
 
 
-def mark_mesocycle_intro_seen(cycle_id, workout_id, exercise_name):
+def mark_mesocycle_intro_seen(
+    cycle_id, workout_id, exercise_name, training_method="Straight"
+):
     cycle_id = str(cycle_id or "").strip()
     workout_id = str(workout_id or "").strip()
     exercise_name = str(exercise_name or "").strip()
+    training_method = canonical_training_method(training_method)
     if not cycle_id or not workout_id or not exercise_name:
         return
 
@@ -2373,15 +2748,23 @@ def mark_mesocycle_intro_seen(cycle_id, workout_id, exercise_name):
     placements = list(state.get(cycle_id, []))
     workout_key = workout_id.casefold()
     exercise_key = exercise_name.casefold()
+    method_key = training_method.casefold()
     if any(
         str(item.get("workout_id", "")).strip().casefold() == workout_key
         and str(item.get("exercise_name", "")).strip().casefold() == exercise_key
+        and canonical_training_method(
+            item.get("training_method", "Straight")
+        ).casefold() == method_key
         for item in placements
     ):
         return
 
     placements.append(
-        {"workout_id": workout_id, "exercise_name": exercise_name}
+        {
+            "workout_id": workout_id,
+            "exercise_name": exercise_name,
+            "training_method": training_method,
+        }
     )
     state[cycle_id] = placements
     settings = read_settings()
@@ -2537,6 +2920,36 @@ def end_mesocycle(cycle_id):
     _write_csv(MESOCYCLES_FILE, MESOCYCLE_FIELDS, rows)
 
 
+def continue_mesocycle(cycle_id):
+    """Reactivate the same mesocycle instead of cloning it.
+
+    Continuing is primarily an undo for an accidentally ended cycle.  Keeping
+    the same cycle ID preserves the original start date, repeating-workout
+    position, calibration state, and history relationship.  Any other active
+    mesocycle is ended, matching ``save_mesocycle()``'s single-active-cycle
+    invariant.
+    """
+    ensure_data()
+    cycle_id = str(cycle_id or "").strip()
+    if not cycle_id:
+        return None
+
+    rows = _read_csv(MESOCYCLES_FILE)
+    found = False
+    for row in rows:
+        if row.get("cycle_id") == cycle_id:
+            row["active"] = "1"
+            found = True
+        else:
+            row["active"] = "0"
+
+    if not found:
+        return None
+
+    _write_csv(MESOCYCLES_FILE, MESOCYCLE_FIELDS, rows)
+    return cycle_id
+
+
 def delete_mesocycle(cycle_id):
     ensure_data()
     cycle_id = str(cycle_id or "")
@@ -2629,11 +3042,14 @@ def mesocycle_status(cycle=None, today=None):
         phase = "Build"
 
     try:
-        start_rir = float(cycle.get("start_rir", 3))
-        end_rir = float(cycle.get("end_rir", 1))
-        deload_rir = float(cycle.get("deload_rir", 4))
+        # RIR prescriptions are discrete by design. Older data may contain a
+        # decimal string, so normalize it once here and keep every downstream
+        # caller on integer RIR values.
+        start_rir = int(round(float(cycle.get("start_rir", 3))))
+        end_rir = int(round(float(cycle.get("end_rir", 1))))
+        deload_rir = int(round(float(cycle.get("deload_rir", 4))))
     except (TypeError, ValueError):
-        start_rir, end_rir, deload_rir = 3.0, 1.0, 4.0
+        start_rir, end_rir, deload_rir = 3, 1, 4
 
     if phase == "Deload":
         suggested_rir = deload_rir
@@ -2642,8 +3058,15 @@ def mesocycle_status(cycle=None, today=None):
             suggested_rir = end_rir
         else:
             position = min(current_microcycle, build_microcycles) - 1
-            frac = position / (build_microcycles - 1)
-            suggested_rir = start_rir + (end_rir - start_rir) * frac
+            if position <= 0:
+                suggested_rir = start_rir
+            elif position >= build_microcycles - 1:
+                # Always land exactly on the configured final-build RIR.
+                suggested_rir = end_rir
+            else:
+                direction = 1 if end_rir > start_rir else -1
+                distance = abs(end_rir - start_rir)
+                suggested_rir = start_rir + direction * min(position, distance)
     else:
         suggested_rir = start_rir
 
@@ -2996,9 +3419,11 @@ def read_workout(workout_id):
         if not sets:
             sets = _build_initial_template_rows([exercise])
 
+        training_method = resolve_training_method(exercise.get("training_method", ""), sets)
         output.append(
             {
                 "exercise_name": exercise["exercise_name"],
+                "training_method": training_method,
                 "sets": [
                     {
                         "set_number": int(row.get("set_number", 1) or 1),
@@ -3079,6 +3504,7 @@ def save_workout(workout_id, name, exercises):
         if not exercise_name:
             continue
 
+        training_method = canonical_training_method(exercise.get("training_method", "Straight"))
         set_rows = exercise.get("sets") or []
         if not set_rows:
             set_rows = [
@@ -3090,6 +3516,7 @@ def save_workout(workout_id, name, exercises):
                     "set_type": "Normal",
                 }
             ]
+        set_rows = reconcile_method_sets(training_method, set_rows)
 
         first = set_rows[0]
 
@@ -3108,6 +3535,7 @@ def save_workout(workout_id, name, exercises):
                         default=default_rest,
                     )
                 ),
+                "training_method": training_method,
             }
         )
 
@@ -3242,7 +3670,6 @@ def latest_completed_straight_session(exercise_name):
     """Return completed straight sets from the newest session for an exercise."""
     ensure_data()
     exercise_key = str(exercise_name or "").strip().casefold()
-    straight_names = {"straight", "normal"}
     rows = _read_csv(SETS_FILE)
 
     latest_session_id = ""
@@ -3250,8 +3677,7 @@ def latest_completed_straight_session(exercise_name):
         if (
             row.get("exercise_name", "").strip().casefold() == exercise_key
             and row.get("completed", "1") != "0"
-            and (row.get("set_type", "Normal") or "Normal").strip().casefold()
-            in straight_names
+            and is_straight_set_type(row.get("set_type", "Normal"))
         ):
             try:
                 weight = float(str(row.get("weight", "") or "").strip())
@@ -3271,8 +3697,7 @@ def latest_completed_straight_session(exercise_name):
             row.get("session_id", "") == latest_session_id
             and row.get("exercise_name", "").strip().casefold() == exercise_key
             and row.get("completed", "1") != "0"
-            and (row.get("set_type", "Normal") or "Normal").strip().casefold()
-            in straight_names
+            and is_straight_set_type(row.get("set_type", "Normal"))
         ):
             output.append({
                 "weight": row.get("weight", ""),
@@ -3296,14 +3721,11 @@ def latest_completed_straight_set(exercise_name):
     """
     ensure_data()
 
-    straight_names = {"straight", "normal"}
-
     for row in reversed(_read_csv(SETS_FILE)):
         if (
             row.get("exercise_name", "").casefold() != exercise_name.casefold()
             or row.get("completed", "1") == "0"
-            or (row.get("set_type", "Normal") or "Normal").strip().casefold()
-            not in straight_names
+            or not is_straight_set_type(row.get("set_type", "Normal"))
         ):
             continue
 
@@ -3321,6 +3743,92 @@ def latest_completed_straight_set(exercise_name):
     return None
 
 
+def latest_completed_method_session(exercise_name, training_method):
+    """Return the newest saved session for one exercise/method, including missed rows."""
+    ensure_data()
+    exercise_key = str(exercise_name or "").strip().casefold()
+    method = canonical_training_method(training_method)
+    rows = _read_csv(SETS_FILE)
+
+    grouped = {}
+    for row in rows:
+        if row.get("exercise_name", "").strip().casefold() != exercise_key:
+            continue
+        session_id = row.get("session_id", "")
+        if session_id:
+            grouped.setdefault(session_id, []).append(row)
+
+    session_methods = {}
+    for session_id, session_rows in grouped.items():
+        explicit = next(
+            (
+                str(row.get("training_method", "") or "").strip()
+                for row in session_rows
+                if str(row.get("training_method", "") or "").strip()
+            ),
+            "",
+        )
+        session_methods[session_id] = (
+            canonical_training_method(explicit)
+            if explicit
+            else infer_training_method(session_rows)
+        )
+
+    latest_session_id = ""
+    for row in reversed(rows):
+        if row.get("exercise_name", "").strip().casefold() != exercise_key:
+            continue
+        if row.get("completed", "1") == "0":
+            continue
+        if is_warmup_set_type(row.get("set_type", "Normal")):
+            continue
+        session_id = row.get("session_id", "")
+        if session_methods.get(session_id, "Straight") != method:
+            continue
+        latest_session_id = session_id
+        if latest_session_id:
+            break
+
+    if not latest_session_id:
+        return []
+
+    output = []
+    for row in grouped.get(latest_session_id, []):
+        output.append({
+            "weight": row.get("weight", ""),
+            "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+            "reps": row.get("reps", ""),
+            "rir": row.get("rir", ""),
+            "set_type": row.get("set_type", "Normal") or "Normal",
+            "training_method": method,
+            "completed": row.get("completed", "1") != "0",
+            "set_number": int(row.get("set_number", 0) or 0),
+            "session_id": latest_session_id,
+            "date": row.get("date", ""),
+        })
+    output.sort(key=lambda item: item.get("set_number", 0))
+    return output
+
+
+def latest_completed_method_anchor_set(exercise_name, training_method):
+    """Newest usable progression-anchor row for the selected training method."""
+    method = canonical_training_method(training_method)
+    rows = latest_completed_method_session(exercise_name, method)
+    for row in rows:
+        if not row.get("completed", False):
+            continue
+        if not method_calibration_anchor(method, row.get("set_type", "Normal")):
+            continue
+        try:
+            weight = float(str(row.get("weight", "") or "").strip())
+            reps = float(str(row.get("reps", "") or "").strip())
+        except (TypeError, ValueError):
+            continue
+        if weight > 0 and reps > 0:
+            return dict(row)
+    return None
+
+
 def build_active_workout(workout):
     rows = []
     started_at = ""
@@ -3328,6 +3836,9 @@ def build_active_workout(workout):
 
     for exercise in workout["exercises"]:
         exercise_name = exercise["exercise_name"]
+        training_method = resolve_training_method(
+            exercise.get("training_method", ""), exercise.get("sets", [])
+        )
 
         # Previous load may seed the active workout, but previously performed
         # reps are deliberately not surfaced as placeholders. Historical reps
@@ -3367,6 +3878,7 @@ def build_active_workout(workout):
                     "previous_rir": previous_rir,
                     "last_week_reps": history_reps,
                     "set_type": set_row.get("set_type", "Normal") or "Normal",
+                    "training_method": training_method,
                     "note": "",
                     "completed": False,
                     "calibration_done": False,
@@ -3411,12 +3923,27 @@ def save_active_workout(active):
                 "weight": row.get("weight", ""),
                 "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
                 "reps": row.get("reps", ""),
-                "rir": row.get("rir", ""),
+                "rir": (
+                    row.get("rir", "")
+                    if method_set_uses_rir(
+                        row.get("training_method", "Straight"),
+                        row.get("set_type", "Normal"),
+                    )
+                    else ""
+                ),
                 "previous_weight": row.get("previous_weight", ""),
                 "previous_reps": row.get("previous_reps", ""),
-                "previous_rir": row.get("previous_rir", ""),
+                "previous_rir": (
+                    row.get("previous_rir", "")
+                    if method_set_uses_rir(
+                        row.get("training_method", "Straight"),
+                        row.get("set_type", "Normal"),
+                    )
+                    else ""
+                ),
                 "last_week_reps": row.get("last_week_reps", ""),
                 "set_type": row.get("set_type", "Normal") or "Normal",
+                "training_method": canonical_training_method(row.get("training_method", "Straight")),
                 "note": row.get("note", ""),
                 "completed": "1" if row.get("completed", False) else "0",
                 "calibration_done": (
@@ -3444,20 +3971,68 @@ def load_active_workout():
         return None
 
     first = rows[0]
-
     started_at = first.get("started_at", "")
     timer_started = (
         first.get("timer_started", "0") == "1"
         or bool((started_at or "").strip())
     )
-
     try:
         timer_elapsed_seconds = max(
-            0,
-            int(first.get("timer_elapsed_seconds", "0") or 0),
+            0, int(first.get("timer_elapsed_seconds", "0") or 0)
         )
     except (TypeError, ValueError):
         timer_elapsed_seconds = 0
+
+    inferred_methods = {}
+    for row in rows:
+        key = str(row.get("exercise_name", "") or "").strip().casefold()
+        if not key or key in inferred_methods:
+            continue
+        same_exercise = [
+            candidate for candidate in rows
+            if str(candidate.get("exercise_name", "") or "").strip().casefold() == key
+        ]
+        explicit = next(
+            (str(candidate.get("training_method", "") or "").strip() for candidate in same_exercise
+             if str(candidate.get("training_method", "") or "").strip()),
+            "",
+        )
+        inferred_methods[key] = resolve_training_method(explicit, same_exercise)
+
+    loaded_rows = []
+    for row in rows:
+        key = str(row.get("exercise_name", "") or "").strip().casefold()
+        loaded_rows.append({
+            "exercise_name": row["exercise_name"],
+            "set_number": int(row["set_number"]),
+            "weight": row.get("weight", ""),
+            "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+            "reps": row.get("reps", ""),
+            "rir": (
+                row.get("rir", "")
+                if method_set_uses_rir(
+                    inferred_methods.get(key, "Straight"),
+                    row.get("set_type", "Normal"),
+                )
+                else ""
+            ),
+            "previous_weight": row.get("previous_weight", ""),
+            "previous_reps": row.get("previous_reps", ""),
+            "previous_rir": (
+                row.get("previous_rir", "")
+                if method_set_uses_rir(
+                    inferred_methods.get(key, "Straight"),
+                    row.get("set_type", "Normal"),
+                )
+                else ""
+            ),
+            "set_type": row.get("set_type", "Normal") or "Normal",
+            "training_method": inferred_methods.get(key, "Straight"),
+            "note": row.get("note", ""),
+            "completed": row.get("completed", "0") == "1",
+            "calibration_done": row.get("calibration_done", "0") == "1",
+            "rest_seconds": parse_duration(row.get("rest_seconds", "180"), default=180),
+        })
 
     return {
         "workout_id": first["workout_id"],
@@ -3465,28 +4040,7 @@ def load_active_workout():
         "started_at": started_at,
         "timer_started": timer_started,
         "timer_elapsed_seconds": timer_elapsed_seconds,
-        "rows": [
-            {
-                "exercise_name": row["exercise_name"],
-                "set_number": int(row["set_number"]),
-                "weight": row.get("weight", ""),
-                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
-                "reps": row.get("reps", ""),
-                "rir": row.get("rir", ""),
-                "previous_weight": row.get("previous_weight", ""),
-                "previous_reps": row.get("previous_reps", ""),
-                "previous_rir": row.get("previous_rir", ""),
-                "set_type": row.get("set_type", "Normal") or "Normal",
-                "note": row.get("note", ""),
-                "completed": row.get("completed", "0") == "1",
-                "calibration_done": row.get("calibration_done", "0") == "1",
-                "rest_seconds": parse_duration(
-                    row.get("rest_seconds", "180"),
-                    default=180,
-                ),
-            }
-            for row in rows
-        ],
+        "rows": loaded_rows,
     }
 
 
@@ -3535,11 +4089,9 @@ def _update_template_weights_from_session(workout_id, rows):
                 template["weight"] = str(completed.get("weight", "") or "")
                 template["weight_unit"] = read_settings().get("unit", "kg")
                 template["reps"] = str(completed.get("reps", "") or "")
-                # Keep a type change made during the workout as the new default.
-                template["set_type"] = (
-                    completed.get("set_type", template.get("set_type", "Normal"))
-                    or "Normal"
-                )
+                # Set roles/methods are program structure. They are persisted
+                # only when the user explicitly chooses "Save for next time"
+                # at workout completion.
                 break
 
     _write_csv(
@@ -3561,6 +4113,10 @@ def append_session(workout, rows):
         if completed:
             completed_count += 1
 
+        set_type = (row.get("set_type") or "Normal").strip() or "Normal"
+        training_method = canonical_training_method(
+            row.get("training_method", "Straight")
+        )
         clean_rows.append(
             {
                 "exercise_name": row["exercise_name"],
@@ -3568,8 +4124,15 @@ def append_session(workout, rows):
                 "weight": str(row.get("weight", "") or "").strip(),
                 "weight_unit": read_settings().get("unit", "kg"),
                 "reps": str(row.get("reps", "") or "").strip(),
-                "rir": str(row.get("rir", "") or "").strip(),
-                "set_type": (row.get("set_type") or "Normal").strip() or "Normal",
+                # RIR is meaningful only for working sets. Never persist it on
+                # warmups, even if stale UI/import state contains a value.
+                "rir": (
+                    str(row.get("rir", "") or "").strip()
+                    if method_set_uses_rir(training_method, set_type)
+                    else ""
+                ),
+                "set_type": set_type,
+                "training_method": training_method,
                 "note": str(row.get("note", "") or "").strip(),
                 "completed": completed,
             }
@@ -3614,6 +4177,7 @@ def append_session(workout, rows):
                 "reps": row["reps"],
                 "rir": row["rir"],
                 "set_type": row["set_type"],
+                "training_method": row.get("training_method", "Straight"),
                 "note": row["note"],
                 "completed": "1" if row["completed"] else "0",
             }
@@ -3688,6 +4252,7 @@ def read_session(session_id):
                 "reps": row.get("reps", ""),
                 "rir": row.get("rir", ""),
                 "set_type": row.get("set_type", "Normal") or "Normal",
+                "training_method": canonical_training_method(row.get("training_method", "Straight")),
                 "note": row.get("note", ""),
                 "completed": row.get("completed", "1") != "0",
             }
@@ -3696,10 +4261,11 @@ def read_session(session_id):
     }
 
 
-def save_session(session_id, workout_name, rows):
+def save_session(session_id, workout_name, rows, session_date=None):
     """
     Rewrite one historical session in place while preserving its original
-    session_id, timestamp and workout_id.
+    session_id and workout_id. A YYYY-MM-DD session_date may replace only the
+    calendar date while retaining the original time-of-day when one exists.
     """
     ensure_data()
 
@@ -3715,6 +4281,20 @@ def save_session(session_id, workout_name, rows):
 
     first = old_rows[0]
     date = first.get("date", "")
+    requested_date = str(session_date or "").strip()
+    if requested_date:
+        try:
+            requested_day = datetime.fromisoformat(requested_date).date().isoformat()
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Workout date must use YYYY-MM-DD.") from exc
+
+        # Completed sessions normally carry an ISO timestamp. Editing the date
+        # should not unexpectedly reset the original workout time.
+        suffix = ""
+        if len(str(date)) > 10 and str(date)[10:11] in {"T", " "}:
+            suffix = str(date)[10:]
+        date = requested_day + suffix
+
     workout_id = first.get("workout_id", "")
     cycle_id = first.get("cycle_id", "")
     cycle_microcycle = first.get("cycle_microcycle", "")
@@ -3730,6 +4310,16 @@ def save_session(session_id, workout_name, rows):
 
         counters[exercise_name] = counters.get(exercise_name, 0) + 1
 
+        set_type = (row.get("set_type") or "Normal").strip() or "Normal"
+        training_method = canonical_training_method(
+            row.get("training_method", "")
+            or next(
+                (old.get("training_method", "") for old in old_rows
+                 if old.get("exercise_name", "").casefold() == exercise_name.casefold()
+                 and old.get("training_method", "")),
+                "Straight",
+            )
+        )
         clean_rows.append(
             {
                 "session_id": session_id,
@@ -3743,8 +4333,13 @@ def save_session(session_id, workout_name, rows):
                 "weight": str(row.get("weight", "") or "").strip(),
                 "weight_unit": read_settings().get("unit", "kg"),
                 "reps": str(row.get("reps", "") or "").strip(),
-                "rir": str(row.get("rir", "") or "").strip(),
-                "set_type": (row.get("set_type") or "Normal").strip() or "Normal",
+                "rir": (
+                    str(row.get("rir", "") or "").strip()
+                    if method_set_uses_rir(training_method, set_type)
+                    else ""
+                ),
+                "set_type": set_type,
+                "training_method": training_method,
                 "note": str(row.get("note", "") or "").strip(),
                 "completed": "1" if row.get("completed", False) else "0",
             }
@@ -3829,6 +4424,61 @@ def workout_sessions(workout_id, limit=12):
                 break
 
     return list(sessions.values())
+
+
+def exercise_sessions(exercise_name, limit=100):
+    """Return completed history for one exercise, newest session first."""
+    ensure_data()
+
+    target = str(exercise_name or "").strip().casefold()
+    if not target:
+        return []
+
+    sessions = {}
+    order = []
+    default_unit = read_settings().get("unit", "kg")
+
+    # sets.csv is append-only by completed workout, so walking backward gives
+    # newest sessions first while still allowing us to sort set numbers below.
+    for row in reversed(_read_sets_cached()):
+        if str(row.get("exercise_name", "") or "").strip().casefold() != target:
+            continue
+        if row.get("completed", "1") == "0":
+            continue
+
+        session_id = str(row.get("session_id", "") or "").strip()
+        if not session_id:
+            continue
+
+        if session_id not in sessions:
+            if limit is not None and len(order) >= int(limit):
+                continue
+            sessions[session_id] = {
+                "session_id": session_id,
+                "date": row.get("date", ""),
+                "workout_id": row.get("workout_id", ""),
+                "workout_name": row.get("workout_name", ""),
+                "rows": [],
+            }
+            order.append(session_id)
+
+        sessions[session_id]["rows"].append(
+            {
+                "set_number": _positive_int(row.get("set_number"), 1),
+                "weight": row.get("weight", ""),
+                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
+                "reps": row.get("reps", ""),
+                "rir": row.get("rir", ""),
+                "set_type": row.get("set_type", "Normal") or "Normal",
+            }
+        )
+
+    result = []
+    for session_id in order:
+        session = sessions[session_id]
+        session["rows"].sort(key=lambda item: item.get("set_number", 1))
+        result.append(session)
+    return result
 
 
 def data_path():

@@ -51,7 +51,7 @@ class MesocycleMixin:
             else self.accent_color()
         )
         rir = status["suggested_rir"]
-        rir_text = f"RIR {rir:.1f}".replace(".0", "")
+        rir_text = f"RIR {int(round(float(rir)))}"
         schedule = storage.mesocycle_day_schedule(cycle.get("cycle_id", ""))
         today_workout_id = schedule.get(status.get("day_in_microcycle", 1), "")
         workout_names = {
@@ -1303,6 +1303,65 @@ class MesocycleMixin:
             root_back_to_active=as_tab,
         )
 
+    def continue_mesocycle(self, cycle_id):
+        """Resume the same mesocycle after it was ended early."""
+        source = storage.get_mesocycle(cycle_id)
+        if not source:
+            self.notify("Mesocycle not found.")
+            return
+
+        if getattr(self, "active_workout", None):
+            self.notify("Finish or discard the active workout before resuming a mesocycle.")
+            return
+
+        # A calendar-complete cycle needs its planned length extended first.
+        # Re-activating it unchanged would immediately remain in Complete phase.
+        if storage.mesocycle_status(source)["complete"]:
+            self.notify("Increase this mesocycle's length first, then resume it.")
+            if source.get("active", "0") == "1":
+                self.show_mesocycle_plan()
+            return
+
+        active = storage.active_mesocycle()
+        source_id = str(source.get("cycle_id", "") or "")
+        active_id = str((active or {}).get("cycle_id", "") or "")
+
+        def resume(dialog=None):
+            if dialog is not None:
+                self.close_dialog(dialog)
+            resumed_id = storage.continue_mesocycle(source_id)
+            if not resumed_id:
+                self.notify("Could not resume mesocycle.")
+                return
+            self.notify("Mesocycle resumed.")
+            self.show_mesocycle()
+
+        if active and active_id != source_id:
+            dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Resume this mesocycle?"),
+                content=ft.Text(
+                    "A different mesocycle is currently active. Resuming this one "
+                    "will end the current active cycle and reactivate this exact "
+                    "mesocycle with its original start date, workout rotation, and calibration."
+                ),
+                actions=[
+                    self.outlined_button(
+                        "Cancel",
+                        on_click=lambda e: self.close_dialog(dialog),
+                    ),
+                    ft.OutlinedButton(
+                        content="Resume mesocycle",
+                        on_click=lambda e: resume(dialog),
+                        style=self.button_style(),
+                    ),
+                ],
+            )
+            self.page.show_dialog(dialog)
+            return
+
+        resume()
+
     def show_previous_mesocycle_editor(self, cycle_id):
         cycle = storage.get_mesocycle(cycle_id)
         if not cycle or cycle.get("active", "0") == "1":
@@ -1405,7 +1464,7 @@ class MesocycleMixin:
         deload_count.on_blur = refresh_suffixes
         refresh_suffixes()
 
-        def save_previous(e=None):
+        def save_previous(e=None, refresh=True):
             valid = True
             fields = [name_field, start_field, length_value, deload_count]
             if advanced:
@@ -1446,7 +1505,7 @@ class MesocycleMixin:
 
             if not valid:
                 self.page.update()
-                return
+                return False
 
             storage.update_mesocycle(cycle_id, config)
             storage.save_mesocycle_day_schedule(
@@ -1454,8 +1513,16 @@ class MesocycleMixin:
                 storage.mesocycle_day_schedule(cycle_id),
                 microcycle_days=max(1, field_int(micro_days, 7)),
             )
-            self.notify("Previous mesocycle saved.")
-            self.show_previous_mesocycle_editor(cycle_id)
+            if refresh:
+                self.notify("Previous mesocycle saved.")
+                self.show_previous_mesocycle_editor(cycle_id)
+            return True
+
+        def continue_previous(e=None):
+            # Continue exactly what is visible in the editor, not a stale saved
+            # copy if the user changed the plan fields immediately beforehand.
+            if save_previous(refresh=False):
+                self.continue_mesocycle(cycle_id)
 
         def confirm_delete(e=None):
             dialog = ft.AlertDialog(
@@ -1558,7 +1625,7 @@ class MesocycleMixin:
                 content=ft.Row(
                     controls=[
                         ft.Icon(ft.Icons.CALENDAR_MONTH),
-                        ft.Text("Edit Cycle Calendar", expand=True, weight=ft.FontWeight.BOLD),
+                        ft.Text("Edit Repeating Workout Schedule", expand=True, weight=ft.FontWeight.BOLD),
                         ft.Icon(ft.Icons.CHEVRON_RIGHT),
                     ]
                 ),
@@ -1567,6 +1634,15 @@ class MesocycleMixin:
         self.set_view(
             controls,
             header=header,
+            footer=ft.Row(
+                controls=[
+                    self.outlined_button(
+                        "Resume mesocycle",
+                        on_click=continue_previous,
+                    ),
+                    ft.Container(expand=True),
+                ]
+            ),
             back_action=self.show_workout_history,
         )
 
@@ -1813,6 +1889,62 @@ class MesocycleMixin:
 
         cycle = storage.active_mesocycle()
         if not cycle:
+            # Ending a cycle is easy to do accidentally.  If the most recent
+            # ended cycle has not reached its planned end date, offer a direct
+            # same-cycle resume instead of immediately pushing the user into a
+            # brand-new mesocycle flow.
+            resumable = next(
+                (
+                    row
+                    for row in storage.mesocycle_history(limit=12)
+                    if row.get("active", "0") != "1"
+                    and not storage.mesocycle_status(row)["complete"]
+                ),
+                None,
+            )
+            if resumable:
+                name = resumable.get("name", "Mesocycle")
+                status = storage.mesocycle_status(resumable)
+                controls = [
+                    ft.Text("No active mesocycle", size=self.fs(28), weight=ft.FontWeight.BOLD),
+                    ft.Container(
+                        width=float("inf"),
+                        padding=ft.Padding(
+                            left=self.ui(11), top=self.ui(10), right=self.ui(11), bottom=self.ui(10)
+                        ),
+                        border=ft.Border.all(1, ft.Colors.GREY_700),
+                        border_radius=self.rounding(),
+                        content=ft.Column(
+                            controls=[
+                                ft.Text(name, size=self.fs(18), weight=ft.FontWeight.BOLD),
+                                ft.Text(
+                                    f"Ended early · day {status['day_in_microcycle']} of "
+                                    f"{resumable.get('microcycle_days', '7')}",
+                                    size=self.fs(11.5),
+                                    color=ft.Colors.GREY_500,
+                                ),
+                                ft.Text(
+                                    "Resume keeps the same start date, workout rotation, "
+                                    "history, and calibration.",
+                                    size=self.fs(11),
+                                ),
+                            ],
+                            spacing=self.ui(4),
+                        ),
+                    ),
+                    self.filled_button(
+                        f"Resume {name}",
+                        on_click=lambda e, cid=resumable.get("cycle_id", ""): self.continue_mesocycle(cid),
+                        expand=True,
+                    ),
+                    self.outlined_button(
+                        "Start new mesocycle",
+                        on_click=lambda e: self.show_mesocycle_plan(as_tab_root=True),
+                        expand=True,
+                    ),
+                ]
+                self.set_view(controls, root_back_to_active=True)
+                return
             self.show_mesocycle_plan(as_tab_root=True)
             return
         if cycle.get("setup_complete", "1") == "0":
@@ -1879,7 +2011,7 @@ class MesocycleMixin:
         rest_timer_lock.on_change = lambda e: save_cycle_flags()
 
         rir = status["suggested_rir"]
-        rir_text = f"{rir:.1f}".rstrip("0").rstrip(".")
+        rir_text = str(int(round(float(rir))))
         phase = status["phase"]
 
         status_box = ft.Container(
@@ -1983,18 +2115,26 @@ class MesocycleMixin:
             self.notify("Mesocycle ended.")
             self.show_mesocycle()
 
+        footer_controls = [ft.Container(expand=True)]
+        if status["complete"]:
+            footer_controls.append(
+                ft.OutlinedButton(
+                    content="Extend mesocycle",
+                    on_click=lambda e: self.show_mesocycle_plan(),
+                    style=self.button_style(),
+                )
+            )
+        footer_controls.append(
+            ft.OutlinedButton(
+                content="End mesocycle",
+                on_click=end_cycle,
+                style=self.button_style(),
+            )
+        )
+
         self.set_view(
             controls,
-            footer=ft.Row(
-                controls=[
-                    ft.Container(expand=True),
-                    ft.OutlinedButton(
-                        content="End mesocycle",
-                        on_click=end_cycle,
-                        style=self.button_style(),
-                    ),
-                ]
-            ),
+            footer=ft.Row(controls=footer_controls),
             root_back_to_active=True,
         )
 
@@ -2186,6 +2326,11 @@ class MesocycleMixin:
 
             for day_number in range(1, days + 1):
                 workout_id = str(planner_state.get(day_number, "") or "")
+                # A deleted workout must not remain as an invisible dangling
+                # assignment that still passes the "has a plan" validation.
+                if workout_id and workout_id not in names:
+                    workout_id = ""
+                    planner_state[day_number] = ""
                 workout_name = names.get(workout_id, "") or "Rest"
                 day_label = f"Day {day_number}"
                 if weekly and start_date is not None:
@@ -2318,8 +2463,7 @@ class MesocycleMixin:
                 deload_suffix.value = (
                     "microcycle" if deload_value == 1 else "microcycles"
                 )
-            if not active:
-                render_planner(update_page=False)
+            render_planner(update_page=False)
             if update_page:
                 self.page.update()
 
@@ -2329,7 +2473,7 @@ class MesocycleMixin:
         micro_days.on_blur = refresh_period_on_blur
         length_value.on_blur = refresh_period_on_blur
         deload_count.on_blur = refresh_period_on_blur
-        start_field.on_blur = lambda e: render_planner(update_page=True) if not active else None
+        start_field.on_blur = lambda e: render_planner(update_page=True)
         refresh_period_labels(update_page=False)
 
         def build_config():
@@ -2383,14 +2527,13 @@ class MesocycleMixin:
                 else:
                     self.clear_field_invalid(deload_count)
 
-            if not active:
-                planned = any(
-                    str(planner_state.get(day, "") or "").strip()
-                    for day in range(1, current_micro_days() + 1)
-                )
-                if not planned:
-                    planner_error.visible = True
-                    valid = False
+            planned = any(
+                str(planner_state.get(day, "") or "").strip()
+                for day in range(1, current_micro_days() + 1)
+            )
+            if not planned:
+                planner_error.visible = True
+                valid = False
 
             if not valid:
                 self.page.update()
@@ -2464,30 +2607,29 @@ class MesocycleMixin:
 
         controls.append(self.mesocycle_rir_logging_card())
 
-        if not active:
-            controls.append(
-                ft.Container(
-                    width=float("inf"),
-                    padding=ft.Padding(
-                        left=self.ui(10),
-                        top=self.ui(9),
-                        right=self.ui(10),
-                        bottom=self.ui(9),
-                    ),
-                    border=ft.Border.all(1, ft.Colors.GREY_700),
-                    border_radius=self.rounding(),
-                    content=ft.Column(
-                        controls=[
-                            planner_title,
-                            planner_help,
-                            planner_days,
-                            planner_error,
-                        ],
-                        spacing=self.ui(7),
-                    ),
-                )
+        controls.append(
+            ft.Container(
+                width=float("inf"),
+                padding=ft.Padding(
+                    left=self.ui(10),
+                    top=self.ui(9),
+                    right=self.ui(10),
+                    bottom=self.ui(9),
+                ),
+                border=ft.Border.all(1, ft.Colors.GREY_700),
+                border_radius=self.rounding(),
+                content=ft.Column(
+                    controls=[
+                        planner_title,
+                        planner_help,
+                        planner_days,
+                        planner_error,
+                    ],
+                    spacing=self.ui(7),
+                ),
             )
-        else:
+        )
+        if active:
             controls.extend([
                 ft.Container(
                     width=float("inf"),
@@ -2499,7 +2641,7 @@ class MesocycleMixin:
                     content=ft.Row(
                         controls=[
                             ft.Icon(ft.Icons.CALENDAR_MONTH),
-                            ft.Text("Cycle Calendar", expand=True, weight=ft.FontWeight.BOLD),
+                            ft.Text("View Cycle Calendar", expand=True, weight=ft.FontWeight.BOLD),
                             ft.Icon(ft.Icons.CHEVRON_RIGHT),
                         ]
                     ),
