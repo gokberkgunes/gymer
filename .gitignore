@@ -10,3 +10,7 @@ key.properties
 .env
 
 .flet/
+
+# Local audit output and scratch scripts.
+/reports/
+/scripts/
