@@ -9,9 +9,37 @@ import flet as ft
 
 import storage
 import progression
+import load_modes
+import protocols
+import deloads
+import volume_accounting
+import rest_scopes
+import set_context
 
 
 class WorkoutMixin:
+    def workout_cycle(self):
+        if self.active_workout and "performed_at" in self.active_workout:
+            return storage.get_mesocycle(self.active_workout.get("cycle_id", ""))
+        return storage.active_mesocycle()
+
+    def workout_cycle_status(self, cycle):
+        status = storage.mesocycle_status(cycle)
+        if self.active_workout and "performed_at" in self.active_workout:
+            active = self.active_workout
+            status.update(phase=active.get("cycle_phase", ""),
+                          current_microcycle=int(active.get("cycle_microcycle") or 1),
+                          suggested_rir=float(active.get("cycle_target_rir") or 0))
+        return status
+
+    def exercise_load_mode(self, exercise_name):
+        for row in (self.active_workout or {}).get("rows", []):
+            if row.get("exercise_name", "").casefold() == exercise_name.casefold():
+                if row.get("load_mode"):
+                    return load_modes.normalize(row["load_mode"])
+                break
+        return storage.read_exercise_details(exercise_name)["load_mode"]
+
 
     def show_workout_tab(self):
         self.page.navigation_bar.selected_index = 0
@@ -132,8 +160,15 @@ class WorkoutMixin:
                             ),
                             content=ft.Row(
                                 controls=[
-                                    ft.Text(
-                                        session["workout_name"],
+                                    ft.Column(
+                                        controls=[
+                                            ft.Text(session["workout_name"]),
+                                            ft.Text(
+                                                f'{session["completed_count"]}/{session["planned_count"]} entries completed',
+                                                size=self.fs(11),
+                                            ),
+                                        ],
+                                        spacing=self.ui(2),
                                         expand=True,
                                     ),
                                     ft.Text(
@@ -294,23 +329,27 @@ class WorkoutMixin:
         )
         self.workout_elapsed_text = ft.Text(
             self.format_workout_elapsed(),
-            size=self.fs(18),
+            size=18 * self.font_scale(),
             weight=ft.FontWeight.BOLD,
             text_align=ft.TextAlign.CENTER,
             no_wrap=True,
         )
         self.workout_target_text = ft.Text(
             f"~{self.format_target_duration(storage.estimate_active_workout_seconds(self.active_workout))}",
-            size=self.fs(9.5),
-            color=ft.Colors.GREY_500,
+            size=11 * self.font_scale(),
+            color=self.foreground_color(),
             text_align=ft.TextAlign.CENTER,
         )
 
         # Fixed icon and time slots prevent 00:00 from moving. The icon
         # slot stays reserved even while the running-state icon is hidden.
+        self.workout_clock_status_text = ft.Text(
+            "Not started", size=11 * self.font_scale(),
+            text_align=ft.TextAlign.CENTER,
+        )
         timer_content = ft.Container(
-            width=self.ui(108),
-            height=self.ui(52),
+            width=max(108, 110 * self.font_scale()),
+            height=max(68, 68 * self.font_scale()),
             alignment=ft.Alignment.CENTER,
             ink=True,
             tooltip="Tap to start/pause/resume · hold to reset",
@@ -340,8 +379,8 @@ class WorkoutMixin:
                                 ),
                             ),
                             ft.Container(
-                                width=self.ui(58),
-                                height=self.ui(27),
+                                width=max(70, 70 * self.font_scale()),
+                                height=max(27, 27 * self.font_scale()),
                                 alignment=ft.Alignment.CENTER,
                                 content=self.workout_elapsed_text,
                             ),
@@ -351,8 +390,9 @@ class WorkoutMixin:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.workout_target_text,
+                    self.workout_clock_status_text,
                 ],
-                spacing=-2,
+                spacing=0,
                 tight=True,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -366,8 +406,8 @@ class WorkoutMixin:
                 left=self.ui(12), top=self.ui(8),
                 right=self.ui(12), bottom=self.ui(8),
             ),
-            content=ft.Row(
-                controls=[
+            content=ft.Column(
+                controls=[ft.Row(controls=[
                     ft.Column(
                         controls=[
                             ft.Text(
@@ -384,12 +424,10 @@ class WorkoutMixin:
                         alignment=ft.MainAxisAlignment.CENTER,
                     ),
                     timer_box,
-                    edit_button,
-                    save_button,
-                    delete_button,
-                ],
+                ], spacing=self.ui(6), vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                ft.Row(controls=[edit_button, save_button, delete_button],
+                       wrap=True, alignment=ft.MainAxisAlignment.END, spacing=self.ui(6))],
                 spacing=self.ui(6),
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
         )
 
@@ -428,9 +466,14 @@ class WorkoutMixin:
 
         previous = storage.latest_exercise_values(exercise_name)
         rows = []
+        details = storage.read_exercise_details(exercise_name)
+        mode = details["load_mode"]
 
         for set_number, set_row in enumerate(template_sets, start=1):
             prev = previous.get(set_number, {})
+            row_context = set_context.resolve(set_row, details)
+            if load_modes.normalize(prev.get("load_mode", "external")) != mode or not set_context.matches(prev, row_context):
+                prev = {}
             rows.append(
                 {
                     "exercise_name": exercise_name,
@@ -445,9 +488,15 @@ class WorkoutMixin:
                     # A configured template rep value may still be used internally,
                     # but historical reps are not shown as workout ghost text.
                     "previous_reps": str(set_row.get("reps", "") or ""),
-                    "previous_rir": str(prev.get("rir", "") or ""),
+                    "previous_rir": "",
+                    "load_mode": mode,
+                    **row_context,
+                    "context_override": set_context.template_metadata(set_row)["context_override"],
+                    "target_rir": self.cycle_rir_target() or "",
                     "set_type": set_row.get("set_type", "Normal") or "Normal",
                     "training_method": training_method,
+                    "planned_work_count": str(sum(not storage.is_warmup_set_type(item.get("set_type", "Normal")) for item in template_sets)),
+                    "protocol_group_start": set_row.get("protocol_group_start", ""),
                     "note": "",
                     "completed": False,
                     "calibration_done": False,
@@ -458,7 +507,7 @@ class WorkoutMixin:
                 }
             )
 
-        return rows
+        return storage.initialize_volume_rows(rows)
 
     def add_exercise_to_active_workout(self, exercise_name):
         exercise_name = (exercise_name or "").strip()
@@ -522,6 +571,8 @@ class WorkoutMixin:
             return
 
         self.set_controls = []
+        # Old row controls are replaced below; reattach the timer after capture.
+        self.timer_inline_item = None
 
         completed = sum(
             1
@@ -533,7 +584,7 @@ class WorkoutMixin:
         cycle_rir = self.cycle_rir_target()
         progress_value = f"{completed}/{total} sets"
         if cycle_rir is not None:
-            progress_value = f"{cycle_rir} RIR · {progress_value}"
+            progress_value = f"Target {cycle_rir} RIR · {progress_value}"
 
         self.active_progress_text = ft.Text(
             progress_value,
@@ -577,24 +628,34 @@ class WorkoutMixin:
         )
 
     def exercise_progression_recommendation(self, exercise_name, training_method="Straight"):
-        cycle = storage.active_mesocycle()
+        if self.exercise_load_mode(exercise_name) != "external":
+            return None
+        cycle = self.workout_cycle()
         if not cycle:
             return None
-        status = storage.mesocycle_status(cycle)
+        status = self.workout_cycle_status(cycle)
         if status.get("phase") not in {"Build", "Deload"}:
             return None
+        if status.get("phase") == "Deload":
+            return None  # Frozen per-row recovery prescriptions own this phase.
 
         training_method = storage.canonical_training_method(training_method)
+        details = storage.read_exercise_details(exercise_name)
         if training_method == "Straight":
-            rows = storage.latest_completed_straight_session(exercise_name)
+            if not self.straight_load_guidance_allowed(exercise_name):
+                return None
+            rows = storage.latest_completed_straight_session(
+                exercise_name, workout_id=self.active_workout.get("workout_id")
+            )
         else:
             rows = storage.latest_completed_method_session(
-                exercise_name, training_method
+                exercise_name, training_method, workout_id=self.active_workout.get("workout_id")
             )
         if not rows:
             return None
 
         unit = self.settings.get("unit", "kg")
+        rows = [{**row, "weight": storage.convert_weight_value(row.get("weight", ""), row.get("weight_unit") or unit, unit)} for row in rows]
         return progression.method_progression_recommendation(
             rows,
             method=training_method,
@@ -604,24 +665,60 @@ class WorkoutMixin:
             weight_increment=storage.exercise_weight_increment(
                 exercise_name, unit, settings=self.settings
             ),
+            rep_min=details["straight_rep_min"], rep_max=details["straight_rep_max"],
+            policy=details["straight_progression"],
+            expected_set_count=sum(
+                1 for row in self.active_workout.get("rows", [])
+                if row.get("exercise_name") == exercise_name and storage.is_straight_set_type(row.get("set_type", "Normal"))
+            ) if training_method == "Straight" else sum(
+                1 for row in self.active_workout.get("rows", [])
+                if row.get("exercise_name") == exercise_name and not storage.is_warmup_set_type(row.get("set_type", "Normal"))
+            ),
+            planned_rows=[row for row in self.active_workout.get("rows", []) if row.get("exercise_name") == exercise_name],
         )
 
     def historical_reps_visible_in_workout(self):
         """Historical reps stay hidden in mesocycles unless Advanced Mode opts in."""
-        if not storage.active_mesocycle():
+        if not self.workout_cycle():
             return True
         return (
             self.advanced_mode_enabled()
             and self.settings.get("show_previous_reps", "0") == "1"
         )
 
+    def straight_load_guidance_allowed(self, exercise_name):
+        if storage.read_exercise_details(exercise_name)["straight_progression"] == "manual":
+            return False
+        context_rows = [row for row in (self.active_workout or {}).get("rows", []) if row.get("exercise_name") == exercise_name]
+        if set_context.comparison_error(context_rows):
+            return False
+        loads = []
+        for row in (self.active_workout or {}).get("rows", []):
+            if row.get("exercise_name") != exercise_name or not storage.is_straight_set_type(row.get("set_type", "Normal")):
+                continue
+            value = progression._number(row.get("weight") or row.get("previous_weight"))
+            if value is not None and value > 0:
+                loads.append(value)
+        return not loads or max(loads) - min(loads) < 1e-6
+
     def first_mesocycle_exercise_intro_available(self, exercise_name):
         """Require one first-set calibration per workout/exercise in a mesocycle."""
-        cycle = storage.active_mesocycle()
+        if self.exercise_load_mode(exercise_name) != "external":
+            return False
+        method = next((row.get("training_method", "Straight") for row in (self.active_workout or {}).get("rows", [])
+                       if row.get("exercise_name") == exercise_name), "Straight")
+        context_rows = [row for row in (self.active_workout or {}).get("rows", []) if row.get("exercise_name") == exercise_name]
+        if set_context.comparison_error(context_rows):
+            return False
+        if storage.canonical_training_method(method) == "Mechanical Drop Set":
+            return False
+        if storage.canonical_training_method(method) == "Straight" and not self.straight_load_guidance_allowed(exercise_name):
+            return False
+        cycle = self.workout_cycle()
         if not cycle or not self.active_workout:
             return False
 
-        status = storage.mesocycle_status(cycle)
+        status = self.workout_cycle_status(cycle)
         # Calibration is a build-phase baseline. If an exercise first appears
         # later in the mesocycle, it still gets calibrated on that first encounter.
         if status.get("phase") != "Build":
@@ -720,6 +817,7 @@ class WorkoutMixin:
         """Return method-aware history and a first-session calibration load hint."""
         training_method = storage.canonical_training_method(training_method)
         unit = self.settings.get("unit", "kg")
+        details = storage.read_exercise_details(exercise_name)
 
         latest = storage.latest_completed_method_anchor_set(
             exercise_name, training_method
@@ -736,27 +834,36 @@ class WorkoutMixin:
         elif training_method == "Straight":
             latest = storage.latest_completed_straight_set(exercise_name)
             source_label = "Latest straight set"
+        if training_method != "Straight" and (not recommendation or not recommendation.get("apply_weight", False)):
+            # A different/unknown protocol or setup is not a comparable RM source.
+            latest = None
 
         latest_weight = ""
         latest_reps = ""
         latest_rir = ""
         suggested_weight = ""
         target_reps = progression.CALIBRATION_TARGET_REPS
+        if training_method == "Straight":
+            target_reps = (int(details["straight_rep_min"]) + int(details["straight_rep_max"])) // 2
         target_rir = 0
-        uses_rir = training_method == "Straight"
+        uses_rir = training_method != "Cluster"
 
-        cycle = storage.active_mesocycle()
+        cycle = self.workout_cycle()
         if cycle:
-            target_rir = storage.mesocycle_status(cycle).get("suggested_rir", 0)
+            target_rir = self.workout_cycle_status(cycle).get("suggested_rir", 0)
 
-        if latest:
+        current_rows = [row for row in (self.active_workout or {}).get("rows", []) if row.get("exercise_name") == exercise_name]
+        if latest and set_context.comparison_error([latest], current_rows):
+            latest = None
+
+        if latest and latest.get("load_mode", "external") == "external":
             try:
                 weight_value = float(str(latest.get("weight", "") or "").strip())
                 reps_value = float(str(latest.get("reps", "") or "").strip())
                 latest_weight = progression.format_weight(weight_value)
                 latest_reps = f"{reps_value:g}"
                 raw_rir = str(latest.get("rir", "") or "").strip()
-                rir_value = float(raw_rir) if raw_rir else 0.0
+                rir_value = float(raw_rir) if raw_rir else None
                 latest_rir = f"{rir_value:g}" if raw_rir else ""
 
                 calibration = progression.method_calibration_recommendation(
@@ -769,6 +876,7 @@ class WorkoutMixin:
                     weight_increment=storage.exercise_weight_increment(
                         exercise_name, unit, settings=self.settings
                     ),
+                    rep_min=details["straight_rep_min"], rep_max=details["straight_rep_max"],
                 )
                 if calibration:
                     suggested_weight = calibration.get("weight_text", "")
@@ -783,7 +891,7 @@ class WorkoutMixin:
                 latest_reps = ""
                 latest_rir = ""
 
-        if not suggested_weight and recommendation:
+        if not suggested_weight and recommendation and recommendation.get("apply_weight", True):
             suggested_weight = str(recommendation.get("weight_text", "") or "")
             target_reps = recommendation.get("target_reps", target_reps)
             uses_rir = bool(recommendation.get("uses_rir", uses_rir))
@@ -811,7 +919,7 @@ class WorkoutMixin:
         if not self.first_mesocycle_exercise_intro_available(exercise_name):
             return
 
-        cycle = storage.active_mesocycle()
+        cycle = self.workout_cycle()
         if not cycle or not self.active_workout:
             return
 
@@ -886,8 +994,8 @@ class WorkoutMixin:
             segment_name = "cluster set"
         elif training_method == "AMRAP":
             calibration_copy = (
-                "Record the AMRAP set. RIR is implicit at 0, so only weight and reps "
-                "are needed."
+                "Record the AMRAP set and actual RIR if known. The method's name "
+                "does not prove muscular failure."
             )
             segment_name = "AMRAP set"
         else:
@@ -975,13 +1083,13 @@ class WorkoutMixin:
         hint = (
             f"The load hint aims for about {calibration_target_reps} reps. Record what "
             "you actually achieve; calibration is not rejected if you land outside "
-            "8–12 reps."
+            "the planned rep range."
         )
         if uses_rir and calibration_target_rir is not None:
             hint = (
                 f"The load hint aims for about {calibration_target_reps} reps at "
                 f"{float(calibration_target_rir):g} RIR. Record what you actually "
-                "achieve; calibration is not rejected if you land outside 8–12 reps."
+                "achieve; calibration is not rejected if you land outside the planned rep range."
             )
 
         controls.extend(
@@ -992,7 +1100,7 @@ class WorkoutMixin:
                     spacing=6 * calibration_scale,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                ft.Text(hint, size=self.fs(10), color=ft.Colors.GREY_500),
+                ft.Text(hint, size=self.fs(10), color=self.contrast_text_color("muted")),
             ]
         )
 
@@ -1112,7 +1220,7 @@ class WorkoutMixin:
                 ft.Text(
                     detail,
                     size=self.fs(10),
-                    color=ft.Colors.GREY_500,
+                    color=self.contrast_text_color("muted"),
                     max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 )
@@ -1155,7 +1263,7 @@ class WorkoutMixin:
 
     def complete_mesocycle_exercise_calibration(self, target):
         """Record unsaved calibration and expose load guidance for later sets."""
-        cycle = storage.active_mesocycle()
+        cycle = self.workout_cycle()
         if not cycle or not self.active_workout:
             return
 
@@ -1179,7 +1287,7 @@ class WorkoutMixin:
             )
 
         weight_text = self.logical_text_value(target.get("weight").value)
-        if not weight_text:
+        if not weight_text or not target.get("allow_load_guidance", True):
             return
 
         training_method = storage.canonical_training_method(
@@ -1205,7 +1313,7 @@ class WorkoutMixin:
             if item.get("set_number", 0) <= target.get("set_number", 0):
                 continue
             work_index += 1
-            if item.get("completed"):
+            if item.get("completed") or not set_context.matches(target, item):
                 continue
             if not storage.method_progression_managed_set(
                 training_method, item.get("set_type", "Normal")
@@ -1232,113 +1340,190 @@ class WorkoutMixin:
             if unit_label is not None:
                 unit_label.visible = True
 
+    def edit_protocol_details(self, row, on_saved, *, historical=False):
+        """Edit reported context without inventing timing or an effort outcome."""
+        context_controls = {key: ft.Dropdown(label=label, value=row.get(key) or "",
+            options=[ft.DropdownOption(key=value, text=text) for value,text in set_context.OPTIONS[key].items()])
+            for key,label in set_context.LABELS.items()}
+        setup = self.text_field(label="Setup / variation", value=row.get("setup", ""),
+                                hint_text="Machine, handle, position or leverage variant")
+        stop = ft.Dropdown(label="Observed stop reason", value=row.get("stop_reason", ""),
+                           options=[ft.DropdownOption(key=key, text=label) for key, label in protocols.STOP_REASONS.items()])
+        planned = self.text_field(label="Planned rest after segment (seconds)", value=str(row.get("rest_seconds", "")), numeric_kind="seconds")
+        planned.read_only = not historical and self.cycle_locks().get("rest_timer_lock", False)
+        actual = self.text_field(label="Actual rest after segment (seconds)", value=row.get("actual_rest_seconds", ""),
+                                 hint_text="Leave blank if unknown", numeric_kind="seconds")
+
+        def save_details(e):
+            valid = self.normalize_numeric_control(planned, kind="seconds", allow_empty=True)
+            valid = self.normalize_numeric_control(actual, kind="seconds", allow_empty=True) and valid
+            if not valid:
+                self.page.update()
+                return
+            row.update({key: control.value or "" for key,control in context_controls.items()})
+            row.update(setup=str(setup.value or "").strip(), stop_reason=stop.value or "",
+                       actual_rest_seconds=str(actual.value or "").strip())
+            row["rest_seconds"] = str(planned.value or "").strip() if historical else storage.parse_duration(planned.value, default=0)
+            self.close_dialog(dialog)
+            on_saved()
+
+        dialog = ft.AlertDialog(title=ft.Text("Protocol details"), content=ft.Column(controls=[
+            ft.Text(f"Planned working segments at start: {row.get('planned_work_count') or 'unknown'}"),
+            ft.Text(volume_accounting.context_summary(row), size=self.fs(11)),
+            setup, *context_controls.values(),
+            ft.Text("These labels do not convert load or reps. Correct the recorded numbers separately if their meaning was wrong.", size=self.fs(11)),
+            stop, planned, actual,
+            ft.Text("Actual rest is your reported rest after this segment, not the timer setting. Unknown records remain blank. Removing a segment does not reduce the original planned count.", size=self.fs(11)),
+        ], tight=True, scroll=ft.ScrollMode.AUTO), actions=[
+            self.outlined_button("Cancel", on_click=lambda e: self.close_dialog(dialog)),
+            self.filled_button("Save protocol details", on_click=save_details),
+        ])
+        self.page.show_dialog(dialog)
+
     def show_exercise_rest_editor(self, exercise_name):
-        """Set one planned rest time for every set of an active exercise."""
+        """Choose explicit unfinished planned rests or edit only the live countdown."""
         if not self.active_workout:
             return
-
-        if storage.active_cycle_locks().get("rest_timer_lock", False):
+        if self.cycle_locks().get("rest_timer_lock", False):
             self.notify("Rest times are locked by the active mesocycle.")
             return
-
         if self.set_controls:
             self.capture_active_controls()
 
-        rows = [
-            row
-            for row in self.active_workout.get("rows", [])
-            if row.get("exercise_name") == exercise_name
-        ]
+        def exercise_rows():
+            return sorted([row for row in (self.active_workout or {}).get("rows", [])
+                           if row.get("exercise_name") == exercise_name],
+                          key=lambda row: int(row.get("set_number", 0) or 0))
+
+        rows = exercise_rows()
         if not rows:
             return
-
-        rows.sort(key=lambda row: int(row.get("set_number", 0) or 0))
-        current_seconds = storage.parse_duration(
-            rows[0].get("rest_seconds", 180), default=180
-        )
+        session_id = self.active_workout.get("session_id")
+        original_signature = rest_scopes.signature(rows)
+        choices = rest_scopes.targets(rows)
+        timer_available = self.timer_started_at is not None and self.timer_exercise_name == exercise_name
+        original_timer = (self.timer_started_epoch, self.timer_set_number, self.timer_total_seconds) if timer_available else None
+        if not choices and not timer_available:
+            self.notify("No unfinished rests or running timer for this exercise.")
+            return
+        self.unregister_text_fields(*getattr(self, "rest_editor_fields", []))
         rest_field = self.text_field(
-            label="Rest timer",
-            value=storage.format_duration(current_seconds),
-            width=self.ui(150),
-            dense=True,
-            text_align=ft.TextAlign.CENTER,
+            label="Rest after entry (seconds or m:ss)", value="", hint_text="e.g. 90 or 1:30",
+            dense=True, text_size=14 * self.font_scale(),
+            label_style=ft.TextStyle(size=11 * self.font_scale()),
             keyboard_type=ft.KeyboardType.NUMBER,
         )
-        rest_field.hint_text = "3:00"
+        self.rest_editor_fields = [rest_field]
+        preview = ft.Text("Choose which rests to change.", size=12 * self.font_scale())
+        options = [ft.DropdownOption(key=key, text=f"{rest_scopes.LABELS.get(key, 'Set ' + key.split(':')[-1])} ({len(numbers)})")
+                   for key, numbers in choices.items()]
+        if timer_available:
+            options.append(ft.DropdownOption(key="timer", text="Running timer only"))
+        scope = ft.Dropdown(label="Apply to unfinished entries / timer", options=options, value=None,
+                            text_size=14 * self.font_scale())
 
-        def focus_rest(e):
-            rest_field.value = str(
-                storage.parse_duration(rest_field.value, default=current_seconds)
-            )
+        def dismiss(e=None):
+            self.unregister_text_fields(rest_field)
+            self.close_dialog(dialog)
+
+        def update_scope(e):
+            self.focused_text_field = None
+            self.clear_field_invalid(rest_field)
+            rest_field.error_text = None
+            if scope.value == "timer":
+                rest_field.value = storage.format_duration(self.timer_total_seconds)
+                preview.value = "Changes only the running timer's total duration. Elapsed time and planned rests stay as recorded. Zero dismisses this timer."
+            else:
+                numbers = choices.get(scope.value, [])
+                values = {storage.parse_duration(row.get("rest_seconds"), default=180)
+                          for row in rows if int(row["set_number"]) in numbers}
+                rest_field.value = storage.format_duration(next(iter(values))) if len(values) == 1 else ""
+                preview.value = ("Sets " + ", ".join(map(str, numbers)) + ": "
+                                 + ("current rest " + storage.format_duration(next(iter(values))) if len(values) == 1
+                                    else "mixed current rests; enter the duration to apply."))
+                if scope.value == "all_pending":
+                    preview.value += " Includes unfinished warmups and protocol fragments."
+            save_button.disabled = scope.value not in choices and scope.value != "timer"
             self.page.update()
-
-        def blur_rest(e):
-            seconds = storage.parse_duration(
-                rest_field.value, default=current_seconds
-            )
-            rest_field.value = storage.format_duration(seconds)
-            self.page.update()
-
-        rest_field.on_focus = focus_rest
-        rest_field.on_blur = blur_rest
 
         def save_rest_time(e):
-            seconds = storage.parse_duration(
-                rest_field.value, default=current_seconds
-            )
-            for row in rows:
-                set_number = int(row.get("set_number", 0) or 0)
-                row["rest_seconds"] = seconds
-
-                item = self.find_set_item(exercise_name, set_number)
-                active_timer_set = (
-                    self.timer_started_at is not None
-                    and self.timer_exercise_name == exercise_name
-                    and self.timer_set_number == set_number
-                )
-                if item is not None:
-                    item["rest_seconds"] = seconds
-                    label = item.get("timer_label")
-                    if label is not None and not active_timer_set:
-                        label.value = storage.format_duration(seconds)
-
-            if (
-                self.timer_started_at is not None
-                and self.timer_exercise_name == exercise_name
-            ):
-                self.timer_total_seconds = seconds
-
-            storage.save_active_workout(self.active_workout)
+            if self.cycle_locks().get("rest_timer_lock", False):
+                self.notify("Rest times are locked by the active mesocycle.")
+                return
+            if (not self.active_workout or self.active_workout.get("session_id") != session_id
+                    or rest_scopes.signature(exercise_rows()) != original_signature):
+                self.notify("This workout changed. Close and reopen the rest editor.")
+                return
+            if scope.value not in choices and not (scope.value == "timer" and timer_available):
+                self.notify("Choose which rests to change.")
+                return
+            try:
+                seconds = rest_scopes.duration(rest_field.value)
+            except ValueError as error:
+                rest_field.error_text = str(error)
+                self.page.update()
+                return
+            if scope.value == "timer":
+                if (self.timer_started_at is None or self.timer_exercise_name != exercise_name
+                        or (self.timer_started_epoch, self.timer_set_number, self.timer_total_seconds) != original_timer):
+                    self.notify("The running timer changed. Close and reopen the rest editor.")
+                    return
+                old_total = self.timer_total_seconds
+                old_state = self.active_workout.get("rest_timer_state", "")
+                try:
+                    if seconds > 0:
+                        self.timer_total_seconds = seconds
+                        self.persist_rest_timer()
+                    else:
+                        self.active_workout["rest_timer_state"] = ""
+                        storage.save_active_workout(self.active_workout)
+                except Exception as error:
+                    self.timer_total_seconds = old_total
+                    self.active_workout["rest_timer_state"] = old_state
+                    self.notify(f"Could not save rest timer: {error}")
+                    return
+                if seconds == 0:
+                    self.dismiss_timer(silent=True, persist=False)
+            else:
+                numbers = set(choices[scope.value])
+                candidate = {**self.active_workout, "rows": [
+                    {**row, "rest_seconds": seconds}
+                    if row.get("exercise_name") == exercise_name and int(row["set_number"]) in numbers
+                    else row for row in self.active_workout["rows"]]}
+                try:
+                    storage.save_active_workout(candidate)
+                except Exception as error:
+                    self.notify(f"Could not save planned rests: {error}")
+                    return
+                self.active_workout["rows"] = candidate["rows"]
+                for number in numbers:
+                    item = self.find_set_item(exercise_name, number)
+                    if item is not None:
+                        item["rest_seconds"] = seconds
+                        label = item.get("timer_label")
+                        if label is not None:
+                            label.value = storage.format_duration(seconds)
             if self.timer_started_at is not None:
                 self.refresh_timer_display(update_page=False)
-            self.close_dialog(dialog)
-            self.page.update()
+            dismiss()
 
+        save_button = self.filled_button("Save", on_click=save_rest_time, height=self.touch_size(),
+                                         on_focus=lambda e: setattr(self, "focused_text_field", None))
+        save_button.disabled = True
+        scope.on_select = update_scope
         dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(f"Rest timer · {exercise_name}"),
+            modal=True, title=ft.Text(f"Rest timer · {exercise_name}"),
             content=ft.Container(
-                width=self.dialog_width(preferred=300, horizontal_inset=42, minimum=230),
-                content=ft.Column(
-                    controls=[
-                        ft.Text(
-                            "Applies to every set in this exercise.",
-                            size=self.fs(11),
-                            color=ft.Colors.GREY_500,
-                        ),
-                        rest_field,
-                    ],
-                    spacing=self.ui(8),
-                    tight=True,
-                ),
+                width=self.dialog_width(preferred=360, horizontal_inset=42, minimum=230),
+                content=ft.Column(controls=[
+                    scope, preview, rest_field,
+                    ft.Text("Planned-rest edits affect unfinished entries only. Completed plans and actual rest observations stay recorded. Running timers are edited separately.",
+                            size=12 * self.font_scale(), color=self.contrast_text_color()),
+                ], spacing=self.ui(8), tight=True, scroll=ft.ScrollMode.AUTO),
             ),
-            actions=[
-                self.outlined_button(
-                    "Cancel", on_click=lambda e: self.close_dialog(dialog)
-                ),
-                self.filled_button("Save", on_click=save_rest_time),
-            ],
+            actions=[self.outlined_button("Cancel", on_click=dismiss, height=self.touch_size()), save_button],
             actions_alignment=ft.MainAxisAlignment.END,
+            on_dismiss=lambda e: self.unregister_text_fields(rest_field),
         )
         self.page.show_dialog(dialog)
 
@@ -1517,7 +1702,7 @@ class WorkoutMixin:
             ft.Text(
                 exercise_note_short,
                 size=self.fs(10.5),
-                color=ft.Colors.GREEN_400,
+                color=self.contrast_text_color("success"),
                 weight=ft.FontWeight.W_600,
                 max_lines=1,
                 no_wrap=True,
@@ -1535,7 +1720,7 @@ class WorkoutMixin:
                 training_method,
                 size=self.fs(9.5),
                 weight=ft.FontWeight.W_600,
-                color=self.accent_color(),
+                color=self.contrast_text_color("accent"),
                 max_lines=1,
                 overflow=ft.TextOverflow.ELLIPSIS,
             ),
@@ -1544,6 +1729,13 @@ class WorkoutMixin:
         progression_recommendation = self.exercise_progression_recommendation(
             exercise_name, training_method
         )
+        allow_load_guidance = (training_method != "Straight" and training_method != "Mechanical Drop Set"
+                               and (not progression_recommendation or progression_recommendation.get("apply_weight", False))) or (training_method == "Straight" and
+            self.straight_load_guidance_allowed(exercise_name)
+            and (not progression_recommendation or progression_recommendation.get("apply_weight", True))
+        )
+        if self.active_workout.get("cycle_phase") == "Deload" or set_context.comparison_error(initial_rows):
+            allow_load_guidance = False
         calibration_required = self.first_mesocycle_exercise_intro_available(
             exercise_name
         )
@@ -1659,14 +1851,15 @@ class WorkoutMixin:
             previous_reps = ""
             if show_historical_reps:
                 previous_reps = str(row_data.get("previous_reps", "") or "")
-                if not previous_reps:
-                    previous_reps = str(
-                        historical_by_set.get(set_number, {}).get("reps", "") or ""
-                    )
+                historical = historical_by_set.get(set_number, {})
+                if not previous_reps and set_context.matches(historical, row_data) and historical.get("load_mode", "external") == row_data.get("load_mode", "external"):
+                    previous_reps = str(historical.get("reps", "") or "")
 
             current_weight = str(row_data.get("weight", "") or "")
             weight_placeholder = previous_weight
-            if calibration_required and managed_set and not row_completed:
+            if deloads.is_recovery(row_data) and not current_weight and not row_completed:
+                current_weight = row_data.get("prescribed_weight", "")
+            if calibration_required and managed_set and not row_completed and not completed_first_weight:
                 if calibration_first_set:
                     weight_placeholder = str(
                         (calibration_context or {}).get("suggested_weight", "") or ""
@@ -1677,6 +1870,7 @@ class WorkoutMixin:
                     weight_placeholder = ""
             elif (
                 completed_first_weight
+                and allow_load_guidance
                 and managed_set
                 and not row_completed
                 and not current_weight.strip()
@@ -1694,6 +1888,7 @@ class WorkoutMixin:
                 )
             elif (
                 progression_recommendation
+                and allow_load_guidance
                 and managed_set
                 and not row_completed
                 and not current_weight.strip()
@@ -1704,26 +1899,22 @@ class WorkoutMixin:
                 if current_weight:
                     row_data["weight"] = current_weight
 
-            # Only Straight-method working sets use explicit RIR. AMRAP and
-            # activation/mini-set methods encode effort in the method itself.
-            planned_rir = self.cycle_rir_target() if uses_rir else None
-            rir_locked = (
-                planned_rir is not None
-                and self.cycle_rir_lock_enabled()
-                and not calibration_first_set
-            )
-            if planned_rir is not None and not calibration_first_set:
-                previous_rir = planned_rir
-            elif calibration_first_set or not uses_rir:
-                previous_rir = ""
+            # A prescription is never an observation; anchors may record
+            # actual effort without inferring failure from a method label.
+            planned_rir = (row_data.get("target_rir") or self.cycle_rir_target()) if uses_rir else None
+            previous_rir = ""  # Actual effort is never copied or prescribed.
+            mode = load_modes.normalize(row_data.get("load_mode") or self.exercise_load_mode(exercise_name))
+            weight_kind = load_modes.numeric_kind(mode)
+            if mode == "bodyweight" and not weight_placeholder:
+                weight_placeholder = "0"
 
             weight, weight_wrap, weight_ghost, weight_unit = self.active_numeric_field(
                 current_weight,
                 weight_placeholder,
                 "Weight",
                 self.SET_WEIGHT_WIDTH,
-                suffix_text=self.settings.get("unit", "kg"),
-                numeric_kind="weight",
+                suffix_text=load_modes.suffix(mode, self.settings.get("unit", "kg")),
+                numeric_kind=weight_kind,
             )
             reps, reps_wrap, reps_ghost, _ = self.active_numeric_field(
                 row_data.get("reps", ""),
@@ -1733,6 +1924,12 @@ class WorkoutMixin:
                 numeric_kind="reps",
             )
             reps_display = reps_wrap
+            if progression_recommendation and managed_set:
+                goals = progression_recommendation.get("set_rep_targets", [])
+                if work_index < len(goals):
+                    reps.tooltip = f"Next goal: {goals[work_index]} reps at target {progression_recommendation.get('target_rir')} RIR. Record actual reps."
+            if row_data.get("target_reps") and deloads.is_recovery(row_data):
+                reps.tooltip = f"Recovery goal: {row_data['target_reps']} reps at {row_data.get('target_rir')} RIR. Record actual reps."
             initial_rir = str(row_data.get("rir", "") or "") if uses_rir else ""
             if not uses_rir:
                 row_data["rir"] = ""
@@ -1741,7 +1938,7 @@ class WorkoutMixin:
             rir, rir_wrap, rir_ghost, _ = self.active_numeric_field(
                 initial_rir,
                 previous_rir,
-                "RIR",
+                "Actual RIR",
                 self.SET_SMALL_WIDTH,
                 visible=(
                     uses_rir
@@ -1753,18 +1950,8 @@ class WorkoutMixin:
                 ),
                 numeric_kind="rir",
             )
-            if planned_rir is not None:
-                rir.tooltip = f"Mesocycle target: {planned_rir} RIR"
-            if rir_locked:
-                # A calibration set may have recorded an actual RIR in an
-                # unfinished first set. Preserve that value across rerenders; all
-                # other locked rows keep the prescribed mesocycle RIR.
-                rir.value = initial_rir or str(planned_rir)
-                rir.data = "locked_rir"
-                rir.read_only = True
-                rir.show_cursor = False
-                rir_ghost.visible = False
-                rir_wrap = ft.Container(width=0, visible=False)
+            rir.tooltip = f"Actual reps left; target {planned_rir} RIR. Leave blank if unknown." if planned_rir not in {None, ""} else "Actual reps left. Leave blank if unknown."
+            weight.tooltip = load_modes.guidance(mode)
             note = self.text_field(
                 hint_text="Note",
                 value=row_data.get("note", ""),
@@ -1780,12 +1967,19 @@ class WorkoutMixin:
             type_button = self.active_set_type_button(set_type, set_number)
 
             item = {
+                **protocols.metadata(row_data),
+                **deloads.metadata(row_data),
+                **volume_accounting.metadata(row_data),
                 "id": item_id,
                 "exercise_name": exercise_name,
                 "set_number": set_number,
                 "weight": weight,
                 "reps": reps,
                 "rir": rir,
+                "target_rir": "" if planned_rir is None else str(planned_rir),
+                "legacy_rir": row_data.get("legacy_rir", ""),
+                "load_mode": mode,
+                "allow_load_guidance": allow_load_guidance,
                 "weight_wrap": weight_wrap,
                 "reps_wrap": reps_wrap,
                 "rir_wrap": rir_wrap,
@@ -1804,6 +1998,7 @@ class WorkoutMixin:
                 "weight_warning_reference": previous_weight,
                 "previous_reps": previous_reps,
                 "previous_rir": previous_rir,
+                "last_week_reps": row_data.get("last_week_reps", ""),
                 "note": note,
                 "completed": completed,
                 "rest_seconds": rest_seconds,
@@ -1824,6 +2019,9 @@ class WorkoutMixin:
             self.update_completed_field_outlines(item)
 
             finish.on_click = lambda e, current=item: self.toggle_set_complete(current)
+            item["finish_semantics"] = self.completion_semantics(
+                finish, exercise_name, set_number, completed
+            )
             def choose_active_set_role(e, current=item):
                 try:
                     current_index = exercise_items.index(current)
@@ -1887,13 +2085,7 @@ class WorkoutMixin:
                     and not current.get("completed")
                     and self.enter_completes_set_enabled()
                 ):
-                    # Keyboard completion must never start/resume the workout
-                    # clock. The explicit set ✓ keeps its existing timer
-                    # behavior. Rest timing still belongs to set completion.
-                    self.toggle_set_complete(
-                        current,
-                        manage_workout_clock=False,
-                    )
+                    self.toggle_set_complete(current)
 
                 await focus_next_numeric(current, key)
 
@@ -1975,7 +2167,7 @@ class WorkoutMixin:
                     return
                 if self.normalize_numeric_control(
                     field,
-                    kind={"weight": "weight", "reps": "reps", "rir": "rir"}[key],
+                    kind={"weight": load_modes.numeric_kind(current.get("load_mode", "external")), "reps": "reps", "rir": "rir"}[key],
                     allow_empty=True,
                 ):
                     self.update_active_numeric_warning(current, key)
@@ -2020,6 +2212,16 @@ class WorkoutMixin:
             )
             note_containers.append(note_container)
 
+            def save_protocol(current=item):
+                self.capture_active_controls()
+                self.show_active_workout()
+
+            protocol_button = ft.IconButton(
+                icon=ft.Icons.TUNE, tooltip="Protocol details", width=self.touch_size(), height=self.touch_size(),
+                visible=True,
+                on_click=lambda e, current=item, callback=save_protocol: self.edit_protocol_details(current, callback),
+            )
+
             set_content = ft.Column(
                 controls=[
                     ft.Row(
@@ -2029,13 +2231,15 @@ class WorkoutMixin:
                             reps_display,
                             rir_wrap,
                             timer_label,
-                            ft.Container(expand=True),
-                            finish,
+                            item["finish_semantics"],
                         ],
+                        wrap=True,
+                        run_spacing=self.ui(4),
                         spacing=self.ui(4),
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     note_container,
+                    ft.Row(controls=[protocol_button, ft.Text(protocols.summary(item), size=self.fs(10), expand=True)]),
                 ],
                 spacing=self.ui(3),
             )
@@ -2112,13 +2316,19 @@ class WorkoutMixin:
                 seed = {
                     "previous_weight": previous["weight"].value or previous.get("previous_weight", ""),
                     "previous_reps": previous["reps"].value or previous.get("previous_reps", ""),
-                    "previous_rir": previous["rir"].value or previous.get("previous_rir", ""),
+                    "previous_rir": "",
+                    "load_mode": previous.get("load_mode", "external"),
+                    "target_rir": previous.get("target_rir", ""),
                     "rest_seconds": previous["rest_seconds"],
                     "set_type": storage.default_next_set_type(
                         previous.get("training_method", "Straight"),
                         [row for row in self.set_controls if row.get("exercise_name") == exercise_name],
                     ),
                     "training_method": previous.get("training_method", "Straight"),
+                    "planned_work_count": previous.get("planned_work_count", ""),
+                    **set_context.metadata(previous),
+                    "context_override": previous.get("context_override", ""),
+                    **{key: previous.get(key, "") for key in ("primary_muscles_snapshot", "secondary_muscles_snapshot", "muscle_metadata_recorded")},
                 }
             else:
                 seed = {
@@ -2130,6 +2340,9 @@ class WorkoutMixin:
             block_state["collapsed"] = False
             self.refresh_exercise_block_state(exercise_name, force_expand=True)
             self.capture_active_controls()
+            if self.active_workout.get("cycle_phase") == "Deload":
+                self.show_active_workout()
+                return
             self.update_active_progress()
             if self.timer_started_at is not None:
                 self.sync_inline_timer()
@@ -2176,7 +2389,29 @@ class WorkoutMixin:
                             calibration_card,
                         )
 
+        mode = self.exercise_load_mode(exercise_name)
         body_controls = [rows_column, adjustment_row]
+        if initial_rows and deloads.is_recovery(initial_rows[0]):
+            working = [row for row in initial_rows if not storage.is_warmup_set_type(row.get("set_type"))]
+            message = deloads.summary(working[0] if working else initial_rows[0])
+            body_controls.insert(0, ft.Text(message + " Keep the effort target and record actual performance. Recovery edits apply only to this session.", size=self.fs(11)))
+        elif self.active_workout.get("cycle_phase") == "Deload":
+            body_controls.insert(0, ft.Text("Interrupted legacy deload: choose recovery loads and volume manually. Automatic progression is paused.", size=self.fs(11)))
+        if training_method in progression.METHODS_WITH_ACTIVATION:
+            counts = {str(row.get("planned_work_count", "")) for row in initial_rows}
+            if counts == {"1"}:
+                body_controls.insert(0, ft.Text("Activation only: no continuation protocol is planned. Progress the load manually.", size=self.fs(11)))
+        if training_method == "Mechanical Drop Set":
+            body_controls.insert(0, ft.Text("Mechanical drop sets use manual progression. Record each setup/variation; leverage changes cannot be evaluated from load alone.", size=self.fs(11)))
+        if progression_recommendation and not calibration_required:
+            goals = progression_recommendation.get("set_rep_targets", [])
+            goal_text = f" Rep goals: {' / '.join(str(value) for value in goals)}." if goals else ""
+            load_text = f"Next load: {progression_recommendation['weight_text']} {self.settings.get('unit', 'kg')}. " if progression_recommendation.get("apply_weight", True) else "Keep individual loads. "
+            body_controls.insert(0, ft.Text(load_text + progression_recommendation["reason"] + goal_text, size=self.fs(11)))
+        if mode != "external":
+            body_controls.insert(0, ft.Text(load_modes.guidance(mode), size=self.fs(11)))
+        elif training_method == "Straight" and not allow_load_guidance:
+            body_controls.insert(0, ft.Text("Progress loads manually for this exercise; keep individual planned loads and record actual reps and RIR.", size=self.fs(11)))
         body = ft.Column(
             controls=body_controls,
             spacing=self.ui(4),
@@ -2253,6 +2488,8 @@ class WorkoutMixin:
 
     def active_field_fallback(self, item, key):
         """Own ghost/default first; immediately-above typed value second."""
+        if key == "rir":
+            return None
         previous_key = {
             "weight": "previous_weight",
             "reps": "previous_reps",
@@ -2270,7 +2507,7 @@ class WorkoutMixin:
             candidates.append(getattr(ghost, "value", ""))
         candidates.append(item.get(previous_key, ""))
 
-        kind = {"weight": "weight", "reps": "reps", "rir": "rir"}[key]
+        kind = {"weight": load_modes.numeric_kind(item.get("load_mode", "external")), "reps": "reps", "rir": "rir"}[key]
         for candidate in candidates:
             value = self.evaluate_numeric_expression(candidate)
             if value is None or not self.numeric_value_is_allowed(value, kind):
@@ -2296,7 +2533,7 @@ class WorkoutMixin:
 
     def resolve_active_numeric_field(self, item, key):
         field = item[key]
-        kind = {"weight": "weight", "reps": "reps", "rir": "rir"}[key]
+        kind = {"weight": load_modes.numeric_kind(item.get("load_mode", "external")), "reps": "reps", "rir": "rir"}[key]
         ghost_key = {
             "weight": "weight_ghost",
             "reps": "reps_ghost",
@@ -2330,7 +2567,7 @@ class WorkoutMixin:
                 item.get("training_method", "Straight"),
                 item.get("set_type", "Normal"),
             )
-            and (self.track_rir_enabled() or item.get("mesocycle_calibration_first"))
+            and bool(self.logical_text_value(item["rir"].value))
         ):
             keys.append(("RIR", "rir"))
 
@@ -2352,7 +2589,7 @@ class WorkoutMixin:
                     item.get("training_method", "Straight"),
                     item.get("set_type", "Normal"),
                 )
-                and (self.track_rir_enabled() or item.get("mesocycle_calibration_first"))
+                and bool(self.logical_text_value(item["rir"].value))
             ):
                 controls.append(item["rir"])
 
@@ -2404,16 +2641,9 @@ class WorkoutMixin:
 
     def copy_previous_completed_set_values_if_empty(self, target):
         """Seed a completely blank set from the immediately previous completed set."""
+        if not target.get("allow_load_guidance", True):
+            return
         fields = [("weight", "weight_ghost"), ("reps", "reps_ghost")]
-        if (
-            self.track_rir_enabled()
-            and storage.method_set_uses_rir(
-                target.get("training_method", "Straight"),
-                target.get("set_type", "Normal"),
-            )
-        ):
-            fields.append(("rir", "rir_ghost"))
-
         # Only auto-copy when the current set has no typed data at all.  A
         # partially entered set remains intentional user input.
         if any(self.logical_text_value(target[key].value) for key, _ in fields):
@@ -2429,7 +2659,7 @@ class WorkoutMixin:
             ),
             None,
         )
-        if previous is None:
+        if previous is None or not set_context.matches(previous, target):
             return
 
         for key, ghost_key in fields:
@@ -2448,6 +2678,8 @@ class WorkoutMixin:
 
     def propagate_completed_values_to_following_sets(self, source):
         """Seed later defaults without violating the selected training method."""
+        if not source.get("allow_load_guidance", True):
+            return
         exercise_name = source.get("exercise_name")
         source_number = source.get("set_number", 0)
         overwrite_defaults = self.update_following_set_defaults_enabled()
@@ -2460,13 +2692,6 @@ class WorkoutMixin:
                 ("weight", "previous_weight", "weight_ghost"),
                 ("reps", "previous_reps", "reps_ghost"),
             ]
-            if (
-                self.track_rir_enabled()
-                and storage.method_set_uses_rir(
-                    method, source.get("set_type", "Normal")
-                )
-            ):
-                field_specs.append(("rir", "previous_rir", "rir_ghost"))
         elif method in {"Myo-Reps", "Rest-Pause", "Mechanical Drop Set"}:
             # These methods reuse the anchor load but continuation reps are
             # fatigue-dependent and must be recorded, not copied from activation.
@@ -2496,6 +2721,7 @@ class WorkoutMixin:
         for item in self.set_controls:
             if (
                 item.get("exercise_name") != exercise_name
+                or not set_context.matches(source, item)
                 or item.get("set_number", 0) <= source_number
             ):
                 continue
@@ -2559,7 +2785,7 @@ class WorkoutMixin:
                 return item, earlier
         return None
 
-    def toggle_set_complete(self, target, manage_workout_clock=True):
+    def toggle_set_complete(self, target):
         exercise_name = target["exercise_name"]
         target_number = target["set_number"]
         making_complete = not target["completed"]
@@ -2628,11 +2854,7 @@ class WorkoutMixin:
         self.update_active_progress()
 
         if making_complete:
-            if manage_workout_clock:
-                if not self.workout_clock_has_started():
-                    self.start_workout_clock()
-                elif self.workout_clock_is_paused():
-                    self.toggle_workout_clock()
+            self.start_workout_clock()
 
             exercise_finished = all(
                 item.get("completed")
@@ -2683,6 +2905,9 @@ class WorkoutMixin:
         self.update_completed_field_outlines(item)
 
         button = item["finish"]
+        if item.get("finish_semantics") is not None:
+            self.describe_completion(item["finish_semantics"], item["exercise_name"],
+                                     item["set_number"], item["completed"])
         timer_label = item.get("timer_label")
         row_container = item.get("row_container")
 
@@ -2737,7 +2962,7 @@ class WorkoutMixin:
         progress_value = f"{completed}/{total} sets"
         cycle_rir = self.cycle_rir_target()
         if cycle_rir is not None:
-            progress_value = f"{cycle_rir} RIR · {progress_value}"
+            progress_value = f"Target {cycle_rir} RIR · {progress_value}"
         self.active_progress_text.value = progress_value
 
         if getattr(self, "workout_target_text", None) is not None and self.active_workout:
@@ -2762,6 +2987,9 @@ class WorkoutMixin:
                 counts.get(exercise_name, 0) + 1
             )
             item["set_number"] = counts[exercise_name]
+            if item.get("finish_semantics") is not None:
+                self.describe_completion(item["finish_semantics"], exercise_name,
+                                         item["set_number"], item["completed"])
 
             if item.get("type_button") is not None:
                 item["type_button"].content = self.active_set_type_content(
@@ -2784,6 +3012,9 @@ class WorkoutMixin:
         for item in self.set_controls:
             rows.append(
                 {
+                    **protocols.metadata(item),
+                    **deloads.metadata(item),
+                    **volume_accounting.metadata(item),
                     "exercise_name": item["exercise_name"],
                     "set_number": item["set_number"],
                     "weight": self.logical_text_value(item["weight"].value),
@@ -2797,6 +3028,10 @@ class WorkoutMixin:
                         )
                         else ""
                     ),
+                    "target_rir": item.get("target_rir", ""),
+                    "legacy_rir": item.get("legacy_rir", ""),
+                    "load_mode": item.get("load_mode", "external"),
+                    "last_week_reps": item.get("last_week_reps", ""),
                     "previous_weight": item.get("previous_weight", ""),
                     "previous_reps": item.get("previous_reps", ""),
                     "previous_rir": (
@@ -2828,130 +3063,61 @@ class WorkoutMixin:
                 }
             )
 
+        if self.active_workout.get("cycle_phase") == "Deload":
+            for row in rows:
+                if not deloads.is_recovery(row):
+                    row["prescription_kind"] = "deload_manual"
+        for name in {row["exercise_name"] for row in rows}:
+            group = [row for row in rows if row["exercise_name"] == name]
+            if any(row.get("group_id") for row in group):
+                storage.initialize_volume_rows(group)
+            counts = [progression._number(row.get("planned_work_count")) for row in group]
+            known = [int(count) for count in counts if count is not None and count > 0]
+            if known:
+                count = max(max(known), sum(not storage.is_warmup_set_type(row.get("set_type")) for row in group))
+                for row in group:
+                    row["planned_work_count"] = str(count)
+                for item in self.set_controls:
+                    if item["exercise_name"] == name:
+                        item["planned_work_count"] = str(count)
         self.active_workout["rows"] = rows
+        if self.timer_started_at is not None and self.timer_inline_item is not None:
+            if not any(item is self.timer_inline_item for item in self.set_controls):
+                self.dismiss_timer(silent=True)
+            else:
+                self.timer_set_number = self.timer_inline_item["set_number"]
+                self.persist_rest_timer()
+        for item, row in zip(self.set_controls, rows):
+            item.update(volume_accounting.metadata(row))
         storage.save_active_workout(
             self.active_workout
         )
 
     def show_workout_completion_summary(self, workout_name, saved_count, muscle_counts):
-        """Show a quiet post-workout summary before returning to the workout list."""
+        """Show performed categories without treating protocol fragments as sets."""
         self.selected_tab = 0
         self.page.navigation_bar.selected_index = 0
-
+        report = muscle_counts
+        totals = report["totals"]
         controls = [
-            ft.Text(
-                "Workout complete",
-                size=self.fs(27),
-                weight=ft.FontWeight.BOLD,
-            ),
-            ft.Text(
-                str(workout_name or "Workout"),
-                size=self.fs(17),
-                weight=ft.FontWeight.W_600,
-                max_lines=2,
-                overflow=ft.TextOverflow.ELLIPSIS,
-            ),
-            ft.Text(
-                f"{int(saved_count or 0)} completed set(s)",
-                size=self.fs(12),
-                color=ft.Colors.GREY_500,
-            ),
-            ft.Container(height=self.ui(4)),
-            ft.Text(
-                "Primary working sets",
-                size=self.fs(20),
-                weight=ft.FontWeight.BOLD,
-            ),
+            ft.Text("Workout complete", size=self.fs(27), weight=ft.FontWeight.BOLD),
+            ft.Text(str(workout_name or "Workout"), size=self.fs(17), weight=ft.FontWeight.W_600),
+            ft.Text(f"{int(saved_count or 0)} completed entries, including warmups", size=self.fs(12)),
+            ft.Text(volume_accounting.describe(totals), size=self.fs(13)),
+            ft.Text(f"Protocol structure: {totals['complete_protocol_groups']} complete; {totals['partial_protocol_groups']} partial or unverified", size=self.fs(11)),
         ]
-
-        if muscle_counts:
-            try:
-                page_width = float(getattr(self.page, "width", 0) or 0)
-            except (TypeError, ValueError):
-                page_width = 0.0
-            if page_width <= 0:
-                page_width = 430.0
-
-            content_width = max(1.0, page_width - (2 * self.ui(self.PAGE_PADDING)))
-            if content_width < 250:
-                columns = 1
-            elif content_width < 365:
-                columns = 2
-            else:
-                columns = 3
-            card_gap = self.ui(7)
-            card_width = max(
-                self.ui(106),
-                (content_width - card_gap * (columns - 1)) / columns,
-            )
-
-            cards = []
-            for muscle, count in muscle_counts.items():
-                cards.append(
-                    ft.Container(
-                        width=card_width,
-                        padding=ft.Padding(
-                            left=self.ui(10),
-                            top=self.ui(9),
-                            right=self.ui(10),
-                            bottom=self.ui(9),
-                        ),
-                        border=ft.Border.all(1, ft.Colors.GREY_700),
-                        border_radius=self.rounding(),
-                        content=ft.Column(
-                            controls=[
-                                ft.Text(
-                                    muscle,
-                                    size=self.fs(11.5),
-                                    weight=ft.FontWeight.W_600,
-                                    max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                                ft.Text(
-                                    f"{count} sets",
-                                    size=self.fs(19),
-                                    weight=ft.FontWeight.BOLD,
-                                ),
-                            ],
-                            spacing=1,
-                            tight=True,
-                        ),
-                    )
-                )
-            controls.append(
-                ft.Row(
-                    controls=cards,
-                    spacing=card_gap,
-                    run_spacing=card_gap,
-                    wrap=True,
-                )
-            )
-        else:
-            controls.append(
-                ft.Text(
-                    "No primary-muscle working sets are assigned for this workout yet.",
-                    size=self.fs(12.5),
-                    color=ft.Colors.GREY_500,
-                )
-            )
-
-        controls.append(
-            ft.Text(
-                "Warm-up sets are excluded. A completed set counts once for each primary muscle assigned to its exercise.",
-                size=self.fs(10.5),
-                color=ft.Colors.GREY_500,
-            )
-        )
-
-        self.set_view(
-            controls,
-            footer=self.filled_button(
-                "Done",
-                on_click=lambda e: self.show_saved_workouts(),
-                expand=True,
-            ),
-            back_action=self.show_saved_workouts,
-        )
+        for kind, title in (("direct", "Direct muscle work (primary tags)"), ("indirect", "Indirect involvement (secondary tags)")):
+            controls.append(ft.Text(title, size=self.fs(18), weight=ft.FontWeight.BOLD))
+            if not report[kind]:
+                controls.append(ft.Text("No tagged work recorded.", size=self.fs(11)))
+            for muscle, metrics in report[kind].items():
+                controls.append(ft.Column(controls=[ft.Text(muscle, weight=ft.FontWeight.BOLD),
+                    ft.Text(volume_accounting.describe(metrics), size=self.fs(12))], spacing=self.ui(2)))
+        controls.append(ft.Text("Protocol groups, activations and fragments are separate units, with no automatic set-equivalence conversion. Indirect tags describe involvement, not growth credit.", size=self.fs(11)))
+        if report["inferred_group_rows"] or report["legacy_metadata_rows"]:
+            controls.append(ft.Text("Legacy grouping is inferred from recorded roles; records without muscle snapshots use current exercise tags.", size=self.fs(11)))
+        self.set_view(controls, footer=self.filled_button("Done", on_click=lambda e: self.show_saved_workouts(), expand=True),
+                      back_action=self.show_saved_workouts)
 
     def active_workout_template_signature(self, *, from_active):
         """Compare only program structure, never performed weight/reps."""
@@ -2968,6 +3134,8 @@ class WorkoutMixin:
                     storage.parse_duration(row.get("rest_seconds", 180), default=180),
                     storage.canonical_set_type(row.get("set_type", "Normal")).casefold(),
                     storage.canonical_training_method(row.get("training_method", "Straight")).casefold(),
+                    row.get("protocol_group_start", ""),
+                    set_context.template_key(row),
                 ))
             return signature
 
@@ -2986,15 +3154,21 @@ class WorkoutMixin:
                     storage.parse_duration(row.get("rest_seconds", 180), default=180),
                     storage.canonical_set_type(row.get("set_type", "Normal")).casefold(),
                     training_method.casefold(),
+                    row.get("protocol_group_start", ""),
+                    set_context.template_key(row),
                 ))
         return signature
 
     def active_workout_template_changed(self):
+        if self.active_workout and self.active_workout.get("cycle_phase") == "Deload":
+            return False
         return self.active_workout_template_signature(from_active=True) != self.active_workout_template_signature(from_active=False)
 
     def save_active_structure_for_next_time(self):
         """Persist active exercise/set/rest/type structure without saving performance."""
         if not self.active_workout:
+            return
+        if self.active_workout.get("cycle_phase") == "Deload":
             return
         workout_id = self.active_workout.get("workout_id", "")
         template = storage.read_workout(workout_id)
@@ -3008,10 +3182,12 @@ class WorkoutMixin:
                 existing_defaults[(key_name, set_number)] = {
                     "weight": row.get("weight", ""),
                     "reps": row.get("reps", ""),
+                    "context": set_context.resolve(row, storage.read_exercise_details(exercise.get("exercise_name", ""))),
                 }
 
         grouped = []
         by_name = {}
+        last_group = {}
         for row in self.active_workout.get("rows", []):
             name = str(row.get("exercise_name", "") or "").strip()
             key = name.casefold()
@@ -3027,11 +3203,21 @@ class WorkoutMixin:
                 grouped.append(exercise)
             set_number = len(by_name[key]["sets"]) + 1
             defaults = existing_defaults.get((key, set_number), {})
+            if defaults and not set_context.matches(defaults["context"], set_context.resolve(row, storage.read_exercise_details(name))):
+                defaults = {}
+            group_id = row.get("group_id")
+            group_start = row.get("protocol_group_start", "")
+            if volume_accounting.role(row) in {"anchor", "continuation", "cluster_fragment"} and group_id:
+                if key in last_group and last_group[key] != group_id:
+                    group_start = "1"
+                last_group[key] = group_id
             by_name[key]["sets"].append({
                 "weight": defaults.get("weight", ""),
                 "reps": defaults.get("reps", ""),
                 "rest_seconds": row.get("rest_seconds", 180),
                 "set_type": storage.canonical_set_type(row.get("set_type", "Normal")),
+                "protocol_group_start": group_start,
+                **set_context.template_metadata(row),
             })
 
         storage.save_workout(
@@ -3041,40 +3227,28 @@ class WorkoutMixin:
         )
 
     def _commit_finished_workout(self, *, save_template_changes=False):
-        if save_template_changes:
-            self.save_active_structure_for_next_time()
+        if not self.active_workout:
+            return
 
         workout = {
             "workout_id": self.active_workout["workout_id"],
             "name": self.active_workout["workout_name"],
         }
-        muscle_counts = storage.completed_primary_muscle_set_counts(
+        muscle_counts = storage.volume_report(
             self.active_workout.get("rows", [])
         )
-        count = storage.append_session(workout, self.active_workout["rows"])
+        try:
+            count = storage.finish_active_workout(
+                self.active_workout,
+                save_template=self.save_active_structure_for_next_time if save_template_changes else None,
+            )
+        except Exception as exc:
+            self.notify(f"Could not save workout: {exc}. Your workout is still available to retry.")
+            return
         if count == 0:
             self.notify("No completed sets. Mark at least one set first.")
             return
 
-        cycle = storage.active_mesocycle()
-        if cycle:
-            cycle_id = cycle.get("cycle_id", "")
-            workout_id = self.active_workout.get("workout_id", "")
-            for row in self.active_workout.get("rows", []):
-                if not (
-                    not storage.is_warmup_set_type(row.get("set_type"))
-                    and row.get("calibration_done", False)
-                    and row.get("completed", False)
-                ):
-                    continue
-                storage.mark_mesocycle_intro_seen(
-                    cycle_id,
-                    workout_id,
-                    row.get("exercise_name", ""),
-                    row.get("training_method", "Straight"),
-                )
-
-        storage.clear_active_workout()
         self.dismiss_timer(silent=True)
         self.active_workout = None
         self.set_controls = []
@@ -3111,10 +3285,10 @@ class WorkoutMixin:
             modal=True,
             title=ft.Text("Keep workout changes for next time?"),
             content=ft.Text(
-                "This workout's exercise/set structure, rest timers, or set types "
-                "differ from the saved workout. Should these become the setup for "
-                "the next time you run this workout? Performed weight and reps are "
-                "not copied into the template."
+                "This workout's exercise/set structure, rest timers, set types or planned segment context "
+                "differ from the saved workout. Keep these changes for the next workout? "
+                "Completed weights and reps still update defaults with the same context. "
+                "This choice controls the programmed structure and segment context."
             ),
             actions=[
                 self.outlined_button(
@@ -3138,7 +3312,7 @@ class WorkoutMixin:
 
     def discard_workout(self, e):
         storage.clear_active_workout()
-        self.dismiss_timer(silent=True)
+        self.dismiss_timer(silent=True, persist=False)
 
         self.active_workout = None
         self.set_controls = []
@@ -3155,6 +3329,21 @@ class WorkoutMixin:
             back_action = self.show_active_workout if self.active_workout else self.show_exercise_database
 
         details = storage.read_exercise_details(exercise_name)
+        default_setup = self.text_field(label="Default setup / variation", value=details.get("setup", ""),
+                                        hint_text="e.g. machine ID, handle, seat setting")
+        context_controls = {key: ft.Dropdown(label=label, value=details.get(key, ""),
+            options=[ft.DropdownOption(key=value, text=text) for value,text in set_context.OPTIONS[key].items()])
+            for key,label in set_context.LABELS.items()}
+        load_mode = ft.Dropdown(
+            label="Load tracking",
+            value=details["load_mode"],
+            options=[ft.DropdownOption(key=key, text=label) for key, label in load_modes.LABELS.items()],
+        )
+        load_help = ft.Text(load_modes.guidance(load_mode.value), size=self.fs(11))
+        def choose_load_mode(e):
+            load_help.value = load_modes.guidance(load_mode.value)
+            self.page.update()
+        load_mode.on_select = choose_load_mode
 
         exercise_name_field = self.text_field(
             label="Exercise name",
@@ -3220,6 +3409,16 @@ class WorkoutMixin:
         )
         equipment_button_refs = {}
         increment_default_text = ft.Text(size=self.fs(11))
+        straight_policy = ft.Dropdown(
+            label="Straight progression",
+            value=details["straight_progression"],
+            options=[ft.DropdownOption(key="double_progression", text="Double progression"),
+                     ft.DropdownOption(key="manual", text="Manual")],
+        )
+        straight_min = self.text_field(label="Straight minimum reps", value=details["straight_rep_min"],
+                                       dense=True, numeric_kind="reps", keyboard_type=ft.KeyboardType.NUMBER)
+        straight_max = self.text_field(label="Straight maximum reps", value=details["straight_rep_max"],
+                                       dense=True, numeric_kind="reps", keyboard_type=ft.KeyboardType.NUMBER)
 
         def refresh_equipment_controls():
             selected = equipment_selected[0]
@@ -3391,6 +3590,14 @@ class WorkoutMixin:
             if not valid:
                 self.page.update()
                 return
+            try:
+                straight_config = progression.straight_settings(straight_min.value, straight_max.value, straight_policy.value)
+            except ValueError as exc:
+                self.mark_field_invalid(straight_min)
+                self.mark_field_invalid(straight_max)
+                self.notify(str(exc))
+                self.page.update()
+                return
 
             increment_lb = details.get("weight_increment_lb", "")
             increment_kg = details.get("weight_increment_kg", "")
@@ -3418,6 +3625,7 @@ class WorkoutMixin:
                             row["exercise_name"] = new_exercise_name
                     if str(self.timer_exercise_name or "").strip().casefold() == old_key:
                         self.timer_exercise_name = new_exercise_name
+                        self.persist_rest_timer()
                     storage.save_active_workout(self.active_workout)
 
                 draft = getattr(self, "workout_editor_draft", None)
@@ -3436,13 +3644,32 @@ class WorkoutMixin:
                 equipment_selected[0],
                 increment_lb,
                 increment_kg,
+                load_mode.value,
+                logging_context={"setup":default_setup.value or "", **{key:control.value or "" for key,control in context_controls.items()}},
+                **straight_config,
             )
+            draft = getattr(self, "workout_editor_draft", None)
+            new_context = {"setup":default_setup.value or "", **{key:control.value or "" for key,control in context_controls.items()}}
+            if draft and not set_context.matches(details, new_context):
+                for exercise in draft.get("exercises", []):
+                    if exercise.get("exercise_name", "").casefold() == new_exercise_name.casefold():
+                        for item in exercise.get("sets", []):
+                            if item.get("context_override") != "1":
+                                item.update(weight="", reps="")
             self.notify("Exercise details saved.")
             back_action()
 
         controls = [
             exercise_name_field,
             exercise_note,
+            load_mode,
+            load_help,
+            default_setup, *context_controls.values(),
+            ft.Text("Context defaults apply to new workouts. Changing setup or logging conventions clears inherited future load/rep presets; explicit segment variants keep theirs. Existing sessions keep their recorded meaning. Unknown does not assume total load or total reps. Both sides in one entry uses manual progression. Increments apply to the entered load basis.", size=self.fs(11)),
+            ft.Text("Applies to new workouts. Existing sessions keep their saved load meaning.", size=self.fs(10)),
+            straight_policy,
+            ft.Row(controls=[ft.Container(content=straight_min, expand=True), ft.Container(content=straight_max, expand=True)]),
+            ft.Text("Straight sets: build reps at the target RIR, then add one increment after every planned set reaches the upper limit. Manual mode disables automatic load/calibration hints. Other methods keep their own rules.", size=self.fs(11)),
             ft.Text("Description", size=self.fs(17), weight=ft.FontWeight.BOLD),
             description,
             ft.Text("Primary muscles", size=self.fs(17), weight=ft.FontWeight.BOLD),
@@ -3459,7 +3686,7 @@ class WorkoutMixin:
             increment_override,
             increment_default_text,
             ft.Text(
-                "Barbell and plate-loaded increments are total logged-weight jumps; dumbbell increments are per dumbbell.",
+                "Increments apply to the load basis you record. The app does not double or halve load or reps for a different convention.",
                 size=self.fs(10),
             ),
             ft.Text("Approx. time per set (seconds)", size=self.fs(17), weight=ft.FontWeight.BOLD),
@@ -3579,19 +3806,16 @@ class WorkoutMixin:
             set_number = row["set_number"]
             prev = previous.get(set_number, {})
 
-            if prev:
-                row["weight"] = prev.get(
-                    "weight",
-                    row.get("weight", ""),
-                )
-                row["reps"] = prev.get(
-                    "reps",
-                    row.get("reps", ""),
-                )
-                row["rir"] = prev.get(
-                    "rir",
-                    row.get("rir", ""),
-                )
+            details = storage.read_exercise_details(new_name)
+            mode = details["load_mode"]
+            row.update(load_mode=mode, weight="", reps="", rir="", legacy_rir="", previous_rir="",
+                       setup="", stop_reason="", actual_rest_seconds="")
+            row.update(set_context.metadata(details))
+            row["context_override"] = ""
+            row.update({key: "" for key in volume_accounting.FIELDS})
+            row["previous_weight"] = prev.get("weight", "") if prev.get("load_mode", "external") == mode and set_context.matches(prev, details) else ""
+
+        storage.initialize_volume_rows([row for row in self.active_workout["rows"] if row["exercise_name"] == new_name])
 
         storage.save_active_workout(
             self.active_workout

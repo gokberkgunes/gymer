@@ -11,6 +11,30 @@ import storage
 
 
 class SettingsMixin:
+    def discard_active_set_controls(self):
+        """Forget controls whose values no longer match the stored workout."""
+        self.set_controls = []
+        self.numeric_field_kinds.clear()
+        self.numeric_warning_fields.clear()
+        self.numeric_warning_acknowledged.clear()
+        self.focus_previous_fields.clear()
+        self.android_backspace_last_values.clear()
+        self.active_numeric_context.clear()
+        self.focused_text_field = None
+        self.timer_inline_item = None
+
+    def change_weight_unit(self, unit):
+        """Flush old-unit controls once, then reload authoritative converted data."""
+        old_unit = self.settings.get("unit", "kg")
+        if old_unit == unit:
+            return
+        if self.active_workout and self.set_controls:
+            self.capture_active_controls()
+        # Neither in-memory state changes unless the whole storage operation,
+        # including loading the converted workout, has committed successfully.
+        self.settings, self.active_workout = storage.change_weight_unit(unit)
+        self.discard_active_set_controls()
+
     async def export_user_data(self, e=None):
         try:
             archive_bytes = storage.export_data_zip_bytes()
@@ -66,12 +90,15 @@ class SettingsMixin:
             # them before rebuilding the Settings page.
             self.timer_generation += 1
             self.workout_clock_generation += 1
+            self._workout_clock_anchor = None
             self.set_controls = []
             self.numeric_field_kinds = {}
             self.numeric_warning_fields = {}
             self.active_workout = storage.load_active_workout()
+            self.workout_elapsed_seconds()
             self.settings = storage.read_settings()
             self.apply_settings(update_page=False)
+            self.restore_rest_timer()
             self.show_settings(force_root=True)
             self.notify(f"Imported {len(imported)} CSV files from {file_name}.")
 
@@ -80,8 +107,8 @@ class SettingsMixin:
             title=ft.Text("Import GYMER data?"),
             content=ft.Text(
                 "This replaces the app's current CSV data with the selected "
-                "backup. workout_set_templates.csv is not imported and will "
-                "be regenerated automatically."
+                "backup, including its saved workout setup. Older backups may "
+                "reconstruct set defaults from their available data."
             ),
             actions=[
                 self.outlined_button("Cancel", on_click=lambda e: self.close_dialog(dialog)),
@@ -138,26 +165,14 @@ class SettingsMixin:
         def save_setting(key, value, rerender=True):
             value = str(value)
             if key == "unit":
-                old_unit = self.settings.get("unit", "kg")
-                if old_unit != value:
-                    # Persist whatever is currently typed before conversion, then
-                    # reload the active workout immediately in the new unit. This
-                    # includes real values and historical ghost/reference weights,
-                    # so an in-progress session follows kg <-> lb changes instead
-                    # of retaining stale numbers until the next workout.
-                    if self.active_workout and self.set_controls:
-                        self.capture_active_controls()
-                    storage.convert_all_weights(old_unit, value)
-                    self.active_workout = storage.load_active_workout()
-
-                    # Warning keys contain the displayed numeric value. They are no
-                    # longer valid after a unit conversion and could otherwise keep
-                    # a converted value orange for the wrong reason.
-                    self.numeric_warning_fields.clear()
-                    self.numeric_warning_acknowledged.clear()
-
-            self.settings[key] = value
-            storage.save_settings(self.settings)
+                try:
+                    self.change_weight_unit(value)
+                except Exception as exc:
+                    self.notify(f"Could not change units: {exc}")
+                    return
+            else:
+                self.settings[key] = value
+                storage.save_settings(self.settings)
             self.apply_settings()
             if rerender:
                 self.show_settings(preserve_scroll=True)

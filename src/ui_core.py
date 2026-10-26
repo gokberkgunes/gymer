@@ -1,4 +1,3 @@
-import ast
 import asyncio
 import math
 import statistics
@@ -10,6 +9,8 @@ import flet as ft
 
 import storage
 import progression
+import numeric_input
+import text_contrast
 
 
 class UICoreMixin:
@@ -54,6 +55,24 @@ class UICoreMixin:
     def ui(self, value):
         """Scale one authored layout dimension for the current logical width."""
         return float(value) * self.phone_layout_scale()
+
+    def touch_size(self, value=48):
+        """Keep tappable bounds independent of dense visual scaling."""
+        return max(48.0, self.ui(value))
+
+    @staticmethod
+    def describe_completion(semantics, exercise, number, completed):
+        semantics.label = f"{exercise}, set {number}, {'completed' if completed else 'not completed'}"
+        semantics.checked = bool(completed)
+        semantics.on_tap_hint_text = "Mark not completed" if completed else "Mark completed"
+
+    def completion_semantics(self, button, exercise, number, completed):
+        semantics = ft.Semantics(
+            content=button, button=True, exclude_semantics=True,
+            on_tap=lambda e: button.on_click(e),
+        )
+        self.describe_completion(semantics, exercise, number, completed)
+        return semantics
 
     def fit_layout_scale(self, designed_width, outer_inset=0, minimum=0.58):
         """Return a local scale that guarantees one dense row fits the viewport.
@@ -163,10 +182,25 @@ class UICoreMixin:
     def foreground_color(self):
         return ft.Colors.WHITE if self.is_dark_mode() else ft.Colors.BLACK
 
+    def contrast_text_color(self, role="muted"):
+        current = self.background_color()
+        background = str(getattr(current, "value", current))
+        return text_contrast.palette(
+            background, self.settings.get("accent_color", "purple"), self.is_dark_mode()
+        )[role]
+
     def track_rir_enabled(self):
         return self.settings.get("track_rir", "1") == "1"
 
     def cycle_locks(self):
+        active = getattr(self, "active_workout", None)
+        if active and "performed_at" in active:
+            cycle = storage.get_mesocycle(active.get("cycle_id", ""))
+            return {
+                "suggested_rir": active.get("cycle_target_rir") or None,
+                "rir_lock": bool(cycle and cycle.get("rir_lock", "1") == "1"),
+                "rest_timer_lock": bool(cycle and cycle.get("rest_timer_lock", "0") == "1"),
+            }
         return storage.active_cycle_locks()
 
     def cycle_rir_target(self):
@@ -408,6 +442,7 @@ class UICoreMixin:
     def numeric_kind_spec(self, kind):
         specs = {
             "weight": {"integer": False, "minimum": 0.000001, "maximum": 10000},
+            "load": {"integer": False, "minimum": 0, "maximum": 10000},
             "reps": {"integer": True, "minimum": 1, "maximum": 999},
             "rir": {"integer": True, "minimum": 0, "maximum": 99},
             "rm": {"integer": True, "minimum": 1, "maximum": 999},
@@ -421,49 +456,7 @@ class UICoreMixin:
 
     def evaluate_numeric_expression(self, text):
         """Safely evaluate a small arithmetic expression such as 45+45."""
-        text = self.logical_text_value(text)
-        if not text or len(text) > 40:
-            return None
-
-        try:
-            tree = ast.parse(text, mode="eval")
-        except (SyntaxError, ValueError):
-            return None
-
-        def evaluate(node):
-            if isinstance(node, ast.Expression):
-                return evaluate(node.body)
-            if isinstance(node, ast.Constant):
-                if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
-                    raise ValueError
-                return float(node.value)
-            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-                value = evaluate(node.operand)
-                return value if isinstance(node.op, ast.UAdd) else -value
-            if isinstance(node, ast.BinOp) and isinstance(
-                node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
-            ):
-                left = evaluate(node.left)
-                right = evaluate(node.right)
-                if isinstance(node.op, ast.Add):
-                    return left + right
-                if isinstance(node.op, ast.Sub):
-                    return left - right
-                if isinstance(node.op, ast.Mult):
-                    return left * right
-                if right == 0:
-                    raise ValueError
-                return left / right
-            raise ValueError
-
-        try:
-            value = evaluate(tree)
-        except (ValueError, ZeroDivisionError, OverflowError):
-            return None
-
-        if not math.isfinite(value) or abs(value) > 1_000_000:
-            return None
-        return value
+        return numeric_input.evaluate_numeric_expression(self.logical_text_value(text))
 
     def format_weight_text(self, value):
         """Hide tiny unit-conversion drift without changing real precision."""
@@ -671,16 +664,18 @@ class UICoreMixin:
 
         self.numeric_warning_acknowledged.add(warning_key)
         record["acknowledged"] = True
-        # Accepted unusual input remains visibly orange, but no longer pulses.
-        record["field"].text_style = ft.TextStyle(color=ft.Colors.ORANGE_400)
+        # Accepted unusual input remains visibly orange.
+        record["field"].text_style = ft.TextStyle(color=self.contrast_text_color("warning"))
 
     def restore_numeric_field_style(self, field):
         field.text_style = None
+        field.helper_text = None
+        field.helper_style = None
         if getattr(field, "data", None) == "locked_rir":
             field.label_style = ft.TextStyle(
                 size=self.fs(12),
                 weight=ft.FontWeight.BOLD,
-                color=ft.Colors.GREEN_400,
+                color=self.contrast_text_color("success"),
             )
 
         for item in self.set_controls:
@@ -720,8 +715,10 @@ class UICoreMixin:
                 "reason": reason,
                 "acknowledged": acknowledged,
             }
-            # Orange text only. Borders keep their normal/completed/locked style.
-            field.text_style = ft.TextStyle(color=ft.Colors.ORANGE_400)
+            field.helper_text = reason
+            field.helper_style = ft.TextStyle(color=self.contrast_text_color("warning"))
+            # Stable warning text; borders keep normal/completed/locked style.
+            field.text_style = ft.TextStyle(color=self.contrast_text_color("warning"))
         else:
             self.numeric_warning_fields.pop(warning_id, None)
             self.restore_numeric_field_style(field)
@@ -737,35 +734,11 @@ class UICoreMixin:
         for key in stale:
             self.numeric_warning_fields.pop(key, None)
 
-        unacknowledged = [
-            record
-            for record in self.numeric_warning_fields.values()
-            if not record.get("acknowledged", False)
-        ]
-        if not unacknowledged:
-            self.numeric_warning_pulse = False
-            # Accepted warnings stay solid orange.
-            for record in self.numeric_warning_fields.values():
-                record["field"].text_style = ft.TextStyle(
-                    color=ft.Colors.ORANGE_400
-                )
-            return False
-
-        self.numeric_warning_pulse = not self.numeric_warning_pulse
+        self.numeric_warning_pulse = False
         for record in self.numeric_warning_fields.values():
-            field = record["field"]
-            if record.get("acknowledged", False):
-                field.text_style = ft.TextStyle(color=ft.Colors.ORANGE_400)
-            else:
-                # Slow pulse between two orange shades; the box itself never blinks.
-                field.text_style = ft.TextStyle(
-                    color=(
-                        ft.Colors.ORANGE_300
-                        if self.numeric_warning_pulse
-                        else ft.Colors.ORANGE_700
-                    )
-                )
-        return True
+            record["field"].text_style = ft.TextStyle(color=self.contrast_text_color("warning"))
+            record["field"].helper_style = ft.TextStyle(color=self.contrast_text_color("warning"))
+        return False
 
     def active_numeric_field(
         self,
@@ -789,13 +762,13 @@ class UICoreMixin:
             suffix_text = "reps"
         elif suffix_text is None and numeric_kind == "rir":
             suffix_text = "RIR"
-        width = self.ui(width)
-        numeric_text_size = self.fs(15)
+        width = max(self.ui(width), float(width) * self.font_scale())
+        numeric_text_size = 15 * self.font_scale()
 
         ghost = ft.Text(
             previous or label,
             size=numeric_text_size,
-            color=ft.Colors.GREY_500,
+            color=self.contrast_text_color(),
             text_align=ft.TextAlign.CENTER,
             max_lines=1,
         )
@@ -838,7 +811,7 @@ class UICoreMixin:
                 suffix_text,
                 size=self.fs(10),
                 weight=ft.FontWeight.W_500,
-                color=ft.Colors.GREY_500,
+                color=self.contrast_text_color(),
                 visible=bool(value.strip() or previous.strip()),
             )
             stack_controls.append(
@@ -962,6 +935,21 @@ class UICoreMixin:
             self.numeric_field_kinds[id(field)] = "number"
         return field
 
+    def unregister_text_fields(self, *fields):
+        """Release mappings owned by controls that a screen is replacing."""
+        removed = {id(field) for field in fields if field is not None}
+        for name in ("numeric_field_kinds", "numeric_warning_fields",
+                     "android_backspace_last_values", "active_numeric_context"):
+            mapping = getattr(self, name, {})
+            for key in removed:
+                mapping.pop(key, None)
+        previous = self.focus_previous_fields
+        for key, field in list(previous.items()):
+            if key in removed or id(field) in removed:
+                previous.pop(key, None)
+        if id(getattr(self, "focused_text_field", None)) in removed:
+            self.focused_text_field = None
+
     def register_focus_sequence(self, *fields):
         editable = [
             field
@@ -1022,7 +1010,7 @@ class UICoreMixin:
             suffix_text,
             size=self.fs(9.5),
             weight=ft.FontWeight.W_500,
-            color=ft.Colors.GREY_500,
+            color=self.contrast_text_color(),
             visible=bool((field.value or "").strip()),
         )
 
@@ -1189,8 +1177,8 @@ class UICoreMixin:
         tooltip=None,
     ):
         return ft.Container(
-            width=self.ui(width),
-            height=self.ui(height),
+            width=self.touch_size(width),
+            height=self.touch_size(height),
             bgcolor=bgcolor,
             border_radius=self.rounding(),
             alignment=ft.Alignment.CENTER,
@@ -1202,7 +1190,7 @@ class UICoreMixin:
 
     def compact_outline_icon(self, icon, on_click, tooltip=None, size=38, icon_size=22):
         """Square icon action for dense rows; avoids Material text-button padding."""
-        side = max(self.ui(size), 30.0)
+        side = self.touch_size(size)
         return ft.Container(
             width=side,
             height=side,
@@ -1222,8 +1210,8 @@ class UICoreMixin:
     def set_ok_button(self, completed=False):
         # Deliberately independent of accent color.
         return ft.Container(
-            width=self.ui(self.SET_OK_WIDTH),
-            height=self.ui(self.SET_OK_HEIGHT),
+            width=self.touch_size(self.SET_OK_WIDTH),
+            height=self.touch_size(self.SET_OK_HEIGHT),
             margin=ft.Margin(left=self.ui(8), top=0, right=0, bottom=0),
             alignment=ft.Alignment.CENTER,
             ink=True,
@@ -1258,8 +1246,8 @@ class UICoreMixin:
 
     def set_adjust_button(self, symbol, tooltip, on_click):
         return ft.Container(
-            width=self.ui(48),
-            height=self.ui(38),
+            width=self.touch_size(48),
+            height=self.touch_size(38),
             alignment=ft.Alignment.CENTER,
             border=ft.Border.all(
                 1,
@@ -1326,8 +1314,8 @@ class UICoreMixin:
     def active_set_type_button(self, set_type, set_number):
         # Plain text/click target: intentionally no outline or filled background.
         return ft.Container(
-            width=self.ui(48),
-            height=self.ui(40),
+            width=self.touch_size(48),
+            height=self.touch_size(40),
             alignment=ft.Alignment.CENTER,
             ink=True,
             tooltip=f"{set_type} — Set {set_number}",

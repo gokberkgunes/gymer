@@ -3,11 +3,12 @@ import asyncio
 import math
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import flet as ft
 
 import storage
+import rest_timer_state
 
 
 class TimerMixin:
@@ -32,7 +33,7 @@ class TimerMixin:
             visible=False,
             right=self.ui(14),
             bottom=self.ui(14),
-            padding=ft.Padding(left=self.ui(6), top=self.ui(4), right=self.ui(6), bottom=self.ui(4)),
+            padding=ft.Padding(left=self.ui(6), top=16, right=self.ui(6), bottom=16),
             bgcolor="#202124",
             border=ft.Border.all(1.5, self.accent_color()),
             border_radius=self.rounding(),
@@ -90,6 +91,7 @@ class TimerMixin:
         if self.timer_started_at is None:
             return
         self.timer_display_mode = "countdown"
+        self.persist_rest_timer()
         self.refresh_timer_display(update_page=True)
 
     def reset_inline_timer_item(self, item):
@@ -103,6 +105,7 @@ class TimerMixin:
         label.color = self.foreground_color()
         label.opacity = 1.0
         label.weight = ft.FontWeight.BOLD
+        label.tooltip = None
 
         if item.get("completed"):
             label.visible = False
@@ -138,7 +141,43 @@ class TimerMixin:
         self.timer_inline_item = item
         self.refresh_timer_display(update_page=False)
 
-    def start_rest_timer(self, exercise_name, total_seconds, inline_item=None):
+    def persist_rest_timer(self):
+        if not self.active_workout:
+            return
+        if self.timer_started_at is None:
+            raw = ""
+        else:
+            if self.timer_set_number is None:
+                return
+            raw = rest_timer_state.encode({
+                "version": 1,
+                "session_id": self.active_workout["session_id"],
+                "exercise_name": self.timer_exercise_name,
+                "set_number": int(self.timer_set_number),
+                "total_seconds": self.timer_total_seconds,
+                "started_epoch": self.timer_started_epoch,
+                "display_mode": self.timer_display_mode,
+            })
+        if self.active_workout.get("rest_timer_state", "") != raw:
+            self.active_workout["rest_timer_state"] = raw
+            storage.save_active_workout(self.active_workout)
+
+    def restore_rest_timer(self):
+        # Clear the previous session's UI/task without writing over restored data.
+        self.dismiss_timer(silent=True, persist=False)
+        if not self.active_workout:
+            return
+        try:
+            state = rest_timer_state.decode(self.active_workout.get("rest_timer_state", ""))
+        except ValueError:
+            return
+        if not rest_timer_state.matches(state, self.active_workout):
+            return
+        self.start_rest_timer(state["exercise_name"], state["total_seconds"],
+                              _restored=state)
+        self.sync_inline_timer()
+
+    def start_rest_timer(self, exercise_name, total_seconds, inline_item=None, *, _restored=None):
         try:
             total_seconds = int(total_seconds)
         except (TypeError, ValueError):
@@ -155,13 +194,17 @@ class TimerMixin:
         self.timer_generation += 1
         generation = self.timer_generation
 
-        self.timer_started_at = time.monotonic()
+        self.timer_started_epoch = _restored["started_epoch"] if _restored else time.time()
+        elapsed = max(0, time.time() - self.timer_started_epoch) if _restored else 0
+        self.timer_started_at = time.monotonic() - elapsed
         self.timer_total_seconds = total_seconds
         self.timer_exercise_name = exercise_name
         self.timer_set_number = (
-            inline_item.get("set_number") if inline_item is not None else None
+            _restored["set_number"] if _restored else (
+                inline_item.get("set_number") if inline_item is not None else None
+            )
         )
-        self.timer_display_mode = self.default_timer_display_mode()
+        self.timer_display_mode = _restored["display_mode"] if _restored else self.default_timer_display_mode()
         self.timer_pulse = False
         self.timer_popup_dismissed = False
 
@@ -182,6 +225,8 @@ class TimerMixin:
                 label.value = self.format_timer(total_seconds)
                 self.timer_inline_item = inline_item
 
+        if not _restored:
+            self.persist_rest_timer()
         self.refresh_timer_display(update_page=False)
         self.page.update()
         self.page.run_task(self.timer_loop, generation)
@@ -190,7 +235,7 @@ class TimerMixin:
         if self.timer_started_at is None:
             return
 
-        elapsed = int(time.monotonic() - self.timer_started_at)
+        elapsed = max(0, int(time.monotonic() - self.timer_started_at))
         remaining = self.timer_total_seconds - elapsed
         overdue = remaining <= 0 and elapsed >= self.timer_total_seconds
 
@@ -202,7 +247,11 @@ class TimerMixin:
             and not self.timer_popup_dismissed
         )
         self.timer_name_text.visible = True
-        self.timer_name_text.value = self.timer_exercise_name
+        self.timer_name_text.value = (
+            f"Rest complete · {self.timer_exercise_name}" if overdue
+            else self.timer_exercise_name
+        )
+        self.timer_popup.tooltip = "Rest complete. Tap to return to workout" if overdue else "Tap: active workout · Hold: countdown"
 
         if self.timer_display_mode == "countdown":
             self.timer_value_text.value = self.format_signed_timer(remaining)
@@ -222,23 +271,17 @@ class TimerMixin:
             label.value = self.format_signed_timer(remaining)
             label.weight = ft.FontWeight.BOLD
             label.opacity = 1.0
+            label.tooltip = "Rest complete" if overdue else "Rest remaining"
 
         if overdue:
-            self.timer_pulse = not self.timer_pulse
-            blink_color = ft.Colors.RED_400 if self.timer_pulse else ft.Colors.WHITE
-
+            self.timer_pulse = False
             self.timer_popup.bgcolor = "#202124"
             self.timer_popup.border = ft.Border.all(1.5, ft.Colors.RED_500)
             self.timer_popup.opacity = 1.0
-            self.timer_value_text.color = blink_color
-            self.timer_name_text.color = blink_color
-
+            self.timer_value_text.color = ft.Colors.WHITE
+            self.timer_name_text.color = ft.Colors.WHITE
             if label is not None:
-                label.color = (
-                    ft.Colors.RED_500
-                    if self.timer_pulse
-                    else self.foreground_color()
-                )
+                label.color = self.foreground_color()
         else:
             self.timer_popup.bgcolor = "#202124"
             self.timer_popup.border = ft.Border.all(1.5, self.accent_color())
@@ -259,7 +302,7 @@ class TimerMixin:
             self.refresh_timer_display(update_page=True)
             await asyncio.sleep(1)
 
-    def dismiss_timer(self, silent=False):
+    def dismiss_timer(self, silent=False, *, persist=True):
         self.timer_generation += 1
         self.timer_started_at = None
         self.timer_total_seconds = 0
@@ -277,6 +320,8 @@ class TimerMixin:
             self.timer_popup.visible = False
             self.timer_popup.opacity = 1.0
 
+        if persist:
+            self.persist_rest_timer()
         if not silent:
             self.page.update()
 
@@ -315,15 +360,30 @@ class TimerMixin:
         if not started_at:
             return elapsed
 
-        try:
-            started = datetime.fromisoformat(started_at)
-        except (TypeError, ValueError):
-            return elapsed
+        key = (self.active_workout.get("session_id"), started_at, elapsed)
+        anchor = getattr(self, "_workout_clock_anchor", None)
+        if anchor is None or anchor[0] != key:
+            try:
+                started = datetime.fromisoformat(started_at)
+                # Legacy naive timestamps use local time; their original offset
+                # was not stored and cannot be reconstructed after travel.
+                if started.tzinfo is None:
+                    started = started.astimezone()
+                recovered = max(0, (datetime.now(timezone.utc) - started).total_seconds())
+            except (TypeError, ValueError, OverflowError, OSError):
+                return elapsed
+            anchor = (key, time.monotonic(), recovered)
+            self._workout_clock_anchor = anchor
+        return elapsed + max(0, int(anchor[2] + time.monotonic() - anchor[1]))
 
-        return elapsed + max(
-            0,
-            int((datetime.now() - started).total_seconds()),
+    def begin_workout_clock_interval(self):
+        self.active_workout["started_at"] = datetime.now(timezone.utc).isoformat(
+            timespec="microseconds"
         )
+        key = (self.active_workout.get("session_id"),
+               self.active_workout["started_at"],
+               self.active_workout.get("timer_elapsed_seconds", 0))
+        self._workout_clock_anchor = (key, time.monotonic(), 0)
 
     def start_workout_clock(self, e=None):
         """
@@ -337,9 +397,7 @@ class TimerMixin:
 
         self.active_workout["timer_started"] = True
         self.active_workout["timer_elapsed_seconds"] = 0
-        self.active_workout["started_at"] = datetime.now().isoformat(
-            timespec="seconds"
-        )
+        self.begin_workout_clock_interval()
         storage.save_active_workout(self.active_workout)
         self.refresh_workout_clock_controls()
         self.page.update()
@@ -360,9 +418,7 @@ class TimerMixin:
             self.active_workout["started_at"] = ""
         else:
             # Resume from the stored accumulated time.
-            self.active_workout["started_at"] = datetime.now().isoformat(
-                timespec="seconds"
-            )
+            self.begin_workout_clock_interval()
 
         self.active_workout["timer_started"] = True
         storage.save_active_workout(self.active_workout)
@@ -377,6 +433,7 @@ class TimerMixin:
         self.active_workout["started_at"] = ""
         self.active_workout["timer_started"] = False
         self.active_workout["timer_elapsed_seconds"] = 0
+        self._workout_clock_anchor = None
         storage.save_active_workout(self.active_workout)
 
         self.workout_clock_pulse = False
@@ -396,6 +453,11 @@ class TimerMixin:
         return f"{minutes:02d}:{seconds:02d}"
 
     def refresh_workout_clock_controls(self):
+        status = getattr(self, "workout_clock_status_text", None)
+        if status is not None:
+            status.value = ("Running" if self.workout_clock_is_running() else
+                            "Paused" if self.workout_clock_has_started() else "Not started")
+            status.color = self.foreground_color()
         if self.workout_elapsed_text is not None:
             self.workout_elapsed_text.value = self.format_workout_elapsed()
 
@@ -407,7 +469,7 @@ class TimerMixin:
 
         if not self.workout_clock_has_started():
             self.workout_timer_play_icon.visible = True
-            self.workout_timer_play_icon.color = ft.Colors.WHITE
+            self.workout_timer_play_icon.color = self.foreground_color()
             self.workout_timer_pause_icon.visible = False
             if self.workout_elapsed_text is not None:
                 self.workout_elapsed_text.color = self.foreground_color()
@@ -422,36 +484,18 @@ class TimerMixin:
                 self.workout_elapsed_text.color = self.foreground_color()
             return
 
-        # Paused: explicit double vertical bars, matching the familiar pause
-        # symbol, and pulse them together with elapsed time.
-        pulse_color = (
-            self.accent_color()
-            if self.workout_clock_pulse
-            else ft.Colors.WHITE
-        )
+        # Keep paused state stable, with both the pause glyph and status text.
         self.workout_timer_play_icon.visible = False
         self.workout_timer_pause_icon.visible = True
-        self.workout_timer_pause_icon.color = pulse_color
+        self.workout_timer_pause_icon.color = self.foreground_color()
         if self.workout_elapsed_text is not None:
-            self.workout_elapsed_text.color = pulse_color
+            self.workout_elapsed_text.color = self.foreground_color()
 
     async def workout_clock_loop(self, generation):
         while generation == self.workout_clock_generation and self.active_workout:
-            has_numeric_warning = False
             if self.workout_clock_visible and self.workout_elapsed_text is not None:
-                if self.workout_clock_is_paused():
-                    self.workout_clock_pulse = not self.workout_clock_pulse
-                else:
-                    self.workout_clock_pulse = False
-
+                self.workout_clock_pulse = False
                 self.refresh_workout_clock_controls()
-                has_numeric_warning = self.refresh_numeric_warning_styles()
+                self.refresh_numeric_warning_styles()
                 self.page.update()
-
-            if has_numeric_warning:
-                # Unacknowledged unusual values pulse slowly by text shade only.
-                await asyncio.sleep(1.15)
-            elif self.workout_clock_is_paused():
-                await asyncio.sleep(0.55)
-            else:
-                await asyncio.sleep(1)
+            await asyncio.sleep(1)

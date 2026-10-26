@@ -1,13 +1,25 @@
 import csv
+import hashlib
 import io
 import json
 import os
 import uuid
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from functools import wraps
 
 import volume_landmarks
+import backup_validation
+import numeric_input
+import set_context
+import csv_transactions
+import load_modes
+import progression
+import protocols
+import deloads
+import volume_accounting
+import rest_timer_state
 
 
 DATA_DIR = Path(os.environ.get("FLET_APP_STORAGE_DATA") or ".").resolve()
@@ -26,11 +38,11 @@ MESOCYCLES_FILE = DATA_DIR / "mesocycles.csv"
 MESOCYCLE_SCHEDULE_FILE = DATA_DIR / "mesocycle_schedule.csv"
 
 # Human-readable backup format: every user-data CSV is stored directly in a
-# single ZIP. workout_set_templates.csv is deliberately excluded; it is a
-# derived/template file and is regenerated after import.
+# single ZIP. Per-set templates contain user-authored program data.
 BACKUP_DATA_FILES = [
     WORKOUTS_FILE,
     WORKOUT_EXERCISES_FILE,
+    WORKOUT_SET_TEMPLATES_FILE,
     SETS_FILE,
     SETTINGS_FILE,
     ACTIVE_WORKOUT_FILE,
@@ -67,6 +79,9 @@ TEMPLATE_SET_FIELDS = [
     "reps",
     "rest_seconds",
     "set_type",
+    "protocol_group_start",
+    "context_override",
+    *set_context.FIELDS,
 ]
 
 SET_FIELDS = [
@@ -82,16 +97,24 @@ SET_FIELDS = [
     "weight_unit",
     "reps",
     "rir",
+    "target_rir",
+    "legacy_rir",
+    "load_mode",
     "set_type",
     "training_method",
     "note",
     "completed",
+    "rest_seconds",
+    *protocols.FIELDS,
+    *deloads.FIELDS,
+    *volume_accounting.FIELDS,
 ]
 
 SETTING_FIELDS = ["key", "value"]
 CATALOG_FIELDS = ["exercise_name"]
 SET_TYPE_FIELDS = ["set_type"]
 EXERCISE_DETAIL_FIELDS = [
+    *set_context.FIELDS,
     "exercise_name",
     "muscle_groups",
     "primary_muscles",
@@ -102,6 +125,10 @@ EXERCISE_DETAIL_FIELDS = [
     "equipment_type",
     "weight_increment_lb",
     "weight_increment_kg",
+    "load_mode",
+    "straight_rep_min",
+    "straight_rep_max",
+    "straight_progression",
 ]
 WORKOUT_DETAIL_FIELDS = [
     "workout_id",
@@ -123,6 +150,9 @@ MESOCYCLE_FIELDS = [
     "start_rir",
     "end_rir",
     "deload_rir",
+    "deload_policy",
+    "deload_load_percent",
+    "deload_volume_percent",
     "rir_lock",
     "rest_timer_lock",
     "show_last_week_reps",
@@ -137,6 +167,12 @@ MESOCYCLE_SCHEDULE_FIELDS = [
 ]
 
 ACTIVE_FIELDS = [
+    "session_id",
+    "performed_at",
+    "cycle_id",
+    "cycle_microcycle",
+    "cycle_phase",
+    "cycle_target_rir",
     "workout_id",
     "workout_name",
     "exercise_name",
@@ -145,6 +181,9 @@ ACTIVE_FIELDS = [
     "weight_unit",
     "reps",
     "rir",
+    "target_rir",
+    "legacy_rir",
+    "load_mode",
     "previous_weight",
     "previous_reps",
     "previous_rir",
@@ -158,6 +197,10 @@ ACTIVE_FIELDS = [
     "started_at",
     "timer_started",
     "timer_elapsed_seconds",
+    "rest_timer_state",
+    *protocols.FIELDS,
+    *deloads.FIELDS,
+    *volume_accounting.FIELDS,
 ]
 
 # Equipment categories drive realistic progression rounding. The category gives
@@ -769,14 +812,51 @@ DEFAULT_EXERCISE_DETAILS.update({
 })
 
 
+def _locked(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with csv_transactions.access(DATA_DIR, BACKUP_DATA_FILES):
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def _transactional(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with storage_transaction():
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def storage_transaction():
+    return csv_transactions.transaction(DATA_DIR, BACKUP_DATA_FILES)
+
+
+@_locked
 def _write_csv(path, fieldnames, rows):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    # Serialize before touching the destination; a bad row or failed generator
+    # must not truncate the user's previous file.
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    _atomic_write_bytes(path, buffer.getvalue().encode("utf-8"))
 
 
+@_locked
+def _atomic_write_bytes(path, data):
+    csv_transactions.before_write(DATA_DIR, BACKUP_DATA_FILES)
+    csv_transactions.atomic_write(path, data)
+
+
+@_locked
+def _delete_file(path):
+    csv_transactions.before_write(DATA_DIR, BACKUP_DATA_FILES)
+    path.unlink(missing_ok=True)
+    csv_transactions.sync_directory(path.parent)
+
+
+@_locked
 def _read_csv(path):
     if not path.exists():
         return []
@@ -785,23 +865,89 @@ def _read_csv(path):
         return list(csv.DictReader(f))
 
 
-_SETS_ROWS_CACHE = {"signature": None, "rows": []}
+_SETS_ROWS_CACHE = {"signature": None, "rows": [], "sessions": {}}
 
 
+@_locked
 def _read_sets_cached():
     """Parse sets.csv once until the file changes on disk."""
     if not SETS_FILE.exists():
         _SETS_ROWS_CACHE["signature"] = None
         _SETS_ROWS_CACHE["rows"] = []
+        _SETS_ROWS_CACHE["sessions"] = {}
+        _SETS_ROWS_CACHE["chronological"] = []
         return []
     stat = SETS_FILE.stat()
-    signature = (stat.st_mtime_ns, stat.st_size)
+    signature = (str(SETS_FILE), stat.st_ino, stat.st_mtime_ns, stat.st_size)
     if _SETS_ROWS_CACHE.get("signature") != signature:
         _SETS_ROWS_CACHE["rows"] = _read_csv(SETS_FILE)
+        sessions = {}
+        for row in _SETS_ROWS_CACHE["rows"]:
+            sessions.setdefault(row.get("session_id", ""), []).append(row)
+        _SETS_ROWS_CACHE["sessions"] = sessions
+        ranks = {session_id: index for index, session_id in enumerate(sessions)}
+        dates = {session_id: _timestamp_key(rows[0].get("date", "")) for session_id, rows in sessions.items()}
+        _SETS_ROWS_CACHE["chronological"] = sorted(
+            _SETS_ROWS_CACHE["rows"],
+            key=lambda row: (dates[row.get("session_id", "")], ranks[row.get("session_id", "")]),
+        )
         _SETS_ROWS_CACHE["signature"] = signature
     return _SETS_ROWS_CACHE.get("rows", [])
 
 
+def _saved_session_rows(session_id):
+    _read_sets_cached()
+    return _SETS_ROWS_CACHE["sessions"].get(session_id, [])
+
+
+def _timestamp_key(value):
+    try:
+        return datetime.fromisoformat(str(value)).astimezone(timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _chronological_sets():
+    _read_sets_cached()
+    return _SETS_ROWS_CACHE.get("chronological", [])
+
+
+def _text(value):
+    return "" if value is None else str(value).strip()
+
+
+def _observation_metadata(row):
+    return {
+        **protocols.metadata(row),
+        **deloads.metadata(row),
+        **volume_accounting.metadata(row),
+        "rest_seconds": _text(row.get("rest_seconds", "")),
+        "target_rir": _text(row.get("target_rir", "")),
+        "legacy_rir": _text(row.get("legacy_rir", "")),
+        "load_mode": load_modes.normalize(row.get("load_mode", "external")),
+    }
+
+
+def _cycle_context(performed_at, *, preferred_id=None, historical=False):
+    """Resolve only an in-range cycle; explicit historical correction may use ended cycles."""
+    day = datetime.fromisoformat(performed_at).date()
+    cycles = _read_csv(MESOCYCLES_FILE)
+    candidates = sorted(enumerate(cycles), key=lambda item: (item[1].get("cycle_id") == preferred_id, item[0]), reverse=True)
+    for _, cycle in candidates:
+        if not historical and cycle.get("active", "0") != "1":
+            continue
+        status = mesocycle_status(cycle, today=day)
+        if status["phase"] in {"Build", "Deload"}:
+            return {
+                "cycle_id": cycle["cycle_id"],
+                "cycle_microcycle": str(status["current_microcycle"]),
+                "cycle_phase": status["phase"],
+                "cycle_target_rir": str(status["suggested_rir"]),
+            }
+    return {"cycle_id": "", "cycle_microcycle": "", "cycle_phase": "", "cycle_target_rir": ""}
+
+
+@_locked
 def export_data_zip_bytes():
     """Return a ZIP containing the app's human-readable user CSV files."""
     ensure_data()
@@ -811,29 +957,57 @@ def export_data_zip_bytes():
         mode="w",
         compression=zipfile.ZIP_DEFLATED,
     ) as archive:
+        files = {}
         for path in BACKUP_DATA_FILES:
             if path.exists():
-                archive.writestr(path.name, path.read_bytes())
+                raw = path.read_bytes()
+                archive.writestr(path.name, raw)
+                files[path.name] = {"sha256": hashlib.sha256(raw).hexdigest()}
+        archive.writestr("manifest.json", json.dumps({
+            "format": "gymer-backup", "version": 1, "files": files,
+        }, indent=2))
     return buffer.getvalue()
 
 
+@_transactional
 def import_data_zip_bytes(data):
     """Replace user CSV data from a GYMER backup ZIP, then migrate it."""
     if not data:
         raise ValueError("The selected ZIP is empty.")
 
     allowed = {path.name: path for path in BACKUP_DATA_FILES}
-    required_any = {"workouts.csv", "sets.csv", "settings.csv"}
+    schemas = {
+        "workouts.csv": WORKOUT_FIELDS,
+        "workout_exercises.csv": EXERCISE_FIELDS,
+        "workout_set_templates.csv": TEMPLATE_SET_FIELDS,
+        "sets.csv": SET_FIELDS,
+        "settings.csv": SETTING_FIELDS,
+        "active_workout.csv": ACTIVE_FIELDS,
+        "exercise_catalog.csv": CATALOG_FIELDS,
+        "set_types.csv": SET_TYPE_FIELDS,
+        "exercise_details.csv": EXERCISE_DETAIL_FIELDS,
+        "workout_details.csv": WORKOUT_DETAIL_FIELDS,
+        "mesocycles.csv": MESOCYCLE_FIELDS,
+        "mesocycle_schedule.csv": MESOCYCLE_SCHEDULE_FIELDS,
+    }
+    if len(data) > backup_validation.MAX_BACKUP_BYTES:
+        raise ValueError("Backup ZIP exceeds the supported size limit.")
 
     try:
         with zipfile.ZipFile(io.BytesIO(data), mode="r") as archive:
             infos = [info for info in archive.infolist() if not info.is_dir()]
             names = {info.filename for info in infos}
+            if len(names) != len(infos):
+                raise ValueError("Backup ZIP contains duplicate filenames.")
+            if len(infos) > 64 or any(info.file_size > backup_validation.MAX_FILE_BYTES for info in infos):
+                raise ValueError("Backup ZIP contains too many files or an oversized file.")
+            if sum(info.file_size for info in infos) > backup_validation.MAX_BACKUP_BYTES:
+                raise ValueError("Uncompressed backup exceeds the supported size limit.")
 
             # Backups are intentionally flat: CSV files only, no folders and no
             # arbitrary extraction paths. Unknown non-CSV metadata is ignored so
             # future versions can add a manifest without breaking old imports.
-            nested = [name for name in names if Path(name).name != name]
+            nested = [name for name in names if Path(name).name != name or "\\" in name]
             if nested:
                 raise ValueError("Backup ZIP must contain files at its top level only.")
 
@@ -848,60 +1022,31 @@ def import_data_zip_bytes(data):
                 )
 
             recognized = sorted(name for name in names if name in allowed)
-            if not recognized or not (set(recognized) & required_any):
+            if not recognized or not (set(recognized) & {"workouts.csv", "sets.csv", "settings.csv"}):
                 raise ValueError("This does not look like a GYMER data backup.")
 
             imported = {}
             for name in recognized:
                 raw = archive.read(name)
-                try:
-                    text = raw.decode("utf-8-sig")
-                except UnicodeDecodeError as exc:
-                    raise ValueError(f"{name} is not a UTF-8 CSV file.") from exc
-
-                reader = csv.reader(io.StringIO(text))
-                header = next(reader, None)
-                if not header:
-                    raise ValueError(f"{name} has no CSV header.")
                 imported[name] = raw
+
+            if "manifest.json" in names:
+                backup_validation.validate_manifest(
+                    archive.read("manifest.json"), imported, set(allowed)
+                )
+            backup_validation.validate_csv_files(imported, schemas, DEFAULT_SETTINGS)
 
     except zipfile.BadZipFile as exc:
         raise ValueError("The selected file is not a valid ZIP archive.") from exc
 
-    # Keep an in-memory rollback copy. Import is destructive by design, but a
-    # failed write/migration should never leave the app half-restored.
-    managed = list(BACKUP_DATA_FILES) + [WORKOUT_SET_TEMPLATES_FILE]
-    previous = {
-        path: path.read_bytes() if path.exists() else None
-        for path in managed
-    }
-
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Remove all managed user files first so an older backup cannot mix with
-        # newer data left behind on the device. Missing files are recreated by
-        # ensure_data() using the app's defaults/migrations.
-        for path in BACKUP_DATA_FILES:
-            if path.exists():
-                path.unlink()
-
-        for name, raw in imported.items():
-            allowed[name].write_bytes(raw)
-
-        # Explicitly excluded from backup: regenerate it from imported data.
-        if WORKOUT_SET_TEMPLATES_FILE.exists():
-            WORKOUT_SET_TEMPLATES_FILE.unlink()
-
-        ensure_data()
-    except Exception:
-        for path, raw in previous.items():
-            if raw is None:
-                if path.exists():
-                    path.unlink()
-            else:
-                path.write_bytes(raw)
-        raise
+    # The outer transaction journals the entire previous state before deletion.
+    # Recovery also covers process death during replacement or migrations.
+    for path in BACKUP_DATA_FILES:
+        _delete_file(path)
+    for name, raw in imported.items():
+        _atomic_write_bytes(allowed[name], raw.decode("utf-8-sig").encode("utf-8"))
+    # Older backups lack templates. Only those archives regenerate them.
+    ensure_data()
 
     return recognized
 
@@ -921,6 +1066,24 @@ def _migrate_csv(path, fieldnames, defaults=None):
     if header == fieldnames:
         return
 
+    if path in {SETS_FILE, ACTIVE_WORKOUT_FILE} and "legacy_rir" not in header:
+        for row in rows:
+            # Old RIR may have been a locked prescription. Preserve the value
+            # without promoting it to an actual effort observation.
+            row["legacy_rir"] = row.get("rir", "")
+            row["rir"] = ""
+            row["previous_rir"] = ""
+    if path == EXERCISE_DETAILS_FILE and "load_mode" not in header:
+        for row in rows:
+            row["load_mode"] = load_modes.default_for(row.get("exercise_name", ""))
+    if path == EXERCISE_DETAILS_FILE:
+        for row in rows:
+            name = row.get("exercise_name", "")
+            default = DEFAULT_EXERCISE_DETAILS.get(name, {})
+            for key in ("primary_muscles", "secondary_muscles"):
+                if key not in header:
+                    row[key] = default.get(key, "") or ("|".join(normalize_muscle_list(row.get("muscle_groups", ""), exercise_name=name)) if key == "primary_muscles" else "")
+
     migrated = []
     for row in rows:
         migrated.append(
@@ -933,6 +1096,7 @@ def _migrate_csv(path, fieldnames, defaults=None):
     _write_csv(path, fieldnames, migrated)
 
 
+@_locked
 def read_settings():
     if not SETTINGS_FILE.exists():
         return dict(DEFAULT_SETTINGS)
@@ -949,6 +1113,7 @@ def read_settings():
     return settings
 
 
+@_locked
 def save_settings(settings):
     merged = dict(DEFAULT_SETTINGS)
     merged.update(settings)
@@ -980,7 +1145,10 @@ def convert_weight_value(value, from_unit, to_unit):
     try:
         number = float(text)
     except (TypeError, ValueError):
-        return text
+        # Active fields can persist valid arithmetic before their next blur.
+        number = numeric_input.evaluate_numeric_expression(text)
+        if number is None:
+            return text
 
     if from_unit == "kg" and to_unit == "lb":
         number *= KG_TO_LB
@@ -999,6 +1167,7 @@ def convert_weight_value(value, from_unit, to_unit):
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
+@_transactional
 def convert_all_weights(from_unit, to_unit):
     """Convert every persisted workout weight when the display unit changes."""
     ensure_data()
@@ -1029,11 +1198,23 @@ def convert_all_weights(from_unit, to_unit):
         WORKOUT_SET_TEMPLATES_FILE, TEMPLATE_SET_FIELDS,
         ["weight"], "weight_unit"
     )
-    convert_file(SETS_FILE, SET_FIELDS, ["weight"], "weight_unit")
+    convert_file(SETS_FILE, SET_FIELDS, ["weight", "prescribed_weight"], "weight_unit")
     convert_file(
         ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS,
-        ["weight", "previous_weight"], "weight_unit"
+        ["weight", "previous_weight", "prescribed_weight"], "weight_unit"
     )
+
+
+@_transactional
+def change_weight_unit(to_unit):
+    """Commit loads/settings and return the converted settings and active state."""
+    if to_unit not in {"kg", "lb"}:
+        raise ValueError("Weight unit must be kg or lb.")
+    settings = read_settings()
+    convert_all_weights(settings.get("unit", "kg"), to_unit)
+    settings["unit"] = to_unit
+    save_settings(settings)
+    return settings, load_active_workout()
 
 
 def _fuzzy_score(query, text):
@@ -1119,7 +1300,7 @@ def filter_names(values, query="", mode=None):
 
 def parse_duration(value, default=180):
     """Accept seconds (180) or m:ss (3:00) and return whole seconds."""
-    text = str(value or "").strip()
+    text = "" if value is None else str(value).strip()
     if not text:
         return max(0, int(default))
 
@@ -1140,7 +1321,7 @@ def parse_duration(value, default=180):
         seconds = int(float(text))
         return max(0, seconds)
 
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return max(0, int(default))
 
 
@@ -1183,6 +1364,7 @@ def _latest_by_set_number(rows):
 
         if set_number not in latest:
             latest[set_number] = {
+                **_observation_metadata(row),
                 "weight": row.get("weight", ""),
                 "weight_unit": row.get("weight_unit", default_unit) or default_unit,
                 "reps": row.get("reps", ""),
@@ -1210,7 +1392,7 @@ def _latest_raw(workout_id, exercise_name):
 
     rows = [
         row
-        for row in _read_csv(SETS_FILE)
+        for row in _chronological_sets()
         if row.get("workout_id") == workout_id
         and row.get("exercise_name", "").casefold() == exercise_name.casefold()
         and row.get("completed", "1") != "0"
@@ -1402,6 +1584,7 @@ def _mark_default_workout_pack_installed():
     save_settings(settings)
 
 
+@_transactional
 def ensure_data():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     install_default_pack = False
@@ -1570,6 +1753,14 @@ def ensure_data():
             },
         )
 
+    active_rows = _read_csv(ACTIVE_WORKOUT_FILE)
+    if active_rows and not active_rows[0].get("session_id"):
+        # Upgrade an interrupted workout once, before it can be finished.
+        session_id = str(uuid.uuid4())
+        for row in active_rows:
+            row["session_id"] = session_id
+        _write_csv(ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS, active_rows)
+
     if not EXERCISE_CATALOG_FILE.exists():
         _write_csv(
             EXERCISE_CATALOG_FILE,
@@ -1727,12 +1918,21 @@ def ensure_data():
                 repeating_rows,
             )
 
+    active_rows = _read_csv(ACTIVE_WORKOUT_FILE)
+    if active_rows and not active_rows[0].get("performed_at"):
+        performed_at = active_rows[0].get("started_at") or datetime.now().isoformat(timespec="seconds")
+        context = _cycle_context(performed_at)
+        for row in active_rows:
+            row.update(performed_at=performed_at, **context)
+        _write_csv(ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS, active_rows)
+
 
 # ----------------------------------------------------------------------
 # EXERCISE CATALOG / SET TYPES
 # ----------------------------------------------------------------------
 
 
+@_locked
 def catalog_exercises(query="", mode=None):
     ensure_data()
     values = [
@@ -1742,6 +1942,7 @@ def catalog_exercises(query="", mode=None):
     return filter_names(values, query, mode)
 
 
+@_locked
 def catalog_contains(name):
     key = (name or "").strip().casefold()
     if not key:
@@ -1753,6 +1954,7 @@ def catalog_contains(name):
     )
 
 
+@_locked
 def add_catalog_exercise(name):
     ensure_data()
     name = (name or "").strip()
@@ -1767,6 +1969,7 @@ def add_catalog_exercise(name):
     return True
 
 
+@_locked
 def delete_catalog_exercise(name):
     ensure_data()
     key = (name or "").strip().casefold()
@@ -1780,6 +1983,7 @@ def delete_catalog_exercise(name):
     _write_csv(EXERCISE_CATALOG_FILE, CATALOG_FIELDS, rows)
 
 
+@_transactional
 def rename_exercise(old_name, new_name):
     """Rename one exercise everywhere without splitting its history."""
     ensure_data()
@@ -1834,6 +2038,12 @@ def rename_exercise(old_name, new_name):
         rows = _read_csv(path)
         changed = False
         for row in rows:
+            if path == ACTIVE_WORKOUT_FILE and row.get("rest_timer_state"):
+                state = rest_timer_state.decode(row["rest_timer_state"])
+                if state["exercise_name"].casefold() == old_key:
+                    state["exercise_name"] = new_name
+                    row["rest_timer_state"] = rest_timer_state.encode(state)
+                    changed = True
             if str(row.get("exercise_name", "") or "").strip().casefold() == old_key:
                 row["exercise_name"] = new_name
                 changed = True
@@ -1883,10 +2093,12 @@ def rename_exercise(old_name, new_name):
     return True
 
 
+@_locked
 def all_exercise_names():
     return catalog_exercises()
 
 
+@_locked
 def set_types(query="", mode=None):
     ensure_data()
     values = [
@@ -1901,6 +2113,7 @@ def set_types(query="", mode=None):
     return filter_names(values, query, mode)
 
 
+@_locked
 def set_type_contains(name):
     key = canonical_set_type(name).casefold()
     if not key:
@@ -1912,6 +2125,7 @@ def set_type_contains(name):
     )
 
 
+@_locked
 def add_set_type(name):
     ensure_data()
     name = canonical_set_type(name)
@@ -1926,6 +2140,7 @@ def add_set_type(name):
     return True
 
 
+@_locked
 def delete_set_type(name):
     """
     Remove only from the selectable set-type database.
@@ -1943,6 +2158,7 @@ def delete_set_type(name):
     _write_csv(SET_TYPES_FILE, SET_TYPE_FIELDS, rows)
 
 
+@_locked
 def read_exercise_details(exercise_name):
     ensure_data()
     key = (exercise_name or "").strip().casefold()
@@ -1952,15 +2168,11 @@ def read_exercise_details(exercise_name):
             default = DEFAULT_EXERCISE_DETAILS.get(exercise_name, {})
             return {
                 "exercise_name": row.get("exercise_name", exercise_name),
+                **set_context.metadata(row),
+                **progression.straight_settings(row.get("straight_rep_min"), row.get("straight_rep_max"), row.get("straight_progression")),
                 "muscle_groups": row.get("muscle_groups", ""),
-                "primary_muscles": (
-                    row.get("primary_muscles", "")
-                    or default.get("primary_muscles", "")
-                ),
-                "secondary_muscles": (
-                    row.get("secondary_muscles", "")
-                    or default.get("secondary_muscles", "")
-                ),
+                "primary_muscles": row.get("primary_muscles", ""),
+                "secondary_muscles": row.get("secondary_muscles", ""),
                 "description": row.get("description", ""),
                 "note": row.get("note", ""),
                 "set_seconds": row.get("set_seconds", ""),
@@ -1970,11 +2182,14 @@ def read_exercise_details(exercise_name):
                 ),
                 "weight_increment_lb": row.get("weight_increment_lb", ""),
                 "weight_increment_kg": row.get("weight_increment_kg", ""),
+                "load_mode": load_modes.normalize(row.get("load_mode") or load_modes.default_for(exercise_name)),
             }
 
     default = DEFAULT_EXERCISE_DETAILS.get(exercise_name, {})
     return {
         "exercise_name": exercise_name,
+        **set_context.metadata({}),
+        **progression.straight_settings(),
         "muscle_groups": default.get("muscle_groups", ""),
         "primary_muscles": default.get("primary_muscles", ""),
         "secondary_muscles": default.get("secondary_muscles", ""),
@@ -1986,8 +2201,10 @@ def read_exercise_details(exercise_name):
         ),
         "weight_increment_lb": "",
         "weight_increment_kg": "",
+        "load_mode": load_modes.default_for(exercise_name),
     }
 
+@_locked
 def exercise_weight_increment(exercise_name, unit, settings=None):
     """Return the available load jump for one exercise in the active unit."""
     unit = "lb" if str(unit or "kg").strip().lower() == "lb" else "kg"
@@ -2013,6 +2230,7 @@ def exercise_weight_increment(exercise_name, unit, settings=None):
     return default_weight_increment(equipment_type, unit)
 
 
+@_locked
 def reset_weight_increment_defaults(settings=None):
     settings = dict(settings or read_settings())
     for equipment_type in EQUIPMENT_TYPES:
@@ -2082,6 +2300,9 @@ def _migrate_exercise_details_muscles_to_rp():
     changed = False
     for row in rows:
         exercise_name = str(row.get("exercise_name", "") or "").strip()
+        if not row.get("load_mode"):
+            row["load_mode"] = load_modes.default_for(exercise_name)
+            changed = True
         primary = normalize_muscle_list(
             row.get("primary_muscles", ""), exercise_name=exercise_name
         )
@@ -2115,6 +2336,7 @@ def muscle_list_text(value):
     return "|".join(normalize_muscle_list(value))
 
 
+@_transactional
 def save_exercise_details(
     exercise_name,
     primary_muscles,
@@ -2125,11 +2347,26 @@ def save_exercise_details(
     equipment_type="",
     weight_increment_lb="",
     weight_increment_kg="",
+    load_mode=None,
+    straight_rep_min=None,
+    straight_rep_max=None,
+    straight_progression=None,
+    logging_context=None,
 ):
     ensure_data()
     exercise_name = (exercise_name or "").strip()
     if not exercise_name:
         return
+    previous_details = read_exercise_details(exercise_name)
+    previous_mode = previous_details["load_mode"]
+    context = set_context.validate({**set_context.metadata(previous_details), **(logging_context or {})})
+    context_changed = not set_context.matches(previous_details, context)
+    mode = load_modes.normalize(load_mode if load_mode is not None else previous_mode)
+    straight = progression.straight_settings(
+        previous_details["straight_rep_min"] if straight_rep_min is None else straight_rep_min,
+        previous_details["straight_rep_max"] if straight_rep_max is None else straight_rep_max,
+        previous_details["straight_progression"] if straight_progression is None else straight_progression,
+    )
 
     set_seconds_text = str(set_seconds or "").strip()
     if set_seconds_text:
@@ -2178,6 +2415,9 @@ def save_exercise_details(
             row["equipment_type"] = equipment_type
             row["weight_increment_lb"] = weight_increment_lb
             row["weight_increment_kg"] = weight_increment_kg
+            row["load_mode"] = mode
+            row.update(straight)
+            row.update(context)
             updated = True
             break
 
@@ -2194,12 +2434,43 @@ def save_exercise_details(
                 "equipment_type": equipment_type,
                 "weight_increment_lb": weight_increment_lb,
                 "weight_increment_kg": weight_increment_kg,
+                "load_mode": mode,
+                **straight,
+                **context,
             }
         )
 
     _write_csv(EXERCISE_DETAILS_FILE, EXERCISE_DETAIL_FIELDS, rows)
+    if mode != previous_mode or context_changed:
+        # Added load and assistance have different meanings. Do not seed a new
+        # plan from numeric defaults authored under the previous load mode.
+        exercises = _read_csv(WORKOUT_EXERCISES_FILE)
+        templates = _read_csv(WORKOUT_SET_TEMPLATES_FILE)
+        placements = set()
+        for exercise in exercises:
+            if exercise["exercise_name"].strip().casefold() == key:
+                placement = (exercise["workout_id"], exercise["order_index"])
+                first = next((row for row in templates if (row["workout_id"], row["order_index"]) == placement
+                              and str(row["set_number"]) == "1"), {})
+                inherited = first.get("context_override") != "1"
+                if mode != previous_mode or inherited:
+                    exercise["default_weight"] = ""
+                if context_changed and inherited:
+                    exercise["default_reps"] = ""
+                placements.add(placement)
+        if placements:
+            for template in templates:
+                if (template["workout_id"], template["order_index"]) in placements:
+                    inherited = template.get("context_override") != "1"
+                    if mode != previous_mode or inherited:
+                        template["weight"] = ""
+                    if context_changed and inherited:
+                        template["reps"] = ""
+            _write_csv(WORKOUT_EXERCISES_FILE, EXERCISE_FIELDS, exercises)
+            _write_csv(WORKOUT_SET_TEMPLATES_FILE, TEMPLATE_SET_FIELDS, templates)
 
 
+@_locked
 def workout_primary_muscles(workout_id):
     workout = read_workout(workout_id)
     if not workout:
@@ -2295,6 +2566,8 @@ def set_type_choices_for_method_row(method, set_rows, row_index):
     )
 
     if method in ACTIVATION_FOLLOWUP:
+        if 0 <= row_index < len(set_rows or []) and set_rows[row_index].get("protocol_group_start") == "1":
+            return ["Activation"]
         if prior_work:
             return [ACTIVATION_FOLLOWUP[method]]
         return ["Warm-up", "Activation"]
@@ -2325,10 +2598,15 @@ def reconcile_method_sets(method, set_rows):
     work_seen = False
     for row in output:
         current = canonical_set_type(row.get("set_type", "Normal"))
+        grouped = method in ACTIVATION_FOLLOWUP or method == "Cluster"
+        if not grouped:
+            row["protocol_group_start"] = ""
         if is_warmup_set_type(current) and not work_seen:
             row["set_type"] = "Warm-up"
+            row["protocol_group_start"] = ""
             continue
 
+        first_in_group = not work_seen or (grouped and row.get("protocol_group_start") == "1")
         if method == "Straight":
             row["set_type"] = current if current in {"Normal", "Top Set", "Back-off"} else "Normal"
         elif method == "AMRAP":
@@ -2336,7 +2614,7 @@ def reconcile_method_sets(method, set_rows):
         elif method == "Cluster":
             row["set_type"] = "Cluster Set"
         elif method in ACTIVATION_FOLLOWUP:
-            row["set_type"] = "Activation" if not work_seen else ACTIVATION_FOLLOWUP[method]
+            row["set_type"] = "Activation" if first_in_group else ACTIVATION_FOLLOWUP[method]
         else:
             row["set_type"] = "Normal"
         work_seen = True
@@ -2362,9 +2640,9 @@ def method_set_uses_rir(method, set_type):
     method = canonical_training_method(method)
     if is_warmup_set_type(set_type):
         return False
-    # AMRAP/activation-based/cluster methods encode effort through their method
-    # and segment performance rather than a per-segment RIR entry.
-    return method == "Straight"
+    # Anchor effort may be observed independently of the method's label.
+    # Cluster and continuation fragments do not become ordinary RM tests.
+    return method == "Straight" or (method != "Cluster" and method_calibration_anchor(method, set_type))
 
 
 def method_calibration_anchor(method, set_type):
@@ -2392,7 +2670,7 @@ def method_progression_managed_set(method, set_type):
         return False
     if method == "Straight":
         # Top/back-off remain deliberately user-authored until they receive a
-        # dedicated role algorithm; ordinary Straight rows keep the 8-12 engine.
+        # dedicated role algorithm; ordinary Straight rows use their configured policy.
         return set_type == "Normal"
     return set_type in allowed_set_types_for_method(method)
 
@@ -2428,128 +2706,120 @@ def is_hypertrophy_working_set(row):
     return not is_warmup_set_type(row.get("set_type", "Normal"))
 
 
+def _muscle_snapshot(exercise_name):
+    details = read_exercise_details(exercise_name)
+    return {"muscle_metadata_recorded": "1", "primary_muscles_snapshot": details.get("primary_muscles", ""),
+            "secondary_muscles_snapshot": details.get("secondary_muscles", "")}
+
+
+@_locked
+def initialize_volume_rows(rows):
+    """Initialize newly authored active rows; never call on historical migrations."""
+    volume_accounting.assign_groups(rows)
+    snapshots = {}
+    for row in rows:
+        if row.get("muscle_metadata_recorded") != "1":
+            name = row["exercise_name"]
+            if name not in snapshots: snapshots[name] = _muscle_snapshot(name)
+            row.update(snapshots[name])
+    return rows
+
+
+@_locked
+def volume_report(rows, *, planned=False, report_groups=False):
+    """Separate work categories and direct/indirect tagged involvement."""
+    prepared, cache = [], {}
+    for source in rows or []:
+        row = dict(source)
+        name = str(row.get("exercise_name", "")).strip()
+        if not name:
+            continue
+        if row.get("muscle_metadata_recorded") == "1":
+            primary, secondary = row.get("primary_muscles_snapshot", ""), row.get("secondary_muscles_snapshot", "")
+        else:
+            if name.casefold() not in cache: cache[name.casefold()] = read_exercise_details(name)
+            details = cache[name.casefold()]
+            primary, secondary = details.get("primary_muscles", ""), details.get("secondary_muscles", "")
+        def tags(value):
+            result = normalize_muscle_list(value, exercise_name=name)
+            return {volume_landmarks.report_group_for_muscle(tag) if report_groups else tag for tag in result}
+        row["_primary"] = tags(primary)
+        row["_secondary"] = tags(secondary) - row["_primary"]
+        prepared.append(row)
+    result = volume_accounting.summarize(prepared, planned=planned)
+    for kind in ("direct", "indirect"):
+        result[kind] = dict(sorted(result[kind].items(), key=lambda item: (RP_MUSCLE_GROUPS.index(item[0]) if item[0] in RP_MUSCLE_GROUPS else len(RP_MUSCLE_GROUPS), item[0])))
+    return result
+
+
+@_locked
 def completed_primary_muscle_set_counts(rows, *, report_groups=False):
-    """
-    Count completed working sets by primary muscle.
+    """Compatibility count: conventional direct sets only, never mini-segments."""
+    return {name: metrics["conventional_sets"] for name, metrics in volume_report(rows, report_groups=report_groups)["direct"].items()
+            if metrics["conventional_sets"]}
 
-    One set counts once for every primary muscle assigned to its exercise.  For
-    RP reporting, Lats + Mid Back are merged into one Back group and deduplicated
-    within a set because RP's published Back landmarks combine vertical pulling
-    and rowing volume. Secondary-muscle tags are intentionally not counted: the
-    RP landmarks are most useful against deliberate/primary working sets and we
-    should not silently turn every compound into fractional secondary volume.
-    """
-    counts = {}
-    details_cache = {}
 
-    for row in rows or []:
-        if not is_hypertrophy_working_set(row):
+def _planned_volume_rows(exercises, scope, snapshots=None):
+    """Copy a plan into scoped report rows without changing its stored fields."""
+    rows = []
+    snapshots = {} if snapshots is None else snapshots
+    for index, exercise in enumerate(exercises):
+        name = str(exercise.get("exercise_name", "")).strip()
+        if not name:
             continue
-
-        exercise_name = str(row.get("exercise_name", "") or "").strip()
-        if not exercise_name:
-            continue
-        key = exercise_name.casefold()
-        if key not in details_cache:
-            details_cache[key] = read_exercise_details(exercise_name)
-        details = details_cache[key]
-        muscles = normalize_muscle_list(details.get("primary_muscles", ""))
-        if report_groups:
-            muscles = list({
-                volume_landmarks.report_group_for_muscle(muscle)
-                for muscle in muscles
-                if volume_landmarks.report_group_for_muscle(muscle)
-            })
-
-        for muscle in muscles:
-            counts[muscle] = counts.get(muscle, 0) + 1
-
-    preferred = list(RP_MUSCLE_GROUPS)
-    if not report_groups:
-        preferred = list(BODYBUILDING_MUSCLE_GROUPS)
-
-    ordered = {}
-    for muscle in preferred:
-        if counts.get(muscle):
-            ordered[muscle] = counts[muscle]
-    for muscle in sorted(counts, key=str.casefold):
-        if muscle not in ordered and counts[muscle]:
-            ordered[muscle] = counts[muscle]
-    return ordered
+        key = name.casefold()
+        if key not in snapshots:
+            snapshots[key] = _muscle_snapshot(name)
+        group = [{**source, "exercise_name": name, "set_number": number,
+                  "completed": True, "volume_scope": f"{scope}/{index}",
+                  "training_method": exercise.get("training_method", "Straight"),
+                  **snapshots[key]}
+                 for number, source in enumerate(exercise.get("sets", []), 1)]
+        volume_accounting.assign_groups(group)
+        rows.extend(group)
+    return rows
 
 
-def mesocycle_planned_primary_set_counts(cycle=None):
-    """Return one repeating microcycle's planned working sets by RP muscle.
+@_locked
+def workout_volume_report(exercises, *, report_groups=False):
+    """Raw planned work per workout; protocols and indirect tags stay separate."""
+    return volume_report(_planned_volume_rows(exercises, "workout"),
+                         planned=True, report_groups=report_groups)
 
-    This intentionally uses the mesocycle's programmed schedule and workout
-    templates only. Completed session history is not read, so the value stays
-    stable before, during, and after a training week. Warm-up sets are excluded.
-    """
-    ensure_data()
+
+@_locked
+def mesocycle_volume_report(cycle=None):
+    """Repeating Build template accounting, with matching seven-day rates."""
     cycle = _normalize_mesocycle(cycle or active_mesocycle() or _mesocycle_defaults())
-    cycle_id = str(cycle.get("cycle_id", "") or "")
-
-    counts = {}
-    details_cache = {}
-    workout_cache = {}
-
-    entries = mesocycle_day_schedule_entries(cycle_id)
-    for day_number in sorted(entries):
-        workout_id = str(entries[day_number].get("workout_id", "") or "").strip()
-        if not workout_id:
-            continue
-
-        if workout_id not in workout_cache:
-            workout_cache[workout_id] = read_workout(workout_id)
-        workout = workout_cache[workout_id]
-        if not workout:
-            continue
-
-        for exercise in workout.get("exercises", []):
-            exercise_name = str(exercise.get("exercise_name", "") or "").strip()
-            if not exercise_name:
-                continue
-
-            key = exercise_name.casefold()
-            if key not in details_cache:
-                details_cache[key] = read_exercise_details(exercise_name)
-
-            report_groups = {
-                volume_landmarks.report_group_for_muscle(muscle)
-                for muscle in normalize_muscle_list(
-                    details_cache[key].get("primary_muscles", ""),
-                    exercise_name=exercise_name,
-                )
-                if volume_landmarks.report_group_for_muscle(muscle)
-            }
-            if not report_groups:
-                continue
-
-            for set_row in exercise.get("sets", []):
-                set_type = str(
-                    set_row.get("set_type", "Normal") or "Normal"
-                ).strip().casefold()
-                if set_type in {"warm-up", "warmup", "warm up"}:
-                    continue
-                for group in report_groups:
-                    counts[group] = counts.get(group, 0) + 1
-
-    ordered = {}
-    for group in RP_MUSCLE_GROUPS:
-        if counts.get(group):
-            ordered[group] = counts[group]
-    for group in sorted(counts, key=str.casefold):
-        if group not in ordered and counts[group]:
-            ordered[group] = counts[group]
-
-    return ordered
+    rows, cache, snapshots = [], {}, {}
+    for day, entry in sorted(mesocycle_day_schedule_entries(cycle["cycle_id"]).items()):
+        wid = entry.get("workout_id", "")
+        if not wid: continue
+        if wid not in cache: cache[wid] = read_workout(wid)
+        workout = cache[wid]
+        if not workout: continue
+        rows.extend(_planned_volume_rows(workout.get("exercises", []), f"{day}/{wid}", snapshots))
+    result = volume_report(rows, planned=True, report_groups=True)
+    days = int(cycle["microcycle_days"])
+    result.update(period_days=days, weekly_totals=volume_accounting.scaled(result["totals"], days),
+                  weekly_direct={key: volume_accounting.scaled(value, days) for key, value in result["direct"].items()},
+                  weekly_indirect={key: volume_accounting.scaled(value, days) for key, value in result["indirect"].items()})
+    return result
 
 
+@_locked
+def mesocycle_planned_primary_set_counts(cycle=None):
+    """Raw period counts of conventional direct sets; protocols are separate."""
+    return {name: metrics["conventional_sets"] for name, metrics in mesocycle_volume_report(cycle)["direct"].items() if metrics["conventional_sets"]}
+
+
+@_locked
 def mesocycle_weekly_primary_set_counts(cycle=None):
-    """Compatibility alias for the planned single-period volume total."""
-    return mesocycle_planned_primary_set_counts(cycle)
+    """Conventional direct sets normalized to seven days."""
+    return {name: metrics["conventional_sets"] for name, metrics in mesocycle_volume_report(cycle)["weekly_direct"].items() if metrics["conventional_sets"]}
 
 
+@_locked
 def read_workout_details(workout_id):
     ensure_data()
     workout_id = str(workout_id or "").strip()
@@ -2582,6 +2852,7 @@ def _positive_int(value, default):
         return int(default)
 
 
+@_locked
 def save_workout_details(
     workout_id,
     description,
@@ -2624,6 +2895,7 @@ def save_workout_details(
     _write_csv(WORKOUT_DETAILS_FILE, WORKOUT_DETAIL_FIELDS, rows)
 
 
+@_locked
 def estimate_active_workout_seconds(active):
     """Estimate a realistic session duration from work, rest and transitions."""
     if not active:
@@ -2711,6 +2983,75 @@ def _mesocycle_intro_seen_map():
     return output
 
 
+def _mesocycle_history_has_calibration(
+    cycle_id, workout_id, exercise_name, training_method="Straight"
+):
+    """Recover calibration state from completed sets in this exact mesocycle.
+
+    Calibration markers were introduced and refined over time.  Older cycles can
+    therefore contain valid completed anchor sets without the newest
+    per-workout/per-method settings marker.  The saved session itself is stronger
+    evidence than that auxiliary marker, especially when resuming an accidentally
+    ended cycle.
+    """
+    cycle_key = str(cycle_id or "").strip()
+    workout_key = str(workout_id or "").strip().casefold()
+    exercise_key = str(exercise_name or "").strip().casefold()
+    method = canonical_training_method(training_method)
+    if not cycle_key or not workout_key or not exercise_key:
+        return False
+
+    grouped = {}
+    for row in _read_sets_cached():
+        if deloads.is_recovery(row):
+            continue
+        if str(row.get("cycle_id", "") or "").strip() != cycle_key:
+            continue
+        if str(row.get("workout_id", "") or "").strip().casefold() != workout_key:
+            continue
+        if (
+            str(row.get("exercise_name", "") or "").strip().casefold()
+            != exercise_key
+        ):
+            continue
+        session_id = str(row.get("session_id", "") or "").strip()
+        if session_id:
+            grouped.setdefault(session_id, []).append(row)
+
+    for session_rows in grouped.values():
+        explicit_method = next(
+            (
+                str(row.get("training_method", "") or "").strip()
+                for row in session_rows
+                if str(row.get("training_method", "") or "").strip()
+            ),
+            "",
+        )
+        session_method = (
+            canonical_training_method(explicit_method)
+            if explicit_method
+            else infer_training_method(session_rows)
+        )
+        if session_method != method:
+            continue
+
+        for row in session_rows:
+            if str(row.get("completed", "1") or "1") == "0":
+                continue
+            if not method_calibration_anchor(method, row.get("set_type", "Normal")):
+                continue
+            try:
+                weight = float(str(row.get("weight", "") or "").strip())
+                reps = float(str(row.get("reps", "") or "").strip())
+            except (TypeError, ValueError):
+                continue
+            if weight > 0 and reps > 0:
+                return True
+
+    return False
+
+
+@_locked
 def mesocycle_intro_seen(
     cycle_id, workout_id, exercise_name, training_method="Straight"
 ):
@@ -2731,9 +3072,16 @@ def mesocycle_intro_seen(
             and placement_method == method_key
         ):
             return True
-    return False
+
+    # If the auxiliary marker is missing (common for older/resumed cycles), a
+    # completed anchor set saved under this same cycle/workout/method proves that
+    # calibration already happened.  Do not force the user to recalibrate.
+    return _mesocycle_history_has_calibration(
+        cycle_id, workout_key, exercise_key, training_method
+    )
 
 
+@_locked
 def mark_mesocycle_intro_seen(
     cycle_id, workout_id, exercise_name, training_method="Straight"
 ):
@@ -2786,6 +3134,7 @@ def _mesocycle_defaults():
         "start_rir": "3",
         "end_rir": "1",
         "deload_rir": "4",
+        **deloads.settings({}),
         "rir_lock": "1",
         "rest_timer_lock": "0",
         "show_last_week_reps": "0",
@@ -2801,6 +3150,7 @@ def mesocycle_defaults():
 def _normalize_mesocycle(row):
     result = _mesocycle_defaults()
     result.update(row or {})
+    result.update(deloads.settings(result))
     result["microcycle_days"] = str(max(1, _positive_int(result.get("microcycle_days"), 7)))
     result["length_value"] = str(max(1, _positive_int(result.get("length_value"), 5)))
     unit = str(result.get("length_unit", "microcycles") or "microcycles").lower()
@@ -2832,6 +3182,7 @@ def _normalize_mesocycle(row):
     return result
 
 
+@_locked
 def active_mesocycle():
     ensure_data()
     for row in reversed(_read_csv(MESOCYCLES_FILE)):
@@ -2840,12 +3191,14 @@ def active_mesocycle():
     return None
 
 
+@_locked
 def mesocycle_history(limit=6):
     ensure_data()
     rows = [_normalize_mesocycle(row) for row in reversed(_read_csv(MESOCYCLES_FILE))]
     return rows[:limit] if limit is not None else rows
 
 
+@_locked
 def get_mesocycle(cycle_id):
     ensure_data()
     cycle_id = str(cycle_id or "").strip()
@@ -2855,6 +3208,7 @@ def get_mesocycle(cycle_id):
     return None
 
 
+@_locked
 def update_mesocycle(cycle_id, config):
     """Update an existing cycle without making it the active cycle."""
     ensure_data()
@@ -2869,6 +3223,8 @@ def update_mesocycle(cycle_id, config):
         active = row.get("active", "0")
         setup_complete = row.get("setup_complete", "1")
         values = _normalize_mesocycle({**row, **(config or {})})
+        if error := deloads.effort_error(values):
+            raise ValueError(error)
         values["cycle_id"] = cycle_id
         values["name"] = (values.get("name") or "Mesocycle").strip() or "Mesocycle"
         values["start_date"] = (
@@ -2885,9 +3241,12 @@ def update_mesocycle(cycle_id, config):
     return found
 
 
+@_locked
 def save_mesocycle(config):
     ensure_data()
     values = _normalize_mesocycle(config)
+    if error := deloads.effort_error(values):
+        raise ValueError(error)
     cycle_id = str(values.get("cycle_id", "") or "").strip() or uuid.uuid4().hex[:8]
     values["cycle_id"] = cycle_id
     values["name"] = (values.get("name") or "Mesocycle").strip() or "Mesocycle"
@@ -2911,6 +3270,7 @@ def save_mesocycle(config):
     return cycle_id
 
 
+@_locked
 def end_mesocycle(cycle_id):
     ensure_data()
     rows = _read_csv(MESOCYCLES_FILE)
@@ -2920,6 +3280,7 @@ def end_mesocycle(cycle_id):
     _write_csv(MESOCYCLES_FILE, MESOCYCLE_FIELDS, rows)
 
 
+@_locked
 def continue_mesocycle(cycle_id):
     """Reactivate the same mesocycle instead of cloning it.
 
@@ -2950,6 +3311,7 @@ def continue_mesocycle(cycle_id):
     return cycle_id
 
 
+@_transactional
 def delete_mesocycle(cycle_id):
     ensure_data()
     cycle_id = str(cycle_id or "")
@@ -2965,6 +3327,7 @@ def delete_mesocycle(cycle_id):
     )
 
 
+@_locked
 def mesocycle_has_planned_workouts(cycle_id):
     return any(
         bool((row.get("workout_id") or "").strip())
@@ -2972,6 +3335,7 @@ def mesocycle_has_planned_workouts(cycle_id):
     )
 
 
+@_locked
 def mark_mesocycle_setup_complete(cycle_id):
     cycle = active_mesocycle()
     if not cycle or cycle.get("cycle_id") != cycle_id:
@@ -2982,6 +3346,7 @@ def mark_mesocycle_setup_complete(cycle_id):
     save_mesocycle(cycle)
 
 
+@_locked
 def mesocycle_length_microcycles(cycle=None):
     """Return the plan length expressed as repeating microcycles.
 
@@ -2999,6 +3364,7 @@ def mesocycle_length_microcycles(cycle=None):
     return max(1, (legacy_days + micro_days - 1) // micro_days)
 
 
+@_locked
 def mesocycle_status(cycle=None, today=None):
     cycle = _normalize_mesocycle(cycle or active_mesocycle() or _mesocycle_defaults())
     try:
@@ -3106,6 +3472,7 @@ def _mesocycle_for_id(cycle_id):
     return None
 
 
+@_locked
 def mesocycle_day_schedule_entries(cycle_id):
     """Return the repeating schedule keyed by day within one microcycle.
 
@@ -3135,6 +3502,7 @@ def mesocycle_day_schedule_entries(cycle_id):
     return result
 
 
+@_locked
 def mesocycle_day_schedule(cycle_id):
     return {
         day_number: row.get("workout_id", "")
@@ -3165,6 +3533,7 @@ def _write_mesocycle_schedule_entries(cycle_id, entries):
     )
 
 
+@_locked
 def save_mesocycle_day_schedule(cycle_id, schedule, microcycle_days=None):
     """Replace the complete repeating day schedule for one mesocycle."""
     ensure_data()
@@ -3188,6 +3557,7 @@ def save_mesocycle_day_schedule(cycle_id, schedule, microcycle_days=None):
     _write_mesocycle_schedule_entries(cycle_id, entries)
 
 
+@_locked
 def set_mesocycle_day_workout(cycle_id, day_number, workout_id, cycle=None):
     """Set one day of the repeating mesocycle schedule.
 
@@ -3242,6 +3612,7 @@ def _session_counts_by_date():
     return counts
 
 
+@_locked
 def mesocycle_calendar_days(cycle=None):
     ensure_data()
     cycle = _normalize_mesocycle(cycle or active_mesocycle() or _mesocycle_defaults())
@@ -3276,6 +3647,7 @@ def mesocycle_calendar_days(cycle=None):
     return days
 
 
+@_locked
 def active_cycle_locks():
     cycle = active_mesocycle()
     if not cycle:
@@ -3285,6 +3657,8 @@ def active_cycle_locks():
             "suggested_rir": None,
         }
     status = mesocycle_status(cycle)
+    if status["phase"] not in {"Build", "Deload"}:
+        return {"rir_lock": False, "rest_timer_lock": False, "suggested_rir": None}
     return {
         "rir_lock": cycle.get("rir_lock", "1") != "0",
         "rest_timer_lock": cycle.get("rest_timer_lock", "0") == "1",
@@ -3292,6 +3666,7 @@ def active_cycle_locks():
     }
 
 
+@_locked
 def workout_has_active_cycle_warning(workout_id):
     cycle = active_mesocycle()
     if not cycle:
@@ -3301,16 +3676,19 @@ def workout_has_active_cycle_warning(workout_id):
     return bool(workout_id)
 
 
+@_locked
 def read_workouts():
     ensure_data()
     return _read_csv(WORKOUTS_FILE)
 
 
+@_locked
 def read_exercises():
     ensure_data()
     return _read_csv(WORKOUT_EXERCISES_FILE)
 
 
+@_locked
 def workout_list_summaries():
     """Return lightweight workout-card data using one pass over each CSV.
 
@@ -3380,6 +3758,7 @@ def workout_list_summaries():
     return output
 
 
+@_locked
 def read_workout(workout_id):
     ensure_data()
 
@@ -3440,6 +3819,8 @@ def read_workout(workout_id):
                             ),
                         ),
                         "set_type": row.get("set_type", "Normal") or "Normal",
+                        "protocol_group_start": row.get("protocol_group_start", ""),
+                        **set_context.template_metadata(row),
                     }
                     for row in sets
                 ],
@@ -3453,6 +3834,7 @@ def read_workout(workout_id):
     }
 
 
+@_transactional
 def create_workout(name="New Workout"):
     ensure_data()
 
@@ -3470,6 +3852,7 @@ def create_workout(name="New Workout"):
     return workout_id
 
 
+@_transactional
 def save_workout(workout_id, name, exercises):
     ensure_data()
 
@@ -3557,6 +3940,8 @@ def save_workout(workout_id, name, exercises):
                         )
                     ),
                     "set_type": set_type,
+                    "protocol_group_start": set_row.get("protocol_group_start", ""),
+                    **set_context.template_metadata(set_row),
                 }
             )
 
@@ -3575,6 +3960,7 @@ def save_workout(workout_id, name, exercises):
     )
 
 
+@_transactional
 def delete_workout(workout_id):
     """Delete a template while preserving completed workout history."""
     ensure_data()
@@ -3614,13 +4000,15 @@ def delete_workout(workout_id):
 # ----------------------------------------------------------------------
 
 
+@_locked
 def latest_set_values(workout_id, exercise_name):
     ensure_data()
 
     matching = [
         row
-        for row in _read_csv(SETS_FILE)
-        if row.get("workout_id") == workout_id
+        for row in _chronological_sets()
+        if not deloads.is_recovery(row)
+        and row.get("workout_id") == workout_id
         and row.get("exercise_name", "").casefold() == exercise_name.casefold()
         and row.get("completed", "1") != "0"
     ]
@@ -3628,24 +4016,29 @@ def latest_set_values(workout_id, exercise_name):
     return _latest_by_set_number(matching)
 
 
+@_locked
 def latest_exercise_values(exercise_name):
     ensure_data()
 
     matching = [
         row
-        for row in _read_csv(SETS_FILE)
-        if row.get("exercise_name", "").casefold() == exercise_name.casefold()
+        for row in _chronological_sets()
+        if not deloads.is_recovery(row)
+        and row.get("exercise_name", "").casefold() == exercise_name.casefold()
         and row.get("completed", "1") != "0"
     ]
 
     return _latest_by_set_number(matching)
 
 
+@_locked
 def latest_completed_exercise_set(exercise_name):
     """Return the newest completed exercise set with usable weight/reps."""
     ensure_data()
 
-    for row in reversed(_read_csv(SETS_FILE)):
+    for row in reversed(_chronological_sets()):
+        if deloads.is_recovery(row):
+            continue
         if (
             row.get("exercise_name", "").casefold() != exercise_name.casefold()
             or row.get("completed", "1") == "0"
@@ -3666,52 +4059,14 @@ def latest_completed_exercise_set(exercise_name):
     return None
 
 
-def latest_completed_straight_session(exercise_name):
-    """Return completed straight sets from the newest session for an exercise."""
-    ensure_data()
-    exercise_key = str(exercise_name or "").strip().casefold()
-    rows = _read_csv(SETS_FILE)
-
-    latest_session_id = ""
-    for row in reversed(rows):
-        if (
-            row.get("exercise_name", "").strip().casefold() == exercise_key
-            and row.get("completed", "1") != "0"
-            and is_straight_set_type(row.get("set_type", "Normal"))
-        ):
-            try:
-                weight = float(str(row.get("weight", "") or "").strip())
-                reps = float(str(row.get("reps", "") or "").strip())
-            except (TypeError, ValueError):
-                continue
-            if weight > 0 and reps > 0:
-                latest_session_id = row.get("session_id", "")
-                break
-
-    if not latest_session_id:
-        return []
-
-    output = []
-    for row in rows:
-        if (
-            row.get("session_id", "") == latest_session_id
-            and row.get("exercise_name", "").strip().casefold() == exercise_key
-            and row.get("completed", "1") != "0"
-            and is_straight_set_type(row.get("set_type", "Normal"))
-        ):
-            output.append({
-                "weight": row.get("weight", ""),
-                "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
-                "reps": row.get("reps", ""),
-                "rir": row.get("rir", ""),
-                "set_type": row.get("set_type", "Normal") or "Normal",
-                "completed": True,
-                "session_id": latest_session_id,
-                "date": row.get("date", ""),
-            })
-    return output
+@_locked
+def latest_completed_straight_session(exercise_name, workout_id=None):
+    """Newest saved Straight session, including missed and invalid working rows."""
+    return [row for row in latest_completed_method_session(exercise_name, "Straight", workout_id=workout_id)
+            if is_straight_set_type(row.get("set_type", "Normal"))]
 
 
+@_locked
 def latest_completed_straight_set(exercise_name):
     """
     Return the newest usable completed straight set for an exercise.
@@ -3721,7 +4076,9 @@ def latest_completed_straight_set(exercise_name):
     """
     ensure_data()
 
-    for row in reversed(_read_csv(SETS_FILE)):
+    for row in reversed(_chronological_sets()):
+        if deloads.is_recovery(row):
+            continue
         if (
             row.get("exercise_name", "").casefold() != exercise_name.casefold()
             or row.get("completed", "1") == "0"
@@ -3743,12 +4100,14 @@ def latest_completed_straight_set(exercise_name):
     return None
 
 
-def latest_completed_method_session(exercise_name, training_method):
+@_locked
+def latest_completed_method_session(exercise_name, training_method, workout_id=None):
     """Return the newest saved session for one exercise/method, including missed rows."""
     ensure_data()
     exercise_key = str(exercise_name or "").strip().casefold()
     method = canonical_training_method(training_method)
-    rows = _read_csv(SETS_FILE)
+    rows = [row for row in _chronological_sets()
+            if not deloads.is_recovery(row) and (workout_id is None or row.get("workout_id") == workout_id)]
 
     grouped = {}
     for row in rows:
@@ -3778,8 +4137,6 @@ def latest_completed_method_session(exercise_name, training_method):
     for row in reversed(rows):
         if row.get("exercise_name", "").strip().casefold() != exercise_key:
             continue
-        if row.get("completed", "1") == "0":
-            continue
         if is_warmup_set_type(row.get("set_type", "Normal")):
             continue
         session_id = row.get("session_id", "")
@@ -3795,6 +4152,7 @@ def latest_completed_method_session(exercise_name, training_method):
     output = []
     for row in grouped.get(latest_session_id, []):
         output.append({
+            **_observation_metadata(row),
             "weight": row.get("weight", ""),
             "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
             "reps": row.get("reps", ""),
@@ -3810,6 +4168,7 @@ def latest_completed_method_session(exercise_name, training_method):
     return output
 
 
+@_locked
 def latest_completed_method_anchor_set(exercise_name, training_method):
     """Newest usable progression-anchor row for the selected training method."""
     method = canonical_training_method(training_method)
@@ -3829,13 +4188,102 @@ def latest_completed_method_anchor_set(exercise_name, training_method):
     return None
 
 
+@_locked
+def pre_deload_session(cycle_id, workout_id, exercise_name, method):
+    """Latest matching session before the fixed Build/Deload boundary."""
+    cycle = get_mesocycle(cycle_id)
+    if not cycle:
+        return []
+    start = datetime.fromisoformat(cycle["start_date"]).date()
+    status = mesocycle_status(cycle, today=start)
+    boundary = start + timedelta(days=status["build_microcycles"] * int(cycle["microcycle_days"]))
+    grouped = {}
+    for row in _chronological_sets():
+        if row.get("cycle_id") != cycle_id or row.get("workout_id") != workout_id:
+            continue
+        if row.get("exercise_name", "").strip().casefold() != exercise_name.strip().casefold() or deloads.is_recovery(row):
+            continue
+        try:
+            day = datetime.fromisoformat(row.get("date", "")).date()
+        except (TypeError, ValueError):
+            continue
+        if start <= day < boundary:
+            grouped.setdefault(row["session_id"], []).append(row)
+    for group in reversed(list(grouped.values())):
+        recorded = next((row.get("training_method") for row in group if row.get("training_method")), "")
+        if resolve_training_method(recorded, group) == method:
+            return sorted(group, key=lambda row: int(row.get("set_number", 0) or 0))
+    return []
+
+
+def _build_deload_rows(workout, rows, context):
+    cycle = get_mesocycle(context.get("cycle_id"))
+    if not cycle:
+        return rows
+    config = deloads.settings(cycle)
+    effort_error = deloads.effort_error(cycle)
+    manual = config["deload_policy"] == "manual" or bool(effort_error)
+    if effort_error:
+        # Keep legacy cycle data intact, but do not prescribe an invalid target.
+        context["cycle_target_rir"] = ""
+    output = []
+    for name in dict.fromkeys(row["exercise_name"] for row in rows):
+        group = [dict(row) for row in rows if row["exercise_name"] == name]
+        work = [row for row in group if not is_warmup_set_type(row.get("set_type"))]
+        method = group[0]["training_method"]
+        reference = pre_deload_session(cycle["cycle_id"], workout["workout_id"], name, method)
+        reference_work = [row for row in reference if not is_warmup_set_type(row.get("set_type"))]
+        count = len(work) if manual else deloads.recovery_count(method, len(work), config["deload_volume_percent"])
+        selected = group if manual else [row for row in group if is_warmup_set_type(row.get("set_type"))] + work[:count]
+        working_index = 0
+        for index, row in enumerate(selected, 1):
+            warmup = is_warmup_set_type(row.get("set_type"))
+            row.update(prescription_kind="deload_manual" if manual else "deload", source_method=method,
+                       original_work_count=str(len(work)), deload_load_percent=config["deload_load_percent"],
+                       deload_volume_percent=config["deload_volume_percent"])
+            if effort_error:
+                row["target_rir"] = ""
+            if not manual:
+                row.update(training_method="Straight", set_type="Warm-up" if warmup else "Normal",
+                           planned_work_count=str(count) if count else "", set_number=index,
+                           protocol_group_start="",
+                           previous_weight="", previous_reps="", previous_rir="")
+            if not warmup:
+                ref = reference_work[working_index] if working_index < len(reference_work) else {}
+                working_index += 1
+                if ref.get("completed", "1") == "0" or set_context.comparison_error([ref], [row]):
+                    ref = {}
+                row.update(reference_session_id=ref.get("session_id", ""), reference_weight=ref.get("weight", ""),
+                           reference_weight_unit=ref.get("weight_unit", row["weight_unit"]))
+                if not manual:
+                    details = read_exercise_details(name)
+                    source_reps = progression._number(ref.get("reps"))
+                    low = min(int(details["straight_rep_min"]), progression.CLUSTER_TARGET_REPS) if method == "Cluster" else int(details["straight_rep_min"])
+                    row["target_reps"] = str(max(1, min(low, int(source_reps)))) if source_reps is not None and source_reps > 0 else str(low)
+                    row["target_rir"] = context["cycle_target_rir"]
+                    value = progression._number(convert_weight_value(ref.get("weight", ""), ref.get("weight_unit") or row["weight_unit"], row["weight_unit"]))
+                    eligible = (row["load_mode"] == "external" and ref.get("load_mode", "external") == "external"
+                                and method not in {"Cluster", "Mechanical Drop Set"}
+                                and not (method == "Straight" and details["straight_progression"] == "manual"))
+                    if eligible and value is not None and value > 0 and source_reps is not None and source_reps > 0:
+                        step = exercise_weight_increment(name, row["weight_unit"])
+                        row["prescribed_weight"] = deloads.recovery_weight(value, percent=config["deload_load_percent"], unit=row["weight_unit"], step=step)
+            output.append(row)
+    return output
+
+
+@_locked
 def build_active_workout(workout):
     rows = []
     started_at = ""
     weight_unit = read_settings().get("unit", "kg")
+    performed_at = datetime.now().isoformat(timespec="seconds")
+    context = _cycle_context(performed_at)
 
     for exercise in workout["exercises"]:
         exercise_name = exercise["exercise_name"]
+        details = read_exercise_details(exercise_name)
+        mode = details["load_mode"]
         training_method = resolve_training_method(
             exercise.get("training_method", ""), exercise.get("sets", [])
         )
@@ -3850,6 +4298,9 @@ def build_active_workout(workout):
 
         for set_number, set_row in enumerate(exercise.get("sets", []), start=1):
             previous = latest.get(set_number, {})
+            row_context = set_context.resolve(set_row, details)
+            if load_modes.normalize(previous.get("load_mode", "external")) != mode or not set_context.matches(previous, row_context):
+                previous = {}
 
             previous_weight = str(
                 previous.get("weight", "")
@@ -3873,12 +4324,21 @@ def build_active_workout(workout):
                     "weight_unit": weight_unit,
                     "reps": "",
                     "rir": "",
+                    "target_rir": context["cycle_target_rir"] if method_set_uses_rir(training_method, set_row.get("set_type", "Normal")) else "",
+                    "legacy_rir": "",
+                    "load_mode": mode,
                     "previous_weight": previous_weight,
                     "previous_reps": previous_reps,
                     "previous_rir": previous_rir,
                     "last_week_reps": history_reps,
                     "set_type": set_row.get("set_type", "Normal") or "Normal",
                     "training_method": training_method,
+                    "planned_work_count": str(sum(not is_warmup_set_type(item.get("set_type", "Normal")) for item in exercise.get("sets", []))),
+                    "protocol_group_start": set_row.get("protocol_group_start", ""),
+                    **row_context,
+                    "context_override": set_context.template_metadata(set_row)["context_override"],
+                    "stop_reason": "",
+                    "actual_rest_seconds": "",
                     "note": "",
                     "completed": False,
                     "calibration_done": False,
@@ -3894,7 +4354,14 @@ def build_active_workout(workout):
                 }
             )
 
+    if context.get("cycle_phase") == "Deload":
+        rows = _build_deload_rows(workout, rows, context)
+    initialize_volume_rows(rows)
+
     return {
+        "performed_at": performed_at,
+        **context,
+        "session_id": str(uuid.uuid4()),
         "workout_id": workout["workout_id"],
         "workout_name": workout["name"],
         "started_at": started_at,
@@ -3904,6 +4371,7 @@ def build_active_workout(workout):
     }
 
 
+@_locked
 def save_active_workout(active):
     ensure_data()
 
@@ -3912,10 +4380,18 @@ def save_active_workout(active):
         return
 
     rows = []
+    if not active.get("session_id"):
+        active["session_id"] = str(uuid.uuid4())
+    # A delayed UI event must not resurrect a successfully finished session.
+    if _saved_session_rows(active["session_id"]):
+        return
 
     for row in active.get("rows", []):
         rows.append(
             {
+                "session_id": active["session_id"],
+                **{key: active.get(key, "") for key in ("performed_at", "cycle_id", "cycle_microcycle", "cycle_phase", "cycle_target_rir")},
+                **_observation_metadata(row),
                 "workout_id": active["workout_id"],
                 "workout_name": active["workout_name"],
                 "exercise_name": row["exercise_name"],
@@ -3950,6 +4426,7 @@ def save_active_workout(active):
                     "1" if row.get("calibration_done", False) else "0"
                 ),
                 "rest_seconds": str(row.get("rest_seconds", 180)),
+                "rest_timer_state": active.get("rest_timer_state", ""),
                 "started_at": active.get("started_at", ""),
                 "timer_started": (
                     "1" if active.get("timer_started", False) else "0"
@@ -3963,6 +4440,7 @@ def save_active_workout(active):
     _write_csv(ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS, rows)
 
 
+@_locked
 def load_active_workout():
     ensure_data()
 
@@ -4005,6 +4483,7 @@ def load_active_workout():
         loaded_rows.append({
             "exercise_name": row["exercise_name"],
             "set_number": int(row["set_number"]),
+            **_observation_metadata(row),
             "weight": row.get("weight", ""),
             "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
             "reps": row.get("reps", ""),
@@ -4018,6 +4497,7 @@ def load_active_workout():
             ),
             "previous_weight": row.get("previous_weight", ""),
             "previous_reps": row.get("previous_reps", ""),
+            "last_week_reps": row.get("last_week_reps", ""),
             "previous_rir": (
                 row.get("previous_rir", "")
                 if method_set_uses_rir(
@@ -4035,15 +4515,19 @@ def load_active_workout():
         })
 
     return {
+        **{key: first.get(key, "") for key in ("performed_at", "cycle_id", "cycle_microcycle", "cycle_phase", "cycle_target_rir")},
+        "session_id": first.get("session_id", ""),
         "workout_id": first["workout_id"],
         "workout_name": first["workout_name"],
         "started_at": started_at,
         "timer_started": timer_started,
         "timer_elapsed_seconds": timer_elapsed_seconds,
+        "rest_timer_state": first.get("rest_timer_state", ""),
         "rows": loaded_rows,
     }
 
 
+@_locked
 def clear_active_workout():
     _write_csv(ACTIVE_WORKOUT_FILE, ACTIVE_FIELDS, [])
 
@@ -4069,7 +4553,11 @@ def _update_template_weights_from_session(workout_id, rows):
             order_map[row["exercise_name"].casefold()] = row["order_index"]
 
     for completed in rows:
+        if deloads.is_recovery(completed):
+            continue
         if not completed.get("completed", False):
+            continue
+        if load_modes.normalize(completed.get("load_mode", "external")) != read_exercise_details(completed.get("exercise_name", ""))["load_mode"]:
             continue
 
         order_index = order_map.get(
@@ -4086,6 +4574,9 @@ def _update_template_weights_from_session(workout_id, rows):
                 and template["order_index"] == order_index
                 and template["set_number"] == set_number
             ):
+                target_context = set_context.resolve(template, read_exercise_details(completed.get("exercise_name", "")))
+                if not set_context.matches(completed, target_context):
+                    continue
                 template["weight"] = str(completed.get("weight", "") or "")
                 template["weight_unit"] = read_settings().get("unit", "kg")
                 template["reps"] = str(completed.get("reps", "") or "")
@@ -4101,9 +4592,17 @@ def _update_template_weights_from_session(workout_id, rows):
     )
 
 
-def append_session(workout, rows):
+@_transactional
+def append_session(workout, rows, *, session_id=None, performed_at=None, cycle_context=None):
     """Append one finished workout session, preserving unfinished planned sets."""
     ensure_data()
+
+    session_id = session_id or str(uuid.uuid4())
+    existing_rows = _saved_session_rows(session_id)
+    if existing_rows:
+        if any(row.get("workout_id") != workout["workout_id"] for row in existing_rows):
+            raise ValueError("This session ID belongs to a different workout.")
+        return sum(row.get("completed", "1") != "0" for row in existing_rows)
 
     clean_rows = []
     completed_count = 0
@@ -4119,15 +4618,17 @@ def append_session(workout, rows):
         )
         clean_rows.append(
             {
+                **_observation_metadata(row),
+                **(_muscle_snapshot(row["exercise_name"]) if row.get("muscle_metadata_recorded") != "1" else {}),
                 "exercise_name": row["exercise_name"],
                 "set_number": row["set_number"],
-                "weight": str(row.get("weight", "") or "").strip(),
-                "weight_unit": read_settings().get("unit", "kg"),
+                "weight": _text(row.get("weight", "")),
+                "weight_unit": row.get("weight_unit") or read_settings().get("unit", "kg"),
                 "reps": str(row.get("reps", "") or "").strip(),
                 # RIR is meaningful only for working sets. Never persist it on
                 # warmups, even if stale UI/import state contains a value.
                 "rir": (
-                    str(row.get("rir", "") or "").strip()
+                    _text(row.get("rir", ""))
                     if method_set_uses_rir(training_method, set_type)
                     else ""
                 ),
@@ -4144,26 +4645,21 @@ def append_session(workout, rows):
     if completed_count == 0:
         return 0
 
-    session_id = str(uuid.uuid4())
-    now = datetime.now().isoformat(timespec="seconds")
-
-    cycle = active_mesocycle()
-    cycle_id = ""
-    cycle_microcycle = ""
-    if cycle:
-        cycle_id = str(cycle.get("cycle_id", "") or "")
-        try:
-            cycle_microcycle = str(
-                int(mesocycle_status(cycle).get("current_microcycle", 1) or 1)
-            )
-        except (TypeError, ValueError):
-            cycle_microcycle = ""
+    now = performed_at or datetime.now().isoformat(timespec="seconds")
+    context = _cycle_context(now) if cycle_context is None else cycle_context
+    if context.get("cycle_phase") == "Deload":
+        for row in clean_rows:
+            if not deloads.is_recovery(row):
+                row["prescription_kind"] = "deload_manual"
+    cycle_id = context.get("cycle_id", "")
+    cycle_microcycle = context.get("cycle_microcycle", "")
 
     output_rows = []
 
     for row in clean_rows:
         output_rows.append(
             {
+                **_observation_metadata(row),
                 "session_id": session_id,
                 "date": now,
                 "workout_id": workout["workout_id"],
@@ -4183,45 +4679,80 @@ def append_session(workout, rows):
             }
         )
 
-    with open(SETS_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=SET_FIELDS)
-        writer.writerows(output_rows)
+    _write_csv(SETS_FILE, SET_FIELDS, _read_csv(SETS_FILE) + output_rows)
 
     # Only completed rows update future workout defaults.
-    _update_template_weights_from_session(
-        workout["workout_id"],
-        clean_rows,
-    )
+    if context.get("cycle_phase") != "Deload":
+        _update_template_weights_from_session(workout["workout_id"], clean_rows)
 
     return completed_count
 
-def recent_sessions(limit=5):
+
+@_transactional
+def finish_active_workout(active, *, save_template=None):
+    """Save every completion effect once, or leave the workout fully retryable."""
     ensure_data()
+    session_id = str(active.get("session_id", "") or "")
+    if not session_id:
+        raise ValueError("Save the active workout before finishing it.")
+    previous = _saved_session_rows(session_id)
+    if previous:
+        if any(row.get("workout_id") != active["workout_id"] for row in previous):
+            raise ValueError("This session ID belongs to a different workout.")
+        return sum(row.get("completed", "1") != "0" for row in previous)
+    stored = _read_csv(ACTIVE_WORKOUT_FILE)
+    if not stored or stored[0].get("session_id") != session_id:
+        raise ValueError("This workout is no longer the saved active workout. Reopen the current workout.")
+    if not any(row.get("completed", False) for row in active.get("rows", [])):
+        return 0
+    if save_template is not None and active.get("cycle_phase") != "Deload":
+        save_template()
+    count = append_session(
+        {"workout_id": active["workout_id"], "name": active["workout_name"]},
+        active["rows"], session_id=session_id,
+        performed_at=active.get("performed_at"), cycle_context=active,
+    )
+    cycle = get_mesocycle(active.get("cycle_id", ""))
+    if cycle and active.get("cycle_phase") != "Deload":
+        for row in active["rows"]:
+            if row.get("completed", False) and row.get("calibration_done", False) and not is_warmup_set_type(row.get("set_type")):
+                mark_mesocycle_intro_seen(cycle["cycle_id"], active["workout_id"], row["exercise_name"], row.get("training_method", "Straight"))
+    clear_active_workout()
+    return count
 
-    rows = _read_sets_cached()
+def _session_overviews(limit=None, workout_id=None):
+    """Newest sessions with performed and planned entry totals kept separate."""
     sessions = {}
-
-    for row in reversed(rows):
+    for row in reversed(_chronological_sets()):
+        if workout_id is not None and row.get("workout_id") != workout_id:
+            continue
         session_id = row.get("session_id")
         if not session_id:
             continue
-
-        if session_id not in sessions:
-            sessions[session_id] = {
-                "session_id": session_id,
-                "date": row.get("date", ""),
-                "workout_id": row.get("workout_id", ""),
-                "workout_name": row.get("workout_name", ""),
-                "set_count": 0,
-            }
-
-        sessions[session_id]["set_count"] += 1
-
+        session = sessions.setdefault(session_id, {
+            "session_id": session_id,
+            "date": row.get("date", ""),
+            "workout_id": row.get("workout_id", ""),
+            "workout_name": row.get("workout_name", ""),
+            "completed_count": 0,
+            "planned_count": 0,
+            "set_count": 0,
+        })
+        session["planned_count"] += 1
+        if row.get("completed", "1") != "0":
+            session["completed_count"] += 1
+            # Compatibility field now counts completed entries, including warmups.
+            session["set_count"] += 1
     return list(sessions.values())[:limit]
 
 
+@_locked
+def recent_sessions(limit=5):
+    ensure_data()
+    return _session_overviews(limit)
 
 
+@_locked
 def read_session(session_id):
     ensure_data()
 
@@ -4247,6 +4778,7 @@ def read_session(session_id):
             {
                 "exercise_name": row.get("exercise_name", ""),
                 "set_number": int(row.get("set_number", "1") or 1),
+                **_observation_metadata(row),
                 "weight": row.get("weight", ""),
                 "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
                 "reps": row.get("reps", ""),
@@ -4261,6 +4793,7 @@ def read_session(session_id):
     }
 
 
+@_locked
 def save_session(session_id, workout_name, rows, session_date=None):
     """
     Rewrite one historical session in place while preserving its original
@@ -4287,6 +4820,8 @@ def save_session(session_id, workout_name, rows, session_date=None):
             requested_day = datetime.fromisoformat(requested_date).date().isoformat()
         except (TypeError, ValueError) as exc:
             raise ValueError("Workout date must use YYYY-MM-DD.") from exc
+        if requested_day > datetime.now().date().isoformat():
+            raise ValueError("A performed workout cannot be dated in the future.")
 
         # Completed sessions normally carry an ISO timestamp. Editing the date
         # should not unexpectedly reset the original workout time.
@@ -4298,6 +4833,9 @@ def save_session(session_id, workout_name, rows, session_date=None):
     workout_id = first.get("workout_id", "")
     cycle_id = first.get("cycle_id", "")
     cycle_microcycle = first.get("cycle_microcycle", "")
+    if str(date)[:10] != str(first.get("date", ""))[:10]:
+        context = _cycle_context(date, preferred_id=cycle_id, historical=True)
+        cycle_id, cycle_microcycle = context["cycle_id"], context["cycle_microcycle"]
     stored_name = (workout_name or "").strip() or first.get("workout_name", "")
 
     clean_rows = []
@@ -4322,6 +4860,7 @@ def save_session(session_id, workout_name, rows, session_date=None):
         )
         clean_rows.append(
             {
+                **_observation_metadata(row),
                 "session_id": session_id,
                 "date": date,
                 "workout_id": workout_id,
@@ -4330,11 +4869,11 @@ def save_session(session_id, workout_name, rows, session_date=None):
                 "cycle_microcycle": cycle_microcycle,
                 "exercise_name": exercise_name,
                 "set_number": counters[exercise_name],
-                "weight": str(row.get("weight", "") or "").strip(),
-                "weight_unit": read_settings().get("unit", "kg"),
+                "weight": _text(row.get("weight", "")),
+                "weight_unit": row.get("weight_unit") or read_settings().get("unit", "kg"),
                 "reps": str(row.get("reps", "") or "").strip(),
                 "rir": (
-                    str(row.get("rir", "") or "").strip()
+                    _text(row.get("rir", ""))
                     if method_set_uses_rir(training_method, set_type)
                     else ""
                 ),
@@ -4361,6 +4900,7 @@ def save_session(session_id, workout_name, rows, session_date=None):
     return len(clean_rows)
 
 
+@_locked
 def delete_session(session_id):
     ensure_data()
 
@@ -4373,59 +4913,19 @@ def delete_session(session_id):
     _write_csv(SETS_FILE, SET_FIELDS, rows)
 
 
+@_locked
 def all_sessions(limit=None):
     ensure_data()
-
-    rows = _read_csv(SETS_FILE)
-    sessions = {}
-
-    for row in reversed(rows):
-        session_id = row.get("session_id")
-        if not session_id:
-            continue
-
-        if session_id not in sessions:
-            sessions[session_id] = {
-                "session_id": session_id,
-                "date": row.get("date", ""),
-                "workout_id": row.get("workout_id", ""),
-                "workout_name": row.get("workout_name", ""),
-            }
-
-            if limit is not None and len(sessions) >= limit:
-                break
-
-    return list(sessions.values())
+    return _session_overviews(limit)
 
 
+@_locked
 def workout_sessions(workout_id, limit=12):
     ensure_data()
-
-    rows = _read_csv(SETS_FILE)
-    sessions = {}
-
-    for row in reversed(rows):
-        if row.get("workout_id") != workout_id:
-            continue
-
-        session_id = row.get("session_id")
-        if not session_id:
-            continue
-
-        if session_id not in sessions:
-            sessions[session_id] = {
-                "session_id": session_id,
-                "date": row.get("date", ""),
-                "workout_id": row.get("workout_id", ""),
-                "workout_name": row.get("workout_name", ""),
-            }
-
-            if len(sessions) >= limit:
-                break
-
-    return list(sessions.values())
+    return _session_overviews(limit, workout_id=workout_id)
 
 
+@_locked
 def exercise_sessions(exercise_name, limit=100):
     """Return completed history for one exercise, newest session first."""
     ensure_data()
@@ -4438,9 +4938,8 @@ def exercise_sessions(exercise_name, limit=100):
     order = []
     default_unit = read_settings().get("unit", "kg")
 
-    # sets.csv is append-only by completed workout, so walking backward gives
-    # newest sessions first while still allowing us to sort set numbers below.
-    for row in reversed(_read_sets_cached()):
+    # Use performed timestamps, including corrected dates, for newest first.
+    for row in reversed(_chronological_sets()):
         if str(row.get("exercise_name", "") or "").strip().casefold() != target:
             continue
         if row.get("completed", "1") == "0":
@@ -4465,6 +4964,7 @@ def exercise_sessions(exercise_name, limit=100):
         sessions[session_id]["rows"].append(
             {
                 "set_number": _positive_int(row.get("set_number"), 1),
+                **_observation_metadata(row),
                 "weight": row.get("weight", ""),
                 "weight_unit": row.get("weight_unit", read_settings().get("unit", "kg")),
                 "reps": row.get("reps", ""),
@@ -4481,6 +4981,7 @@ def exercise_sessions(exercise_name, limit=100):
     return result
 
 
+@_locked
 def data_path():
     ensure_data()
     return DATA_DIR

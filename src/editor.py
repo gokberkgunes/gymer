@@ -8,6 +8,9 @@ from datetime import datetime
 import flet as ft
 
 import storage
+import load_modes
+import set_context
+import volume_accounting
 
 
 class EditorMixin:
@@ -34,10 +37,34 @@ class EditorMixin:
                 self.show_saved_workouts()
             return
 
+        self.unregister_text_fields(
+            *getattr(self, "workout_editor_numeric_fields", []),
+            *getattr(self, "workout_editor_form_fields", []),
+        )
+        self.workout_editor_numeric_fields = []
+        self.workout_editor_form_fields = []
+
         settings = storage.read_settings()
         default_sets = int(settings.get("default_sets", "3") or 3)
         default_rest = int(settings.get("default_rest_seconds", "180") or 180)
         workout_details = storage.read_workout_details(workout_id)
+        groups_locked = bool(self.active_workout and self.active_workout.get("workout_id") == workout_id)
+
+        def group_signature(exercises):
+            return [(exercise.get("exercise_name", "").casefold(), exercise.get("training_method", "Straight"),
+                     tuple(index for index, item in enumerate(exercise.get("sets", []))
+                           if item.get("protocol_group_start") == "1"))
+                    for exercise in exercises
+                    if any(item.get("protocol_group_start") == "1" for item in exercise.get("sets", []))]
+
+        original_groups = group_signature(workout.get("exercises", []))
+
+        def context_signature(exercises):
+            return [(exercise.get("exercise_name", "").casefold(), index, set_context.template_key(item))
+                    for exercise in exercises for index, item in enumerate(exercise.get("sets", []))
+                    if item.get("context_override") == "1"]
+
+        original_contexts = context_signature(workout.get("exercises", []))
 
         # Returning from an exercise's pencil/details editor must not discard
         # unsaved workout edits. A one-shot in-memory draft is restored here.
@@ -63,12 +90,15 @@ class EditorMixin:
             active_cycle and active_cycle.get("rest_timer_lock", "0") == "1"
         )
 
+        def action_focused(e):
+            self.focused_text_field = None
+
         name_field = self.text_field(
             label="Workout name",
             value=workout["name"],
             dense=True,
         )
-        name_field.expand = 1
+        name_field.expand = False
         workout_description = self.text_field(
             hint_text="Description",
             value=workout_details.get("description", ""),
@@ -77,19 +107,19 @@ class EditorMixin:
             max_lines=2,
             dense=True,
         )
-        workout_description.expand = 1
+        workout_description.expand = False
 
         # Timing controls live on the dedicated approximator page, but stay in
         # this closure so edits survive moving back and forth before Save.
         workout_set_seconds = self.text_field(
-            label="Default set duration (seconds)",
+            label="Default entry duration (seconds)",
             value=workout_details.get("set_seconds", "45") or "45",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             numeric_kind="seconds",
         )
         workout_set_overhead = self.text_field(
-            label="Setup / logging per set",
+            label="Setup / logging per entry",
             value=storage.format_duration(
                 workout_details.get("set_overhead_seconds", "30") or "30"
             ),
@@ -146,12 +176,17 @@ class EditorMixin:
             workout_session_overhead,
         )
 
+        self.workout_editor_form_fields = [
+            name_field, workout_description, workout_set_seconds,
+            workout_set_overhead, workout_transition, workout_session_overhead,
+        ]
+
         exercise_fields = ft.Column(spacing=self.ui(12))
         exercise_edit_rows = []
         muscle_summary = ft.Column(spacing=self.ui(5))
         time_target_text = ft.Text(
             weight=ft.FontWeight.BOLD,
-            color=self.accent_color(),
+            color=self.contrast_text_color("accent"),
         )
         time_target_large = ft.Text(
             size=self.fs(28),
@@ -185,6 +220,8 @@ class EditorMixin:
                         default=default_rest,
                     ),
                     "set_type": set_row.get("set_type", "Normal") or "Normal",
+                    "protocol_group_start": set_row.get("protocol_group_start", ""),
+                    **set_context.template_metadata(set_row),
                 }
                 for set_row in (exercise.get("sets") or make_default_sets())
             ]
@@ -228,6 +265,8 @@ class EditorMixin:
                                 "reps": set_row.get("reps", ""),
                                 "rest_seconds": set_row.get("rest_seconds", default_rest),
                                 "set_type": set_row.get("set_type", "Normal") or "Normal",
+                                "protocol_group_start": set_row.get("protocol_group_start", ""),
+                                **set_context.template_metadata(set_row),
                             }
                             for set_row in row.get("sets", [])
                         ],
@@ -334,46 +373,25 @@ class EditorMixin:
             return f"{minutes}m {remainder}s"
 
         def refresh_summaries(update_page=False):
-            counts = {name: 0 for name in storage.BODYBUILDING_MUSCLE_GROUPS}
-            for row in exercise_edit_rows:
-                name = (row.get("exercise_name") or "").strip()
-                if not name:
-                    continue
-                details = storage.read_exercise_details(name)
-                for muscle in storage.normalize_muscle_list(
-                    details.get("primary_muscles", "")
-                ):
-                    counts[muscle] += len(row.get("sets", []))
-
-            chips = []
-            for muscle in storage.BODYBUILDING_MUSCLE_GROUPS:
-                count = counts[muscle]
-                if not count:
-                    continue
-                chips.append(
-                    ft.Container(
-                        padding=ft.Padding(left=self.ui(8), top=self.ui(4), right=self.ui(8), bottom=self.ui(4)),
-                        border=ft.Border.all(1, ft.Colors.GREY_700),
-                        border_radius=self.rounding(),
-                        content=ft.Text(
-                            f"{muscle}  {count}",
-                            size=self.fs(11),
-                            weight=ft.FontWeight.BOLD,
-                        ),
-                    )
-                )
-
-            muscle_summary.controls = [
-                (
-                    ft.Row(controls=chips, spacing=self.ui(5), wrap=True)
-                    if chips
-                    else ft.Text(
-                        "Assign Primary muscles in Exercise Database → Details to see direct-set totals.",
-                        size=self.fs(11),
-                        color=ft.Colors.GREY_500,
-                    )
-                )
+            report = storage.workout_volume_report(exercise_edit_rows)
+            summary = [
+                ft.Text("Planned work per workout", weight=ft.FontWeight.BOLD),
+                ft.Text(volume_accounting.describe(report["totals"]), size=self.fs(12)),
+                ft.Text(f"Protocol structure: {report['totals']['complete_protocol_groups']} complete; "
+                        f"{report['totals']['partial_protocol_groups']} partial or unverified", size=self.fs(11)),
             ]
+            for key, title in (("direct", "Direct involvement (primary tags)"),
+                               ("indirect", "Indirect involvement (secondary tags)")):
+                summary.append(ft.Text(title, size=self.fs(11), weight=ft.FontWeight.BOLD))
+                if not report[key]:
+                    summary.append(ft.Text("No tagged work", size=self.fs(11), color=self.contrast_text_color()))
+                for muscle, metrics in report[key].items():
+                    summary.append(ft.Text(f"{muscle}: {volume_accounting.describe(metrics)}", size=self.fs(11)))
+            summary.append(ft.Text(
+                "Warmups are separate. Protocol groups and segments are not conventional-set equivalents; secondary tags describe involvement. Left/right entries count separately; no automatic side pairing or set-equivalence conversion.",
+                size=self.fs(11), color=self.contrast_text_color(),
+            ))
+            muscle_summary.controls = summary
 
             breakdown = timing_breakdown()
             target = self.format_target_duration(breakdown["total"])
@@ -436,6 +454,9 @@ class EditorMixin:
             previous = storage.latest_exercise_values(selected)
             for set_number, set_row in enumerate(row.get("sets", []), start=1):
                 known = previous.get(set_number, {})
+                if not set_context.matches(known, storage.read_exercise_details(selected)):
+                    known = {}
+                set_row.update(set_context.template_metadata({}))
                 set_row["weight"] = str(known.get("weight", "") or "")
                 set_row["reps"] = str(known.get("reps", "") or "")
 
@@ -483,6 +504,7 @@ class EditorMixin:
                 {
                     "weight": previous.get("weight", ""),
                     "reps": previous.get("reps", ""),
+                    **set_context.template_metadata(previous),
                     "rest_seconds": previous.get("rest_seconds", default_rest),
                     "set_type": storage.default_next_set_type(
                         row.get("training_method", "Straight"), row.get("sets", [])
@@ -501,6 +523,32 @@ class EditorMixin:
             row["sets"].pop()
             render_rows()
 
+        def toggle_group_start(row, set_row):
+            if groups_locked:
+                return
+            snapshot_row_controls()
+            set_row["protocol_group_start"] = "" if set_row.get("protocol_group_start") == "1" else "1"
+            row["sets"] = storage.reconcile_method_sets(row["training_method"], row["sets"])
+            render_rows()
+
+        def add_protocol_group(row):
+            if groups_locked:
+                return
+            snapshot_row_controls()
+            work = [item for item in row["sets"] if not storage.is_warmup_set_type(item.get("set_type"))]
+            # Copy only authored plan values, never control objects or observations.
+            start = max((index for index, item in enumerate(work) if item.get("protocol_group_start") == "1"), default=0)
+            source = work[start:]
+            if not source:
+                source = [{"weight": "", "reps": "", "rest_seconds": default_rest}] * 2
+            elif len(source) == 1:
+                source = source * 2
+            for index, item in enumerate(source):
+                row["sets"].append({key: item.get(key, "") for key in ("weight", "reps", "rest_seconds")}
+                                   | {"protocol_group_start": "1" if index == 0 else "", **set_context.template_metadata(item)})
+            row["sets"] = storage.reconcile_method_sets(row["training_method"], row["sets"])
+            render_rows()
+
         def rest_changed(e, set_row):
             set_row["rest_seconds"] = storage.parse_duration(
                 e.control.value,
@@ -508,38 +556,88 @@ class EditorMixin:
             )
             refresh_summaries(update_page=True)
 
+        def edit_planned_context(row, set_row):
+            if self.active_workout and self.active_workout.get("workout_id") == workout_id:
+                return
+            snapshot_row_controls()
+            defaults = storage.read_exercise_details(row.get("exercise_name", ""))
+            previous = set_context.resolve(set_row, defaults)
+            inherit = ft.Checkbox(label="Inherit exercise defaults", value=set_row.get("context_override") != "1")
+            setup = self.text_field(label="Setup / variation", value=previous["setup"],
+                                    hint_text="e.g. cable station 2, high handle, upright position")
+            selectors = {key: ft.Dropdown(label=label, value=previous[key],
+                options=[ft.DropdownOption(key=value, text=text) for value, text in set_context.OPTIONS[key].items()])
+                for key, label in set_context.LABELS.items()}
+
+            def toggle_inheritance(e=None):
+                setup.disabled = bool(inherit.value)
+                for control in selectors.values():
+                    control.disabled = bool(inherit.value)
+                if inherit.value:
+                    current = storage.read_exercise_details(row.get("exercise_name", ""))
+                    setup.value = current.get("setup", "")
+                    for key, control in selectors.items():
+                        control.value = current.get(key, "")
+                self.page.update()
+
+            def close(e=None):
+                self.unregister_text_fields(setup)
+                self.close_dialog(dialog)
+
+            def save(e):
+                if self.active_workout and self.active_workout.get("workout_id") == workout_id:
+                    self.notify("Finish or discard this active workout before changing planned segment context.")
+                    return
+                plan = set_context.template_metadata({
+                    "context_override": "" if inherit.value else "1", "setup": setup.value or "",
+                    **{key: control.value or "" for key, control in selectors.items()},
+                })
+                effective = set_context.resolve(plan, storage.read_exercise_details(row.get("exercise_name", "")))
+                if not set_context.matches(previous, effective):
+                    set_row.update(weight="", reps="")
+                    # The rebuild snapshots controls, so keep their values in sync.
+                    set_row["_weight_field"].value = ""
+                    set_row["_reps_field"].value = ""
+                set_row.update(plan)
+                close()
+                render_rows()
+
+            inherit.on_change = toggle_inheritance
+            setup.disabled = bool(inherit.value)
+            for control in selectors.values():
+                control.disabled = bool(inherit.value)
+            dialog = ft.AlertDialog(
+                modal=True, title=ft.Text("Planned segment context"),
+                content=ft.Column(controls=[inherit, setup, *selectors.values(),
+                    ft.Text("An override keeps this segment's context when exercise defaults change. Blank override fields mean unknown. Changing effective context clears this row's load/rep presets; enter them again for the new variation. Mechanical-drop progression remains manual.", size=12 * self.font_scale()),
+                ], tight=True, scroll=ft.ScrollMode.AUTO),
+                actions=[self.outlined_button("Cancel", on_click=close, height=self.touch_size()),
+                         self.filled_button("Save segment context", on_click=save, height=self.touch_size())],
+                on_dismiss=lambda e: self.unregister_text_fields(setup),
+            )
+            self.page.show_dialog(dialog)
+
         def render_rows():
             snapshot_row_controls()
             exercise_fields.controls.clear()
 
-            # Author this editor against the same 430-logical-pixel canvas as
-            # the large-phone layout, then scale the *whole card geometry*
-            # together on narrower Android viewports.  Do not reflow a set into
-            # extra rows: that made fields larger relative to the exercise name
-            # and produced the crushed layout seen on small-width devices.
-            try:
-                page_width = float(getattr(self.page, "width", 0) or 0)
-            except (TypeError, ValueError):
-                page_width = 0.0
-            if page_width <= 0:
-                page_width = 430.0
+            self.unregister_text_fields(*getattr(self, "workout_editor_numeric_fields", []))
+            self.workout_editor_numeric_fields = []
 
-            outer_padding = self.ui(self.PAGE_PADDING)
-            available_width = max(1.0, page_width - (2 * outer_padding))
-            editor_scale = max(0.54, min(1.0, available_width / 418.0))
-
+            # Fields retain readable dimensions; rows wrap instead of shrinking.
             def es(value):
-                return float(value) * editor_scale
+                return float(value)
 
             def efs(value):
-                return float(value) * self.font_scale() * editor_scale
+                return float(value) * self.font_scale()
 
+            field_scale = max(1.0, self.font_scale())
             field_gap = es(5)
-            weight_width = es(94)
-            reps_width = es(82)
-            rest_width = es(80)
-            type_width = es(94)
-            field_height = es(50)
+            weight_width = 94 * field_scale
+            reps_width = 82 * field_scale
+            rest_width = 80 * field_scale
+            type_width = 94 * field_scale
+            field_height = 56 * field_scale
 
             def editor_action(
                 icon,
@@ -554,22 +652,14 @@ class EditorMixin:
                 if not enabled:
                     color = ft.Colors.with_opacity(0.30, color)
                     bgcolor = None
-                return ft.Container(
-                    width=es(36),
-                    height=es(42),
-                    alignment=ft.Alignment.CENTER,
-                    ink=bool(enabled),
-                    bgcolor=bgcolor,
-                    border=ft.Border.all(
-                        1, border_color or self.field_border_color()
-                    ),
-                    border_radius=self.rounding(),
-                    tooltip=tooltip,
-                    on_click=on_click if enabled else None,
-                    content=ft.Icon(
-                        icon,
-                        size=es(22),
-                        color=color,
+                return ft.IconButton(
+                    width=self.touch_size(), height=self.touch_size(),
+                    icon=icon, icon_size=22, icon_color=color,
+                    bgcolor=bgcolor, disabled=not enabled,
+                    tooltip=tooltip, on_click=on_click, on_focus=action_focused,
+                    style=ft.ButtonStyle(
+                        side=ft.BorderSide(1, border_color or self.field_border_color()),
+                        shape=ft.RoundedRectangleBorder(radius=self.rounding()),
                     ),
                 )
 
@@ -607,17 +697,32 @@ class EditorMixin:
             for row_index, row in enumerate(exercise_edit_rows):
                 row_id = row["id"]
                 set_controls = []
+                grouped = row.get("training_method") in storage.ACTIVATION_FOLLOWUP or row.get("training_method") == "Cluster"
+                group_number = 0
 
                 for set_index, set_row in enumerate(row["sets"]):
+                    working = not storage.is_warmup_set_type(set_row.get("set_type"))
+                    if grouped and working:
+                        can_split = group_number > 0
+                        if group_number == 0 or set_row.get("protocol_group_start") == "1":
+                            group_number += 1
+                            set_controls.append(ft.Text(f"Protocol group {group_number}", weight=ft.FontWeight.BOLD, size=efs(12)))
+                        if can_split:
+                            joining = set_row.get("protocol_group_start") == "1"
+                            set_controls.append(ft.OutlinedButton(
+                                content="Join preceding group" if joining else "Start group here",
+                                height=max(48, 48 * field_scale), style=self.button_style(),
+                                tooltip=f"{row['exercise_name']}, set {set_index + 1}: {'join preceding group' if joining else 'start protocol group'}",
+                                disabled=groups_locked, on_focus=action_focused,
+                                on_click=lambda e, target=row, item=set_row: toggle_group_start(target, item),
+                            ))
                     weight = editor_numeric_field(
-                        label="Weight",
+                        label=load_modes.suffix(storage.read_exercise_details(row.get("exercise_name", ""))["load_mode"], self.settings.get("unit", "kg")),
                         value=set_row.get("weight", ""),
                         width=weight_width,
-                        kind="weight",
+                        kind=load_modes.numeric_kind(storage.read_exercise_details(row.get("exercise_name", ""))["load_mode"]),
                     )
-                    # Keep the unit inside the compact weight box without using
-                    # the generic wrapper's phone-scale padding; this card has
-                    # its own proportional editor scale.
+                    # Reserve space for the unit inside the weight field.
                     weight.content_padding = ft.Padding(
                         left=es(9),
                         top=es(7),
@@ -628,7 +733,7 @@ class EditorMixin:
                         self.settings.get("unit", "kg"),
                         size=efs(9),
                         weight=ft.FontWeight.W_500,
-                        color=ft.Colors.GREY_500,
+                        color=self.foreground_color(),
                         visible=bool((weight.value or "").strip()),
                     )
                     weight_display = ft.Stack(
@@ -682,6 +787,7 @@ class EditorMixin:
                         def focus_rest(
                             e, field=rest, target=set_row
                         ):
+                            self.focused_text_field = field
                             seconds = storage.parse_duration(
                                 field.value,
                                 default=target.get("rest_seconds", default_rest),
@@ -703,38 +809,20 @@ class EditorMixin:
                         rest.on_focus = focus_rest
                         rest.on_blur = blur_rest
 
-                    self.chain_text_fields(
-                        weight,
-                        reps,
-                        None if rest.read_only else rest,
-                    )
+                    self.workout_editor_numeric_fields.extend([weight, reps, rest])
 
                     set_row["_weight_field"] = weight
                     set_row["_reps_field"] = reps
                     set_row["_rest_field"] = rest
 
-                    # Match the full Weight/Reps/Rest footprint exactly. Using
-                    # a shorter nested outline made Normal/AMRAP visibly unlike
-                    # the neighboring fields on real phones.
-                    type_button = ft.Container(
-                        width=type_width,
-                        height=field_height,
-                        alignment=ft.Alignment.CENTER,
-                        padding=ft.Padding(
-                            left=es(5),
-                            top=0,
-                            right=es(5),
-                            bottom=0,
-                        ),
-                        border=ft.Border.all(1, self.accent_color()),
-                        border_radius=self.rounding(),
-                        ink=True,
-                        tooltip="Change set role",
+                    type_button = ft.OutlinedButton(
+                        width=type_width, height=field_height,
+                        style=self.button_style(), on_focus=action_focused,
+                        tooltip=f"{row['exercise_name'] or 'Exercise'}, set {set_index + 1}: change set role",
                         on_click=lambda e, target=row, target_set=set_row, index=set_index: choose_set_type(target, target_set, index),
                         content=ft.Text(
                             storage.display_set_type(set_row.get("set_type", "Normal")),
-                            size=efs(11),
-                            max_lines=1,
+                            size=efs(11), max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
                             text_align=ft.TextAlign.CENTER,
                         ),
@@ -748,33 +836,31 @@ class EditorMixin:
                                 rest,
                                 type_button,
                             ],
-                            spacing=field_gap,
+                            spacing=field_gap, run_spacing=field_gap, wrap=True,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         )
                     )
 
+                    effective = set_context.resolve(set_row, storage.read_exercise_details(row.get("exercise_name", "")))
+                    context_label = ("Override" if set_row.get("context_override") == "1" else "Inherits defaults")
+                    context_label += " · " + (set_context.summary(effective) or "Context unknown")
+                    if groups_locked:
+                        context_label += " · Planned context is fixed while this workout is active."
+                    set_controls.append(ft.Row(controls=[
+                        ft.OutlinedButton(content="Plan context", height=max(48, 48 * field_scale),
+                            style=self.button_style(), disabled=groups_locked, on_focus=action_focused,
+                            tooltip=f"{row['exercise_name'] or 'Exercise'}, set {set_index + 1}: edit planned context",
+                            on_click=lambda e, target=row, item=set_row: edit_planned_context(target, item)),
+                        ft.Text(context_label, size=efs(11), expand=True),
+                    ], spacing=es(7), vertical_alignment=ft.CrossAxisAlignment.CENTER))
+
                 exercise_name = row["exercise_name"] or "Choose exercise"
                 is_placeholder = not bool((row.get("exercise_name") or "").strip())
-                name_button = ft.Container(
-                    height=es(42),
-                    expand=True,
-                    alignment=ft.Alignment.CENTER_LEFT,
-                    padding=ft.Padding(
-                        left=es(10),
-                        top=0,
-                        right=es(7),
-                        bottom=0,
-                    ),
-                    border=ft.Border.all(
-                        1,
-                        self.accent_color()
-                        if is_placeholder
-                        else self.field_border_color(),
-                    ),
-                    border_radius=self.rounding(),
-                    ink=True,
+                name_button = ft.OutlinedButton(
+                    height=max(48, 48 * self.font_scale()), expand=True,
+                    style=self.button_style(), on_focus=action_focused,
                     on_click=lambda e, target=row: choose_exercise(target),
-                    tooltip="Choose / change exercise",
+                    tooltip=f"Choose / change exercise: {exercise_name}",
                     content=ft.Row(
                         controls=[
                             ft.Text(
@@ -782,7 +868,7 @@ class EditorMixin:
                                 size=efs(14),
                                 weight=ft.FontWeight.BOLD,
                                 color=(
-                                    self.accent_color()
+                                    self.contrast_text_color("accent")
                                     if is_placeholder
                                     else self.foreground_color()
                                 ),
@@ -817,7 +903,7 @@ class EditorMixin:
                     ft.Text(
                         exercise_note_short,
                         size=efs(10.5),
-                        color=ft.Colors.GREEN_400,
+                        color=self.foreground_color(),
                         weight=ft.FontWeight.W_600,
                         max_lines=1,
                         no_wrap=True,
@@ -827,44 +913,41 @@ class EditorMixin:
                     else None
                 )
 
-                # Reordering is intentionally arrow-only.  Drag-and-drop was
-                # removed completely so the exercise name and actions stay on
-                # one predictable row on every phone width.
+                # Keep the full exercise name area separate from its actions.
                 header_row = ft.Row(
                     controls=[
-                        name_button,
                         editor_action(
                             ft.Icons.EDIT_OUTLINED,
                             on_click=lambda e, target=row: open_exercise_details_from_editor(target),
-                            tooltip="Edit exercise details",
+                            tooltip=f"Edit exercise details: {exercise_name}",
                             enabled=not is_placeholder,
                         ),
                         editor_action(
                             ft.Icons.ARROW_UPWARD,
                             on_click=lambda e, rid=row_id: move_by(rid, -1),
-                            tooltip="Move exercise up",
+                            tooltip=f"Move exercise up: {exercise_name}",
                             enabled=row_index > 0,
                         ),
                         editor_action(
                             ft.Icons.ARROW_DOWNWARD,
                             on_click=lambda e, rid=row_id: move_by(rid, 1),
-                            tooltip="Move exercise down",
+                            tooltip=f"Move exercise down: {exercise_name}",
                             enabled=row_index < len(exercise_edit_rows) - 1,
                         ),
                         editor_action(
                             ft.Icons.DELETE_OUTLINE,
                             on_click=lambda e, rid=row_id: remove_row(rid),
-                            tooltip="Remove exercise",
+                            tooltip=f"Remove exercise: {exercise_name}",
                             color=ft.Colors.WHITE,
                             bgcolor=ft.Colors.RED_700,
                             border_color=ft.Colors.RED_700,
                         ),
                     ],
-                    spacing=es(5),
+                    spacing=es(5), wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
 
-                header_controls = [header_row]
+                header_controls = [ft.Row(controls=[name_button]), header_row]
                 if exercise_note is not None:
                     header_controls.append(
                         ft.Container(
@@ -890,18 +973,14 @@ class EditorMixin:
                 method_value = storage.canonical_training_method(
                     row.get("training_method", "Straight")
                 )
-                method_button = ft.Container(
-                    height=es(34),
-                    alignment=ft.Alignment.CENTER_LEFT,
-                    padding=ft.Padding(left=es(9), top=0, right=es(9), bottom=0),
-                    border=ft.Border.all(1, self.accent_color()),
-                    border_radius=self.rounding(),
-                    ink=True,
-                    tooltip="Training method controls which set roles are available",
+                method_button = ft.OutlinedButton(
+                    width=float("inf"), height=max(48, 48 * self.font_scale()),
+                    style=self.button_style(), on_focus=action_focused,
+                    tooltip=f"Choose training method for {exercise_name}",
                     on_click=lambda e, target=row: choose_training_method(target),
                     content=ft.Row(
                         controls=[
-                            ft.Text("Method", size=efs(10), color=ft.Colors.GREY_500),
+                            ft.Text("Method", size=efs(10), color=self.foreground_color()),
                             ft.Text(
                                 method_value,
                                 size=efs(11.5),
@@ -942,6 +1021,11 @@ class EditorMixin:
                         controls=[
                             header_block,
                             method_button,
+                            *([ft.Text(
+                                "Rest is after each segment. The final segment's rest is the break before the next group. Multi-group progression is manual."
+                                + (" Group boundaries are fixed until this workout is finished or discarded." if groups_locked else ""),
+                                size=efs(11), color=self.contrast_text_color(),
+                            )] if grouped else []),
                             set_rows_block,
                             ft.Row(
                                 controls=[
@@ -955,8 +1039,14 @@ class EditorMixin:
                                         "Remove last set",
                                         lambda e, target=row: remove_set_from_exercise(target),
                                     ),
+                                    *([ft.OutlinedButton(
+                                        content="Add protocol group", height=max(48, 48 * field_scale),
+                                        style=self.button_style(), disabled=groups_locked,
+                                        tooltip=f"Add protocol group: {row['exercise_name']}", on_focus=action_focused,
+                                        on_click=lambda e, target=row: add_protocol_group(target),
+                                    )] if grouped else []),
                                 ],
-                                spacing=es(7),
+                                spacing=es(7), run_spacing=es(7), wrap=True,
                             ),
                         ],
                         spacing=es(5),
@@ -964,6 +1054,7 @@ class EditorMixin:
                 )
                 exercise_fields.controls.append(card)
 
+            self.chain_text_fields(*self.workout_editor_numeric_fields)
             refresh_summaries()
             self.page.update()
 
@@ -987,7 +1078,7 @@ class EditorMixin:
                     reps_field = set_row.get("_reps_field")
                     if weight_field is not None and not self.normalize_numeric_control(
                         weight_field,
-                        kind="weight",
+                        kind=load_modes.numeric_kind(storage.read_exercise_details(row.get("exercise_name", ""))["load_mode"]),
                         allow_empty=True,
                     ):
                         numeric_valid = False
@@ -1050,6 +1141,8 @@ class EditorMixin:
                             "reps": set_row.get("reps", ""),
                             "rest_seconds": set_row.get("rest_seconds", default_rest),
                             "set_type": set_row.get("set_type", "Normal"),
+                            "protocol_group_start": set_row.get("protocol_group_start", ""),
+                            **set_context.template_metadata(set_row),
                         }
                     )
                 output_exercises.append(
@@ -1059,6 +1152,15 @@ class EditorMixin:
                         "sets": output_sets,
                     }
                 )
+
+            if (self.active_workout and self.active_workout.get("workout_id") == workout_id
+                    and context_signature(output_exercises) != original_contexts):
+                self.notify("Finish or discard this active workout before changing planned segment context.")
+                return
+
+            if groups_locked and group_signature(output_exercises) != original_groups:
+                self.notify("Finish or discard this active workout before changing protocol groups or their method.")
+                return
 
             if return_to_active and self.active_workout and self.active_workout.get("workout_id") == workout_id:
                 output_keys = {
@@ -1196,6 +1298,12 @@ class EditorMixin:
                                 )
                                 active_row["training_method"] = training_method
 
+                            for context_key, value in set_context.resolve(set_row, storage.read_exercise_details(exercise_name)).items():
+                                active_row.setdefault(context_key, value)
+                            active_row.setdefault("context_override", set_row.get("context_override", ""))
+                            active_row.setdefault("load_mode", storage.read_exercise_details(exercise_name)["load_mode"])
+                            active_row.setdefault("protocol_group_start", set_row.get("protocol_group_start", ""))
+                            active_row.setdefault("target_rir", self.cycle_rir_target() or "")
                             rebuilt_rows.append(active_row)
 
                     self.active_workout["workout_name"] = name_field.value or workout.get("name", "Workout")
@@ -1304,7 +1412,8 @@ class EditorMixin:
                         controls=[
                             ft.Text("Tune it to your routine", weight=ft.FontWeight.BOLD),
                             ft.Text(
-                                "If your sets usually take longer, increase Set duration. "
+                                "Each programmed row contributes to timing, including warmups and protocol fragments. "
+                                "Tune Entry duration to your routine. "
                                 "If changing plates or logging takes time, increase Setup / logging.",
                                 size=self.fs(12),
                             ),
@@ -1342,11 +1451,10 @@ class EditorMixin:
                 hide_active_return_bar=return_to_active,
             )
 
-        time_link = ft.Container(
-            width=self.ui(66),
-            height=self.ui(44),
-            alignment=ft.Alignment.CENTER,
-            ink=True,
+        time_link = ft.OutlinedButton(
+            width=140 * max(1.0, self.font_scale()),
+            height=max(48, 48 * self.font_scale()),
+            style=self.button_style(), on_focus=action_focused,
             tooltip="Workout Time Approximator",
             on_click=lambda e: show_time_approximator(),
             content=ft.Row(
@@ -1379,7 +1487,7 @@ class EditorMixin:
                 warning = ft.Text(
                     warning_text,
                     size=self.fs(11),
-                    color=ft.Colors.ORANGE_400,
+                    color=self.contrast_text_color("warning"),
                     weight=ft.FontWeight.W_500,
                 )
 
@@ -1395,14 +1503,11 @@ class EditorMixin:
 
             top_controls.extend(
                 [
-                    ft.Row(
-                        controls=[
-                            name_field,
-                            workout_description,
-                            time_link,
-                        ],
+                    ft.Column(
+                        controls=[name_field, workout_description,
+                                  ft.Row(controls=[time_link], alignment=ft.MainAxisAlignment.END)],
                         spacing=self.ui(6),
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
                     muscle_summary,
                     ft.Text(

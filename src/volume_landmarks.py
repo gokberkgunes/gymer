@@ -1,8 +1,8 @@
 """RP hypertrophy volume landmark metadata supplied for Gymer.
 
 The range values and source links in this file come from the RP Strength table
-supplied by the user.  Gymer uses one compact representative MEV value in the
-mesocycle summary, while the detail dialog preserves the original ranges.
+supplied by the user. Summary and detail views preserve the supplied ranges;
+they are broad references, not personal requirements.
 """
 
 RP_VOLUME_LANDMARKS = {
@@ -123,28 +123,21 @@ def landmark_for(group):
     return RP_VOLUME_LANDMARKS.get(str(group or "").strip())
 
 
-def _range_target(value, fraction=0.55):
-    """Return a whole-set representative value 55% through a supplied range."""
-    text = str(value or "").strip().replace("–", "-")
-    try:
-        low_text, high_text = text.split("-", 1)
-        low = float(low_text.strip())
-        high = float(high_text.strip())
-    except (TypeError, ValueError):
-        return None
-    return int(low + (high - low) * fraction + 0.5)
-
-
 def mev_target(group):
+    """Compatibility accessor returning both supplied bounds, never a midpoint."""
     landmark = landmark_for(group)
     if not landmark:
         return None
-    return _range_target(landmark.get("mev", ""))
+    try:
+        low, high = (float(value.strip()) for value in landmark.get("mev", "").replace("–", "-").split("-", 1))
+    except (TypeError, ValueError):
+        return None
+    return (low, high) if 0 <= low <= high else None
 
 
 def mev_label(group):
-    target = mev_target(group)
-    return "—" if target is None else str(target)
+    landmark = landmark_for(group)
+    return str(landmark["mev"]) if landmark and mev_target(group) is not None else "—"
 
 
 def has_rp_landmark(group):

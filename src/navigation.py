@@ -98,6 +98,8 @@ class NavigationMixin:
         hide_active_return_bar=False,
     ):
         self.page.controls.clear()
+        # A field removed with the old screen must not receive page key events.
+        self.focused_text_field = None
 
         # Main tabs are roots, but while a workout is running Android Back from
         # History/Cycle/Rep Max/Settings should first return to that global
@@ -303,7 +305,7 @@ class NavigationMixin:
                         secondary,
                         size=self.fs(10),
                         weight=ft.FontWeight.BOLD,
-                        color=self.accent_color(),
+                        color=self.contrast_text_color("accent"),
                     ),
                     ft.Icon(
                         ft.Icons.CHEVRON_RIGHT,

@@ -8,10 +8,43 @@ from datetime import datetime
 import flet as ft
 
 import storage
+import set_context
 import volume_landmarks
+import deloads
+import volume_accounting
 
 
 class MesocycleMixin:
+
+    def deload_editor(self, cycle):
+        config = deloads.settings(cycle)
+        policy = ft.Dropdown(label="Deload policy", value=config["deload_policy"], options=[
+            ft.DropdownOption(key="recovery", text="Temporary recovery prescription"),
+            ft.DropdownOption(key="manual", text="Plan recovery manually"),
+        ])
+        load = self.text_field(label="Deload load retained (%)", value=config["deload_load_percent"], numeric_kind="weight", dense=True)
+        volume = self.text_field(label="Deload independent sets retained (%)", value=config["deload_volume_percent"], numeric_kind="weight", dense=True)
+        rir = self.text_field(label="Deload target RIR", value=cycle.get("deload_rir", "4"), numeric_kind="rir", dense=True)
+
+        def values():
+            valid = True
+            for field, kind in ((load, "weight"), (volume, "weight"), (rir, "rir")):
+                valid = self.normalize_numeric_control(field, kind=kind, allow_empty=False) and valid
+            if not valid:
+                self.page.update()
+                return None
+            try:
+                result = deloads.settings({"deload_policy": policy.value, "deload_load_percent": load.value, "deload_volume_percent": volume.value})
+            except ValueError as exc:
+                self.mark_field_invalid(load)
+                self.mark_field_invalid(volume)
+                self.notify(str(exc))
+                return None
+            return {**result, "deload_rir": rir.value}
+
+        controls = ft.Column(controls=[policy, load, volume, rir, ft.Text(
+            "Configurable recovery defaults: percentages are retained, not subtracted. Independent sets round down, with at least one. Intensifier/cluster protocols become one straight recovery set. Loads use a fixed pre-deload reference when available. Actual effort stays editable; the saved workout template is preserved.", size=self.fs(11))])
+        return controls, values
 
     def format_cycle_date(self, value):
         try:
@@ -44,11 +77,11 @@ class MesocycleMixin:
         status = storage.mesocycle_status(cycle)
         phase = status["phase"]
         phase_color = (
-            ft.Colors.ORANGE_500
+            self.contrast_text_color("warning")
             if phase == "Deload"
-            else ft.Colors.GREEN_500
+            else self.contrast_text_color("success")
             if phase == "Build"
-            else self.accent_color()
+            else self.contrast_text_color("accent")
         )
         rir = status["suggested_rir"]
         rir_text = f"RIR {int(round(float(rir)))}"
@@ -86,7 +119,7 @@ class MesocycleMixin:
                             ft.Text(
                                 today_text,
                                 size=self.fs(10.5),
-                                color=ft.Colors.GREY_500,
+                                color=self.contrast_text_color("muted"),
                             ),
                         ],
                         spacing=1,
@@ -165,7 +198,7 @@ class MesocycleMixin:
                                     content=ft.Text(
                                         label,
                                         size=self.fs(9.5 if compact else 10),
-                                        color=ft.Colors.GREY_500,
+                                        color=self.contrast_text_color("muted"),
                                         weight=ft.FontWeight.W_600,
                                         text_align=ft.TextAlign.CENTER,
                                     ),
@@ -406,7 +439,7 @@ class MesocycleMixin:
                 ft.Text(
                     "This same workout schedule is used for every microcycle in the mesocycle.",
                     size=self.fs(11),
-                    color=ft.Colors.GREY_500,
+                    color=self.contrast_text_color("muted"),
                 ),
             ]
         )
@@ -502,13 +535,11 @@ class MesocycleMixin:
     def show_rir_unlock_info(self):
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Unlock RIR"),
+            title=ft.Text("Prescribed RIR target"),
             content=ft.Text(
-                "The cycle will still lower its suggested RIR as the training periods get "
-                "harder. Unlocking only lets you edit the logged RIR. Keeping it "
-                "locked makes every set follow the effort target the cycle was "
-                "designed around, so progression and load suggestions stay easier "
-                "to interpret."
+                "This setting controls whether a calculator can override the prescribed "
+                "target. Actual RIR is always editable and is recorded separately. "
+                "A target never proves how hard a set actually was."
             ),
             actions=[
                 self.filled_button(
@@ -533,13 +564,11 @@ class MesocycleMixin:
 
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Keep RIR locked?"),
+            title=ft.Text("Override prescribed targets?"),
             content=ft.Text(
-                "The cycle will keep progressing toward lower RIR targets either "
-                "way. If you change the prescribed RIR, however, your logged sets "
-                "no longer match the effort target you were supposed to follow, "
-                "which can make the cycle and future load suggestions harder to "
-                "interpret. Keep it locked unless you intentionally want to override it."
+                "The cycle keeps its scheduled targets. Unlocking permits a calculator "
+                "target override. Always record performed reps and actual RIR honestly; "
+                "actual effort can be edited with either setting."
             ),
             actions=[
                 self.filled_button("Keep locked", on_click=keep_locked),
@@ -561,21 +590,18 @@ class MesocycleMixin:
             content=ft.Column(
                 controls=[
                     ft.Text(
-                        "Log reps at the prescribed RIR",
+                        "Record performed reps and actual effort",
                         weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
-                        "The RIR target is fixed during a mesocycle so progress "
-                        "can be compared consistently. Record the rep count that "
-                        "corresponds to the prescribed RIR, even if the set ended "
-                        "harder or easier than planned.",
+                        "A cycle target is a prescription. Actual RIR is your estimate "
+                        "of clean reps left after the set. Record the reps you performed "
+                        "and leave actual RIR blank when unknown.",
                         size=self.fs(11),
                     ),
                     ft.Text(
-                        "Example: the target is 3 RIR. You perform 8 reps but feel "
-                        "you only had 2 reps left. Record 7 reps at 3 RIR. This "
-                        "keeps progression tracking and future load suggestions "
-                        "based on the same effort target.",
+                        "Example: target 3 RIR, 8 reps performed, 2 reps left. "
+                        "Record 8 reps and actual RIR 2. The target remains 3.",
                         size=self.fs(11),
                         weight=ft.FontWeight.W_500,
                     ),
@@ -616,19 +642,20 @@ class MesocycleMixin:
                             "change the microcycle length in days.",
                         ),
                         section(
-                            "Follow the prescribed RIR",
-                            "Each microcycle gives you a fixed RIR target. Use it as "
-                            "the effort standard for that phase. If a set ends harder "
-                            "or easier than planned, adjust the rep count you record so "
-                            "it represents the prescribed RIR. That keeps comparisons "
-                            "between training periods meaningful.",
+                            "Keep targets separate from actual effort",
+                            "Use the prescribed RIR as a guide, then record performed "
+                            "reps and the actual reps left. Never change the logged "
+                            "rep count to make it match a target. Leave actual RIR "
+                            "blank if unknown; legacy RIR remains unverified.",
                         ),
                         section(
                             "Progress reps, then load",
-                            "GYMER uses an 8-12 rep working window. When load needs to change, "
-                            "it estimates strength with the Wathan rep-max curve, targets 8 reps "
-                            "plus the current period's RIR, then rounds only to the exercise's "
-                            "available gym-weight increment.",
+                            "Straight double progression uses each exercise's rep range "
+                            "(8–12 by default). Build reps at the target RIR, then add one "
+                            "available load increment after every planned set reaches the "
+                            "upper limit. Missed sets or unknown effort block an increase. "
+                            "Change the range or select manual progression in exercise details; "
+                            "other methods have separate rules.",
                         ),
                         section(
                             "Change the plan when needed",
@@ -774,6 +801,12 @@ class MesocycleMixin:
 
     def exercise_rep_max_seed(self, exercise_name):
         unit = self.settings.get("unit", "kg")
+        if self.exercise_load_mode(exercise_name) != "external":
+            return "", "", "Bodyweight and assisted loads do not establish a total RM."
+
+        context_rows = [row for row in (self.active_workout or {}).get("rows", []) if row.get("exercise_name") == exercise_name]
+        if not context_rows:
+            context_rows = [storage.read_exercise_details(exercise_name)]
 
         for item in reversed(self.set_controls):
             if (
@@ -784,16 +817,17 @@ class MesocycleMixin:
             ):
                 continue
 
+            if set_context.comparison_error([item], context_rows):
+                return "", "", "Setup, side or logging conventions differ; enter a comparable RM manually."
+
             weight = self.evaluate_numeric_expression(item["weight"].value)
             reps = self.evaluate_numeric_expression(item["reps"].value)
             if weight is None or reps is None or weight <= 0 or reps <= 0:
                 continue
 
-            rir = 0.0
-            if self.track_rir_enabled():
-                parsed_rir = self.evaluate_numeric_expression(item["rir"].value)
-                if parsed_rir is not None:
-                    rir = max(0.0, parsed_rir)
+            rir = self.evaluate_numeric_expression(item["rir"].value)
+            if rir is None:
+                return f"{weight:g}", "", "Actual RIR is unknown; enter a known repetition maximum manually."
 
             effective_rm = int(round(reps + rir))
             note = f"Using your latest straight set: {weight:g} {unit} × {reps:g}"
@@ -807,6 +841,11 @@ class MesocycleMixin:
         latest = storage.latest_completed_straight_set(exercise_name)
         if not latest:
             return "", "", "No completed straight set is available yet. Enter a set you know."
+        if latest.get("load_mode", "external") != "external":
+            return "", "", "The latest set uses bodyweight or assistance; enter an external-load RM manually."
+
+        if set_context.comparison_error([latest], context_rows):
+            return "", "", "Setup, side or logging conventions differ; enter a comparable RM manually."
 
         stored_unit = latest.get("weight_unit", unit) or unit
         converted = storage.convert_weight_value(
@@ -815,8 +854,9 @@ class MesocycleMixin:
             unit,
         )
         reps = self.evaluate_numeric_expression(latest.get("reps", "")) or 0
-        rir = self.evaluate_numeric_expression(latest.get("rir", "")) or 0
-        rir = max(0.0, rir)
+        rir = self.evaluate_numeric_expression(latest.get("rir", ""))
+        if rir is None:
+            return converted, "", "Actual RIR is unknown; legacy RIR is unverified and cannot establish an RM."
         effective_rm = int(round(reps + rir))
 
         note = f"Using your latest straight set: {converted} {unit} × {reps:g}"
@@ -850,6 +890,9 @@ class MesocycleMixin:
     ):
         if not self.active_workout:
             return
+        if self.exercise_load_mode(exercise_name) != "external":
+            self.notify("Choose added load or assistance manually for this exercise.")
+            return
 
         target = next(
             (
@@ -868,12 +911,9 @@ class MesocycleMixin:
         target["weight_unit"] = self.settings.get("unit", "kg")
         target["reps"] = str(target_reps)
 
-        if self.track_rir_enabled():
-            planned_rir = self.cycle_rir_target()
-            if planned_rir is not None and self.cycle_rir_lock_enabled():
-                target["rir"] = str(planned_rir)
-            else:
-                target["rir"] = str(target_rir)
+        planned_rir = self.cycle_rir_target()
+        target["target_rir"] = str(planned_rir if planned_rir is not None and self.cycle_rir_lock_enabled() else target_rir)
+        target["rir"] = ""  # Choosing a target is not an observed effort.
 
         # A calculator row is an explicit target choice, not a suspicious
         # accidental entry. Mark the loaded values as accepted before the
@@ -921,6 +961,13 @@ class MesocycleMixin:
             self.selected_tab = 2
             self.page.navigation_bar.selected_index = 2
 
+        self.unregister_text_fields(*getattr(self, "rep_max_fields", []))
+        field_scale = max(1.0, self.font_scale())
+        text_size = 14 * self.font_scale()
+
+        def action_focused(e):
+            self.focused_text_field = None
+
         unit = self.settings.get("unit", "kg")
         percentages = self.rep_max_percentages()
         advanced = self.advanced_mode_enabled()
@@ -934,7 +981,9 @@ class MesocycleMixin:
             label=f"Known weight ({unit})",
             hint_text="e.g. 100",
             value=str(initial_known_weight or ""),
-            width=self.ui(150),
+            width=150 * field_scale,
+            text_size=text_size,
+            label_style=ft.TextStyle(size=11 * self.font_scale()),
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             numeric_kind="weight",
@@ -943,7 +992,9 @@ class MesocycleMixin:
             label="Known RM",
             hint_text="e.g. 10",
             value=str(initial_known_rm or ""),
-            width=self.ui(90),
+            width=90 * field_scale,
+            text_size=text_size,
+            label_style=ft.TextStyle(size=11 * self.font_scale()),
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             numeric_kind="rm",
@@ -951,12 +1002,15 @@ class MesocycleMixin:
         target_reps = self.text_field(
             label="Target reps",
             value=target_reps_value,
-            width=self.ui(108),
+            width=108 * field_scale,
+            text_size=text_size,
+            label_style=ft.TextStyle(size=11 * self.font_scale()),
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             numeric_kind="target_reps",
             visible=advanced,
         )
+        self.rep_max_fields = [known_weight, known_rm, target_reps]
         if advanced:
             self.chain_text_fields(known_weight, known_rm, target_reps)
         else:
@@ -964,7 +1018,7 @@ class MesocycleMixin:
 
         estimated_1rm = ft.Text(
             "—",
-            size=self.fs(21),
+            size=21 * self.font_scale(),
             weight=ft.FontWeight.BOLD,
             text_align=ft.TextAlign.RIGHT,
             no_wrap=True,
@@ -974,23 +1028,35 @@ class MesocycleMixin:
                 ft.Text(
                     "Estimated 1RM",
                     size=self.fs(10),
-                    color=ft.Colors.GREY_500,
+                    color=self.contrast_text_color("muted"),
                     text_align=ft.TextAlign.RIGHT,
                 ),
                 estimated_1rm,
             ],
             spacing=0,
-            expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.END,
         )
 
         def right_text(value, width=None, *, bold=False, expand=False):
             return ft.Text(
                 value,
-                width=width,
+                width=width * field_scale if width is not None else None,
+                size=text_size,
                 expand=expand,
                 text_align=ft.TextAlign.RIGHT,
                 weight=ft.FontWeight.BOLD if bold else ft.FontWeight.W_500,
+            )
+
+        def scroll_table(rows):
+            return ft.Container(
+                width=float("inf"),
+                border=ft.Border.all(1, ft.Colors.GREY_700),
+                border_radius=self.rounding(),
+                content=ft.Row(
+                    controls=[ft.Container(width=360 * field_scale,
+                                           content=ft.Column(controls=rows, spacing=0))],
+                    scroll=ft.Scrollbar(thumb_visibility=True, interactive=True),
+                ),
             )
 
         rm_target_labels = []
@@ -1042,7 +1108,7 @@ class MesocycleMixin:
                         right_text("RIR", 52, bold=True),
                         rir_reps_header,
                         right_text("Target weight", expand=True, bold=True),
-                        *([ft.Container(width=self.ui(24))] if exercise_name else []),
+                        *([right_text("Apply", 64, bold=True)] if exercise_name else []),
                     ],
                     spacing=self.ui(8),
                 ),
@@ -1066,15 +1132,16 @@ class MesocycleMixin:
                 weight_label,
             ]
             if exercise_name:
-                controls.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18))
+                apply = ft.OutlinedButton(
+                    content="Use", width=64 * field_scale, height=48 * field_scale,
+                    style=self.button_style(), disabled=True,
+                    tooltip=f"Use {rir_value}-RIR target for {exercise_name}",
+                    on_focus=action_focused,
+                )
+                row_state["apply"] = apply
+                controls.append(apply)
             container = ft.Container(
                 padding=ft.Padding(left=self.ui(8), top=self.ui(8), right=self.ui(8), bottom=self.ui(8)),
-                ink=bool(exercise_name),
-                tooltip=(
-                    "Use this target for the next unfinished set"
-                    if exercise_name
-                    else None
-                ),
                 content=ft.Row(controls=controls, spacing=self.ui(8)),
             )
             row_state["container"] = container
@@ -1146,6 +1213,19 @@ class MesocycleMixin:
                     row_state["target_weight"] = None
                     row_state["target_reps"] = reps_count
 
+                if exercise_name:
+                    row_state["apply"].disabled = not (
+                        row_state["target_weight"] is not None
+                        and float(row_state["target_weight"]) > 0
+                        and row_state["target_reps"]
+                    )
+                    row_state["apply"].tooltip = (
+                        f"Use {row_state['rir']}-RIR target for {exercise_name}: "
+                        f"{row_state['target_weight']} {unit} × {shown_reps} reps"
+                        if not row_state["apply"].disabled
+                        else f"Use {row_state['rir']}-RIR target for {exercise_name}: enter valid inputs first"
+                    )
+
             self.page.update()
 
         def finalize(field, kind):
@@ -1167,6 +1247,7 @@ class MesocycleMixin:
                 not exercise_name
                 or not row_state.get("target_weight")
                 or not row_state.get("target_reps")
+                or float(row_state["target_weight"]) <= 0
             ):
                 return
             self.apply_exercise_rep_max_target(
@@ -1178,7 +1259,7 @@ class MesocycleMixin:
 
         for row_state in rir_rows:
             if exercise_name:
-                row_state["container"].on_click = (
+                row_state["apply"].on_click = (
                     lambda e, state=row_state: use_rir_target(state)
                 )
 
@@ -1192,10 +1273,10 @@ class MesocycleMixin:
             ft.IconButton(
                 icon=ft.Icons.INFO_OUTLINE,
                 icon_size=self.ui(20),
-                width=self.ui(34),
-                height=self.ui(34),
+                width=self.touch_size(),
+                height=self.touch_size(),
                 padding=0,
-                tooltip="How to use this calculator",
+                tooltip="How to use this calculator", on_focus=action_focused,
                 on_click=lambda e: self.show_rep_max_info(),
             ),
         ]
@@ -1209,7 +1290,7 @@ class MesocycleMixin:
         ]
         if source_note:
             controls.append(
-                ft.Text(source_note, size=self.fs(11), color=ft.Colors.GREY_500)
+                ft.Text(source_note, size=self.fs(11), color=self.contrast_text_color("muted"))
             )
 
         controls.extend(
@@ -1220,7 +1301,7 @@ class MesocycleMixin:
                         known_rm,
                         estimated_1rm_block,
                     ],
-                    spacing=self.ui(8),
+                    spacing=self.ui(8), run_spacing=self.ui(8), wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Divider(),
@@ -1230,11 +1311,10 @@ class MesocycleMixin:
                             "RIR Targets",
                             size=self.fs(20),
                             weight=ft.FontWeight.BOLD,
-                            expand=True,
                         ),
                         *([target_reps] if advanced else []),
                     ],
-                    spacing=self.ui(8),
+                    wrap=True, spacing=self.ui(8),
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
             ]
@@ -1242,25 +1322,19 @@ class MesocycleMixin:
 
         controls.extend(
             [
-                ft.Container(
-                    width=float("inf"),
-                    border=ft.Border.all(1, ft.Colors.GREY_700),
-                    border_radius=self.rounding(),
-                    content=ft.Column(controls=rir_controls, spacing=0),
-                ),
+                scroll_table(rir_controls),
             ]
         )
         controls.append(
             ft.Text(
                 (
-                    "Tap any target number to load that weight and rep target into "
-                    "the next unfinished set for this exercise."
+                    "Choose Use to load that target into the next unfinished set. "
+                    "Actual RIR remains unknown until you record it. Enter an RM with the same setup, side and logging conventions as the target."
                     if exercise_name
-                    else "When opened from an exercise, tap a target number to load "
-                    "it directly into the next unfinished set."
+                    else "Open this calculator from an exercise to use a target for its next unfinished set."
                 ),
                 size=self.fs(10.5),
-                color=ft.Colors.GREY_500,
+                color=self.contrast_text_color("muted"),
             )
         )
 
@@ -1268,18 +1342,14 @@ class MesocycleMixin:
             [
                 ft.Divider(),
                 ft.Text("1–20 RM Table", size=self.fs(20), weight=ft.FontWeight.BOLD),
-                ft.Container(
-                    width=float("inf"),
-                    border=ft.Border.all(1, ft.Colors.GREY_700),
-                    border_radius=self.rounding(),
-                    content=ft.Column(controls=rm_rows, spacing=0),
-                ),
+                ft.Text("Tables scroll sideways when needed.", size=12 * self.font_scale(), color=self.contrast_text_color()),
+                scroll_table(rm_rows),
                 ft.Text(
                     "Use the full table when you want to compare rep ranges. "
                     "Treat the numbers as starting estimates and adjust from "
                     "your own completed sets.",
                     size=self.fs(10.5),
-                    color=ft.Colors.GREY_500,
+                    color=self.contrast_text_color("muted"),
                 ),
             ]
         )
@@ -1421,8 +1491,8 @@ class MesocycleMixin:
                 return default
             return int(round(value))
 
-        length_suffix = ft.Text(size=self.fs(10.5), color=ft.Colors.GREY_500)
-        deload_suffix = ft.Text(size=self.fs(10.5), color=ft.Colors.GREY_500)
+        length_suffix = ft.Text(size=self.fs(10.5), color=self.contrast_text_color("muted"))
+        deload_suffix = ft.Text(size=self.fs(10.5), color=self.contrast_text_color("muted"))
 
         def suffix_wrapper(field, suffix):
             field.content_padding = ft.Padding(
@@ -1464,6 +1534,8 @@ class MesocycleMixin:
         deload_count.on_blur = refresh_suffixes
         refresh_suffixes()
 
+        deload_controls, deload_values = self.deload_editor(cycle)
+
         def save_previous(e=None, refresh=True):
             valid = True
             fields = [name_field, start_field, length_value, deload_count]
@@ -1489,6 +1561,11 @@ class MesocycleMixin:
                 valid = False
 
             config = dict(cycle)
+            recovery = deload_values()
+            if recovery is None:
+                self.page.update()
+                return False
+            config.update(recovery)
             config.update({
                 "name": (name_field.value or "Mesocycle").strip(),
                 "start_date": (start_field.value or "").strip(),
@@ -1505,6 +1582,9 @@ class MesocycleMixin:
 
             if not valid:
                 self.page.update()
+                return False
+            if error := deloads.effort_error(config):
+                self.notify(error)
                 return False
 
             storage.update_mesocycle(cycle_id, config)
@@ -1603,6 +1683,7 @@ class MesocycleMixin:
         controls = [
             name_field,
             start_field,
+            deload_controls,
             ft.Row(
                 controls=[length_wrapper, deload_wrapper],
                 spacing=self.ui(8),
@@ -1701,7 +1782,7 @@ class MesocycleMixin:
                     size=self.fs(11),
                 ),
                 ft.Text(
-                    "MEV — Minimum Effective Volume: the lowest weekly volume expected to reliably produce growth.",
+                    "MEV — Minimum Effective Volume: a supplied weekly reference range, not a validated personal minimum.",
                     size=self.fs(11),
                 ),
                 ft.Text(
@@ -1717,7 +1798,7 @@ class MesocycleMixin:
             tight=True,
         )
 
-        body = [definitions]
+        body = [definitions, ft.Text("The supplied table contains broad reference ranges. Individual response and the accounting method matter; no range is a guaranteed personal threshold. Protocol fragments and indirect tags are not converted into direct sets.", size=self.fs(11))]
         if landmark:
             body.extend(
                 [
@@ -1757,7 +1838,7 @@ class MesocycleMixin:
                         ft.Text(
                             "Source",
                             size=self.fs(10.5),
-                            color=ft.Colors.GREY_500,
+                            color=self.contrast_text_color("muted"),
                         ),
                         self.outlined_button(
                             "Open RP Strength article",
@@ -1795,93 +1876,29 @@ class MesocycleMixin:
         self.page.show_dialog(dialog)
 
     def mesocycle_weekly_volume_card(self, cycle):
-        """Compact planned primary working sets for the repeating schedule."""
-        counts = storage.mesocycle_planned_primary_set_counts(cycle)
-        weekly = self.cycle_period_noun(cycle) == "week"
-
-        rows = []
-        for group, count in counts.items():
-            mev = volume_landmarks.mev_label(group)
-            mev_text = "MEV —" if mev == "—" else f"MEV {mev}"
-            rows.append(
-                ft.Container(
-                    width=float("inf"),
-                    padding=ft.Padding(
-                        left=self.ui(6),
-                        top=self.ui(4),
-                        right=self.ui(6),
-                        bottom=self.ui(4),
-                    ),
-                    ink=True,
-                    on_click=lambda e, name=group: self.show_volume_landmark_info(name),
-                    content=ft.Row(
-                        controls=[
-                            ft.Text(
-                                group,
-                                size=self.fs(12.5),
-                                weight=ft.FontWeight.W_600,
-                                expand=True,
-                            ),
-                            ft.Text(
-                                str(int(count or 0)),
-                                width=self.ui(34),
-                                text_align=ft.TextAlign.RIGHT,
-                                size=self.fs(12.5),
-                                weight=ft.FontWeight.BOLD,
-                            ),
-                            ft.Text(
-                                mev_text,
-                                width=self.ui(68),
-                                text_align=ft.TextAlign.RIGHT,
-                                size=self.fs(10.5),
-                                color=self.accent_color(),
-                                weight=ft.FontWeight.W_600,
-                            ),
-                        ],
-                        spacing=self.ui(5),
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                )
-            )
-
-        if not rows:
-            rows = [
-                ft.Text(
-                    "Add workouts to the repeating schedule to see planned muscle-group sets.",
-                    size=self.fs(11),
-                    color=ft.Colors.GREY_500,
-                )
-            ]
-
-        title = "Planned weekly sets" if weekly else "Planned microcycle sets"
-        return ft.Container(
-            width=float("inf"),
-            padding=ft.Padding(
-                left=self.ui(9),
-                top=self.ui(8),
-                right=self.ui(9),
-                bottom=self.ui(7),
-            ),
-            border=ft.Border.all(1, ft.Colors.GREY_700),
-            border_radius=self.rounding(),
-            content=ft.Column(
-                controls=[
-                    ft.Text(
-                        title,
-                        size=self.fs(16),
-                        weight=ft.FontWeight.BOLD,
-                    ),
-                    ft.Text(
-                        "Planned primary working sets · tap a muscle for RP landmarks",
-                        size=self.fs(10),
-                        color=ft.Colors.GREY_500,
-                    ),
-                    *rows,
-                ],
-                spacing=self.ui(1),
-                tight=True,
-            ),
-        )
+        """Build-template work, raw and normalized, with separate exposure types."""
+        report = storage.mesocycle_volume_report(cycle)
+        days = report["period_days"]
+        controls = [
+            ft.Text("Repeating Build-plan volume", size=self.fs(16), weight=ft.FontWeight.BOLD),
+            ft.Text(f"Raw totals per {days} days; seven-day rates = totals × 7 / {days}. Temporary recovery prescriptions are separate.", size=self.fs(11)),
+        ]
+        names = list(dict.fromkeys([*report["direct"], *report["indirect"]]))
+        for name in names:
+            lines = [ft.Text(name, weight=ft.FontWeight.BOLD)]
+            for kind, label in (("direct", "Direct"), ("indirect", "Indirect involvement")):
+                metrics = report[kind].get(name)
+                if metrics:
+                    lines.append(ft.Text(f"{label}, per {days} days: {volume_accounting.describe(metrics)}", size=self.fs(11)))
+                    lines.append(ft.Text(f"{label}, per 7 days: {volume_accounting.describe(report['weekly_' + kind][name])}", size=self.fs(11)))
+            lines.append(ft.Text(f"Supplied MEV reference: {volume_landmarks.mev_label(name)} / week", size=self.fs(10.5)))
+            controls.append(ft.Container(padding=self.ui(6), ink=True,
+                on_click=lambda e, group=name: self.show_volume_landmark_info(group), content=ft.Column(controls=lines, spacing=self.ui(2))))
+        if not names:
+            controls.append(ft.Text("Add workouts and muscle tags to see planned involvement.", size=self.fs(11)))
+        controls.append(ft.Text("These categories are not additive set equivalents. Only conventional direct sets share the reference's units; protocol work is shown separately. Supplied ranges are general references, not personal requirements. Secondary tags do not assign hypertrophy credit.", size=self.fs(10.5)))
+        return ft.Container(width=float("inf"), padding=self.ui(9), border=ft.Border.all(1, ft.Colors.GREY_700),
+                            border_radius=self.rounding(), content=ft.Column(controls=controls, spacing=self.ui(5)))
 
     def show_mesocycle(self):
         self.selected_tab = 2
@@ -1921,7 +1938,7 @@ class MesocycleMixin:
                                     f"Ended early · day {status['day_in_microcycle']} of "
                                     f"{resumable.get('microcycle_days', '7')}",
                                     size=self.fs(11.5),
-                                    color=ft.Colors.GREY_500,
+                                    color=self.contrast_text_color("muted"),
                                 ),
                                 ft.Text(
                                     "Resume keeps the same start date, workout rotation, "
@@ -1966,7 +1983,7 @@ class MesocycleMixin:
             cycle.update(updated)
 
         unlock_rir = ft.Switch(
-            label="Unlock RIR",
+            label="Allow target RIR override",
             value=cycle.get("rir_lock", "1") == "0",
         )
         rir_lock_info = ft.IconButton(
@@ -1975,7 +1992,7 @@ class MesocycleMixin:
             width=self.ui(32),
             height=self.ui(32),
             padding=0,
-            tooltip="Why keep RIR locked?",
+            tooltip="Target RIR and actual effort",
             on_click=lambda e: self.show_rir_unlock_info(),
         )
         rest_timer_lock = ft.Switch(
@@ -2036,7 +2053,7 @@ class MesocycleMixin:
                             ft.Text(
                                 f"{self.format_cycle_date(status['start_date'])} – {self.format_cycle_date(status['end_date'])}",
                                 size=self.fs(10.5),
-                                color=ft.Colors.GREY_500,
+                                color=self.contrast_text_color("muted"),
                             ),
                         ],
                         spacing=1,
@@ -2206,12 +2223,12 @@ class MesocycleMixin:
         length_suffix = ft.Text(
             size=self.fs(10.5),
             weight=ft.FontWeight.W_500,
-            color=ft.Colors.GREY_500,
+            color=self.contrast_text_color("muted"),
         )
         deload_suffix = ft.Text(
             size=self.fs(10.5),
             weight=ft.FontWeight.W_500,
-            color=ft.Colors.GREY_500,
+            color=self.contrast_text_color("muted"),
         )
 
         def suffixed_field(field, suffix_control):
@@ -2240,7 +2257,7 @@ class MesocycleMixin:
         deload_wrapper = suffixed_field(deload_count, deload_suffix)
 
         unlock_rir = ft.Switch(
-            label="Unlock RIR",
+            label="Allow target RIR override",
             value=cycle.get("rir_lock", "1") == "0",
         )
         rir_lock_info = ft.IconButton(
@@ -2249,7 +2266,7 @@ class MesocycleMixin:
             width=self.ui(32),
             height=self.ui(32),
             padding=0,
-            tooltip="Why keep RIR locked?",
+            tooltip="Target RIR and actual effort",
             on_click=lambda e: self.show_rir_unlock_info(),
         )
         rest_timer_lock = ft.Switch(
@@ -2288,12 +2305,12 @@ class MesocycleMixin:
         )
         planner_help = ft.Text(
             size=self.fs(11),
-            color=ft.Colors.GREY_500,
+            color=self.contrast_text_color("muted"),
         )
         planner_error = ft.Text(
             "Assign at least one workout day.",
             size=self.fs(11),
-            color=ft.Colors.RED_400,
+            color=self.contrast_text_color("error"),
             visible=False,
         )
         planner_days = ft.Column(spacing=self.ui(6))
@@ -2476,6 +2493,8 @@ class MesocycleMixin:
         start_field.on_blur = lambda e: render_planner(update_page=True)
         refresh_period_labels(update_page=False)
 
+        deload_controls, deload_values = self.deload_editor(cycle)
+
         def build_config():
             return {
                 "cycle_id": cycle.get("cycle_id", ""),
@@ -2519,6 +2538,14 @@ class MesocycleMixin:
                 valid = False
 
             config = build_config()
+            recovery = deload_values()
+            if recovery is None:
+                self.page.update()
+                return
+            config.update(recovery)
+            if error := deloads.effort_error(config):
+                self.notify(error)
+                return
             if valid:
                 status = storage.mesocycle_status(config)
                 if field_int(deload_count, 0) >= status["total_microcycles"]:
@@ -2605,6 +2632,7 @@ class MesocycleMixin:
                 ),
             ])
 
+        controls.append(deload_controls)
         controls.append(self.mesocycle_rir_logging_card())
 
         controls.append(

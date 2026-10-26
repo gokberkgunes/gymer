@@ -89,6 +89,8 @@ class RepsApp(
 
         self.settings = storage.read_settings()
         self.active_workout = storage.load_active_workout()
+        self._workout_clock_anchor = None
+        self.workout_elapsed_seconds()
         self.set_controls = []
         self.selected_tab = 0
         self.active_progress_text = None
@@ -144,6 +146,7 @@ class RepsApp(
         self.page.on_platform_brightness_change = self.platform_brightness_changed
         self.page.on_keyboard_event = self.handle_keyboard_event
         self.show_workout_tab()
+        self.restore_rest_timer()
 
 
 def main(page: ft.Page):

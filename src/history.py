@@ -8,6 +8,11 @@ from datetime import datetime
 import flet as ft
 
 import storage
+import protocols
+import set_context
+import deloads
+import volume_accounting
+import load_modes
 
 
 class HistoryMixin:
@@ -104,9 +109,15 @@ class HistoryMixin:
                         ),
                         content=ft.Row(
                             controls=[
-                                ft.Text(
-                                    session["workout_name"],
-                                    weight=ft.FontWeight.BOLD,
+                                ft.Column(
+                                    controls=[
+                                        ft.Text(session["workout_name"]),
+                                        ft.Text(
+                                            f'{session["completed_count"]}/{session["planned_count"]} entries completed',
+                                            size=self.fs(11),
+                                        ),
+                                    ],
+                                    spacing=self.ui(2),
                                     expand=True,
                                 ),
                                 ft.Text(
@@ -178,7 +189,7 @@ class HistoryMixin:
                             ft.Text(
                                 "Exercise History",
                                 size=self.fs(11),
-                                color=ft.Colors.GREY_500,
+                                color=self.contrast_text_color("muted"),
                             ),
                         ],
                         spacing=0,
@@ -193,7 +204,7 @@ class HistoryMixin:
             controls.append(
                 ft.Text(
                     "No completed history for this exercise yet.",
-                    color=ft.Colors.GREY_500,
+                    color=self.contrast_text_color("muted"),
                 )
             )
         else:
@@ -202,7 +213,7 @@ class HistoryMixin:
                 for row in session.get("rows", []):
                     raw_weight = str(row.get("weight", "") or "").strip()
                     weight = self.format_weight_text(raw_weight) if raw_weight else "—"
-                    unit = str(row.get("weight_unit", "") or "").strip()
+                    unit = load_modes.suffix(row.get("load_mode", "external"), str(row.get("weight_unit", "") or "").strip())
                     reps = str(row.get("reps", "") or "").strip() or "—"
                     rir = str(row.get("rir", "") or "").strip()
                     set_type = str(row.get("set_type", "Normal") or "Normal").strip()
@@ -211,9 +222,15 @@ class HistoryMixin:
                         f"{weight}{(' ' + unit) if unit else ''} × {reps} reps"
                     )
                     if rir and not storage.is_warmup_set_type(set_type):
-                        text += f" · {rir} RIR"
+                        text += f" · actual {rir} RIR"
+                    if row.get("target_rir", "") != "":
+                        text += f" · target {row['target_rir']} RIR"
+                    if row.get("legacy_rir", "") != "":
+                        text += f" · legacy RIR {row['legacy_rir']} (unverified)"
                     if not storage.is_straight_set_type(set_type):
                         text += f" · {set_type}"
+                    if set_context.summary(row):
+                        text += " · " + set_context.summary(row)
                     set_lines.append(text)
 
                 controls.append(
@@ -244,7 +261,7 @@ class HistoryMixin:
                                                 include_time=False,
                                             ),
                                             size=self.fs(11),
-                                            color=ft.Colors.GREY_500,
+                                            color=self.contrast_text_color("muted"),
                                         ),
                                     ],
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -403,19 +420,22 @@ class HistoryMixin:
 
             group["sets"].append(
                 {
+                    **{key: previous.get(key, "") for key in volume_accounting.FIELDS},
+                    "protocol_group_start": "",
+                    **set_context.metadata(previous),
+                    "load_mode": previous.get("load_mode", "external"),
                     "weight": previous.get("weight", ""),
                     "reps": previous.get("reps", ""),
-                    "rir": (
-                        previous.get("rir", "")
-                        if storage.method_set_uses_rir(method, next_type)
-                        else ""
-                    ),
+                    "rir": "",
                     "set_type": next_type,
+                    "segment_role": volume_accounting.role({"set_type": next_type}),
                     "note": "",
                     "completed": False,
                 }
             )
             group["sets"] = storage.reconcile_method_sets(method, group["sets"])
+            if volume_accounting.role(group["sets"][-1]) == "conventional":
+                group["sets"][-1].update(group_id="", group_planned_count="1")
 
             render()
 
@@ -444,10 +464,25 @@ class HistoryMixin:
         def render():
             snapshot()
             controls_column.controls.clear()
+            report = storage.volume_report([{**row, "exercise_name": group["exercise_name"]} for group in grouped for row in group["sets"]])
+            controls_column.controls.append(ft.Text("Recorded work: " + volume_accounting.describe(report["totals"]), size=self.fs(12)))
+            if report["inferred_group_rows"] or report["legacy_metadata_rows"]:
+                controls_column.controls.append(ft.Text("Legacy grouping is inferred; records without muscle snapshots use current tags.", size=self.fs(10.5)))
 
             for group in grouped:
                 exercise_name = group["exercise_name"]
                 training_method = group.get("training_method", "Straight")
+                current_mode = load_modes.normalize(group["sets"][0].get("load_mode", "external")) if group["sets"] else "external"
+                def select_load(e, selected_group=group):
+                    snapshot()
+                    for set_row in selected_group["sets"]:
+                        set_row["load_mode"] = e.control.value
+                    render()
+                mode_control = ft.Dropdown(
+                    label="Recorded load meaning", value=current_mode,
+                    options=[ft.DropdownOption(key=key, text=label) for key, label in load_modes.LABELS.items()],
+                    on_select=select_load,
+                )
                 note_containers = []
                 history_done = sum(
                     1 for row in group["sets"] if row.get("completed", True)
@@ -491,16 +526,17 @@ class HistoryMixin:
                 for index, row in enumerate(group["sets"], start=1):
                     weight = self.text_field(
                         value=row.get("weight", ""),
-                        hint_text="Weight",
+                        hint_text=load_modes.suffix(row.get("load_mode", "external"), self.settings.get("unit", "kg")),
                         width=self.SET_WEIGHT_WIDTH,
                         dense=True,
                         text_align=ft.TextAlign.CENTER,
                         keyboard_type=ft.KeyboardType.NUMBER,
-                        numeric_kind="weight",
+                        numeric_kind=load_modes.numeric_kind(row.get("load_mode", "external")),
                     )
-                    weight_display, _ = self.weight_field_with_unit(
+                    weight_display, _ = self.field_with_suffix(
                         weight,
                         self.SET_WEIGHT_WIDTH,
+                        load_modes.suffix(row.get("load_mode", "external"), row.get("weight_unit") or self.settings.get("unit", "kg")),
                     )
                     reps = self.text_field(
                         value=row.get("reps", ""),
@@ -523,7 +559,7 @@ class HistoryMixin:
                         row["rir"] = ""
                     rir = self.text_field(
                         value=row.get("rir", "") if uses_rir else "",
-                        hint_text="RIR",
+                        hint_text="Actual RIR",
                         width=self.SET_SMALL_WIDTH,
                         dense=True,
                         text_align=ft.TextAlign.CENTER,
@@ -589,14 +625,6 @@ class HistoryMixin:
                                 target.get("weight_control"),
                                 target.get("reps_control"),
                             ]
-                            if (
-                                self.track_rir_enabled()
-                                and storage.method_set_uses_rir(
-                                    method, target.get("set_type")
-                                )
-                            ):
-                                required.append(target.get("rir_control"))
-
                             missing = [
                                 field
                                 for field in required
@@ -614,13 +642,16 @@ class HistoryMixin:
                         button.content.color = (
                             ft.Colors.WHITE if making_complete else ft.Colors.GREEN_500
                         )
-                        self.page.update()
+                        render()
 
                     done_button.on_click = toggle_history_done
+                    done_semantics = self.completion_semantics(
+                        done_button, exercise_name, index, bool(row.get("completed", True))
+                    )
 
                     delete_set = ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
-                        icon_color=ft.Colors.RED_400,
+                        icon_color=self.contrast_text_color("error"),
                         tooltip="Delete set",
                         on_click=lambda e, g=group, target=row: remove_set(
                             g, target
@@ -636,13 +667,25 @@ class HistoryMixin:
                                         weight_display,
                                         reps_display,
                                         rir_display,
-                                        ft.Container(expand=True),
-                                        done_button,
+                                        done_semantics,
                                         delete_set,
                                     ],
-                                    spacing=self.ui(4),
+                                    wrap=True, spacing=self.ui(4),
                                 ),
                                 note_container,
+                                ft.Text(volume_accounting.context_summary(row), size=self.fs(10)),
+                                ft.Text(deloads.summary(row), size=self.fs(10), visible=deloads.is_recovery(row)),
+                                ft.Row(controls=[
+                                    ft.IconButton(icon=ft.Icons.TUNE, tooltip="Protocol details",
+                                                  on_click=lambda e, target=row: self.edit_protocol_details(target, render, historical=True)),
+                                    ft.Text(protocols.summary(row), size=self.fs(10), expand=True),
+                                ]),
+                                ft.Text(
+                                    " · ".join(part for part in (
+                                        f"Target {row['target_rir']} RIR" if row.get("target_rir", "") != "" else "",
+                                        f"Legacy RIR {row['legacy_rir']} (unverified)" if row.get("legacy_rir", "") != "" else "",
+                                    ) if part), size=self.fs(10),
+                                ),
                             ],
                             spacing=self.ui(4),
                         )
@@ -676,9 +719,9 @@ class HistoryMixin:
                                             f"{history_done}/{history_total} done",
                                             size=self.fs(10),
                                             color=(
-                                                ft.Colors.GREY_500
+                                                self.contrast_text_color()
                                                 if history_done == history_total
-                                                else ft.Colors.ORANGE_400
+                                                else self.contrast_text_color("warning")
                                             ),
                                         ),
                                         notes_button,
@@ -688,6 +731,8 @@ class HistoryMixin:
                                     controls=set_controls,
                                     spacing=self.ui(self.set_spacing()),
                                 ),
+                                mode_control,
+                                ft.Text(load_modes.guidance(current_mode), size=self.fs(10)),
                                 self.set_adjust_button(
                                     "+",
                                     "Add set",
@@ -746,7 +791,7 @@ class HistoryMixin:
                         field = row.get(key)
                         if field is not None and not self.normalize_numeric_control(
                             field,
-                            kind=kind,
+                            kind=load_modes.numeric_kind(row.get("load_mode", "external")) if kind == "weight" else kind,
                             allow_empty=True,
                         ):
                             numeric_valid = False
@@ -763,6 +808,10 @@ class HistoryMixin:
                 self.page.update()
                 return
             self.clear_field_invalid(workout_date)
+            if requested_date > datetime.now().date().isoformat():
+                self.mark_field_invalid(workout_date)
+                self.notify("A performed workout cannot be dated in the future.")
+                return
 
             snapshot()
             rows = []
@@ -771,7 +820,15 @@ class HistoryMixin:
                 for row in group["sets"]:
                     rows.append(
                         {
+                            **protocols.metadata(row),
+                            **deloads.metadata(row),
+                            **volume_accounting.metadata(row),
+                            "rest_seconds": row.get("rest_seconds", ""),
                             "exercise_name": group["exercise_name"],
+                            "target_rir": row.get("target_rir", ""),
+                            "legacy_rir": row.get("legacy_rir", ""),
+                            "load_mode": row.get("load_mode", "external"),
+                            "weight_unit": row.get("weight_unit") or self.settings.get("unit", "kg"),
                             "weight": row.get("weight", ""),
                             "reps": row.get("reps", ""),
                             "rir": (
@@ -1004,7 +1061,7 @@ class HistoryMixin:
                             f"{cycle_rir} RIR",
                             size=self.fs(11.5),
                             weight=ft.FontWeight.BOLD,
-                            color=self.accent_color(),
+                            color=self.contrast_text_color("accent"),
                         )
                     ] if cycle_rir is not None else []),
                     *([
@@ -1012,7 +1069,7 @@ class HistoryMixin:
                             " · ".join(muscle_summary),
                             size=self.fs(11),
                             weight=ft.FontWeight.W_500,
-                            color=ft.Colors.GREY_500,
+                            color=self.contrast_text_color("muted"),
                         )
                     ] if muscle_summary else []),
                     ft.Container(height=2),
