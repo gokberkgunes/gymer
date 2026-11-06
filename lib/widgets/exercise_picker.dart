@@ -128,6 +128,7 @@ class _PickerState extends State<_Picker> {
     );
     final entries = <(String, bool)>[
       if (favourites.isNotEmpty) ...[('Favourites', true), for (final name in favourites) (name, false)],
+      if (favourites.isNotEmpty && (recent.isNotEmpty || remaining.isNotEmpty)) ('', true),
       if (recent.isNotEmpty) ...[('Recent', true), for (final name in recent) (name, false)],
       if (grouped && promoted.isNotEmpty && remaining.isNotEmpty) ('All exercises', true),
       for (final name in remaining) (name, false),
@@ -168,6 +169,7 @@ class _PickerState extends State<_Picker> {
                 itemBuilder: (context, index) {
                   if (index < entries.length) {
                     final (label, isSection) = entries[index];
+                    if (isSection && label.isEmpty) return const Divider(indent: 20, endIndent: 20, height: 16);
                     return isSection ? section(label) : row(label);
                   }
                   if (canAdd) {
