@@ -16,6 +16,7 @@ import 'logic/plates.dart';
 import 'logic/progression.dart';
 import 'logic/snapshots.dart';
 import 'logic/volume.dart';
+import 'logic/warmup.dart';
 import 'models.dart';
 
 class ExercisePoint {
@@ -280,7 +281,7 @@ class AppStore extends ChangeNotifier {
     void session(Session s) {
       final src = s.unit;
       if (src == to) return;
-      for (final e in s.exercises) {
+      for (final e in [...s.exercises, ...s.warmupExercises]) {
         for (final set in e.sets) {
           set
             ..weight = c(set.weight, src)
@@ -470,8 +471,8 @@ class AppStore extends ChangeNotifier {
     final t = template(s.templateId) ?? WorkoutTemplate(id: '', name: '', exercises: []);
     return estimateWorkout(
       rows: [
-        for (final e in s.exercises)
-          for (final set in e.sets) (e.name, set.rest),
+        for (final e in s.visibleExercises)
+          for (final set in s.visibleSetsFor(e)) (e.name, set.rest),
       ],
       setSeconds: (n) => setSecondsFor(n, t.setSeconds),
       setOverhead: t.setOverhead,
@@ -755,7 +756,7 @@ class AppStore extends ChangeNotifier {
   static double _tenth(double v) => (v * 10).round() / 10;
 
   void moveSessionExercise(SessionExercise e, int delta) {
-    final list = active?.exercises;
+    final list = active?.visibleExercises;
     final i = list?.indexOf(e) ?? -1;
     if (list == null || i < 0 || i + delta < 0 || i + delta >= list.length) return;
     list
@@ -769,6 +770,7 @@ class AppStore extends ChangeNotifier {
     e.sets.insert(index.clamp(0, e.sets.length), set);
     _reconcileSession(e);
     e.collapsed = false;
+    if (active?.warmupExercises.contains(e) == true && !set.done) active!.warmingUp = true;
     changed();
   }
 
@@ -835,6 +837,76 @@ class AppStore extends ChangeNotifier {
     rest = null;
     _syncAlerts();
     changed();
+  }
+
+  /// Builds a temporary whole-workout warm-up phase. Working rows remain untouched.
+  String? startWarmups({int sets = 3}) {
+    final session = active;
+    if (session == null) return 'Start a workout first.';
+    if (sets != 2 && sets != 3) return 'Choose two or three warm-up sets.';
+    if (session.doneSets > 0) return 'Start warm-ups before completing working sets.';
+    if (session.warmupExercises.any((exercise) => exercise.sets.any((set) => set.done))) {
+      return 'Warm-ups are already underway. Switch phases to return to them.';
+    }
+    final warmups = <SessionExercise>[];
+    var hasWorkingLoad = false;
+    for (final exercise in session.exercises) {
+      if (exercise.loadMode != 'external') continue;
+      final source = exercise.work.where((set) => (set.weight ?? set.hintWeight ?? 0) > 0).firstOrNull;
+      if (source == null) continue;
+      hasWorkingLoad = true;
+      final usesBar = platesApply(exercise.name);
+      final ramp = warmupRamp(
+        source.weight ?? source.hintWeight!,
+        sets: sets,
+        increment: incrementFor(exercise.name, session.unit) ?? 0.5,
+        bar: usesBar ? plates(source.weight ?? source.hintWeight!, name: exercise.name).bar : 0,
+        plates: usesBar ? settings.plates : null,
+        pairs: usesBar ? settings.platePairs : null,
+      );
+      if (ramp.isEmpty) continue;
+      warmups.add(
+        SessionExercise(
+          name: exercise.name,
+          sets: [
+            for (final step in ramp)
+              SetEntry(
+                type: 'Warm-up',
+                weight: step.weight,
+                reps: step.reps,
+                rest: 60,
+                context: source.context,
+                prescribed: true,
+              ),
+          ],
+        ),
+      );
+    }
+    if (warmups.isEmpty) {
+      return hasWorkingLoad
+          ? 'No warm-up loads are available with this plate setup.'
+          : 'Enter working weights first, then start warm-ups.';
+    }
+    session
+      ..warmupExercises = warmups
+      ..warmingUp = true;
+    _dismissRest();
+    changed();
+    return null;
+  }
+
+  void showWorkoutPhase({required bool warmup}) {
+    final session = active;
+    if (session == null || (warmup && session.warmupExercises.isEmpty)) return;
+    session.warmingUp = warmup;
+    changed();
+  }
+
+  void _finishWarmupPhase() {
+    final session = active;
+    if (session != null && session.warmingUp && (session.warmupExercises.isEmpty || session.warmupsComplete)) {
+      session.warmingUp = false;
+    }
   }
 
   SessionExercise _buildExercise(TemplateExercise te, Session session, Mesocycle? cycle) {
@@ -1142,6 +1214,9 @@ class AppStore extends ChangeNotifier {
           return existing;
         }(),
     ];
+    // Preserve completed warm-ups when the plan is edited, and discard ramps for removed exercises.
+    s.warmupExercises.removeWhere((warmup) => !s.exercises.any((exercise) => exercise.name == warmup.name));
+    _finishWarmupPhase();
   }
 
   /// Completed sets can't disappear when editing the plan mid-workout.
@@ -1192,6 +1267,8 @@ class AppStore extends ChangeNotifier {
   String? removeSessionExercise(SessionExercise e) {
     if (e.sets.any((s) => s.done)) return 'Completed exercises cannot be removed from the current session.';
     active?.exercises.remove(e);
+    active?.warmupExercises.removeWhere((warmup) => identical(warmup, e) || warmup.name == e.name);
+    _finishWarmupPhase();
     if (rest?.exercise == e.name) _dismissRest();
     changed();
     return null;
@@ -1204,6 +1281,8 @@ class AppStore extends ChangeNotifier {
       return 'That exercise is already in the current workout.';
     }
     final info = addExercise(newName);
+    s.warmupExercises.removeWhere((warmup) => warmup.name == e.name);
+    _finishWarmupPhase();
     final latest = _latestSetValues(info.name, null, anyWorkout: true) ?? const <SetEntry>[];
     e
       ..name = info.name
@@ -1230,7 +1309,9 @@ class AppStore extends ChangeNotifier {
 
   void addSet(SessionExercise e) {
     final last = e.sets.isEmpty ? null : e.sets.last;
-    final type = defaultNextSetType(e.method, [for (final s in e.sets) s.type]);
+    final type = active?.warmupExercises.contains(e) == true
+        ? 'Warm-up'
+        : defaultNextSetType(e.method, [for (final s in e.sets) s.type]);
     e.sets.add(
       SetEntry(
         type: type,
@@ -1251,7 +1332,7 @@ class AppStore extends ChangeNotifier {
     e.sets.removeAt(index);
     _reconcileSession(e);
     final r = rest;
-    if (r != null && r.exercise == e.name) {
+    if (r != null && r.exercise == e.name && r.warmup == (active?.warmupExercises.contains(e) == true)) {
       if (r.setIndex == index) {
         _dismissRest();
       } else if (r.setIndex > index) {
@@ -1261,13 +1342,16 @@ class AppStore extends ChangeNotifier {
           exercise: e.name,
           setIndex: r.setIndex - 1,
           countdown: r.countdown,
+          warmup: r.warmup,
         );
       }
     }
+    _finishWarmupPhase();
     changed();
   }
 
   void changeSetType(SessionExercise e, SetEntry set, String type) {
+    if (active?.warmupExercises.contains(e) == true) return;
     set.type = type;
     _reconcileSession(e);
     changed();
@@ -1289,7 +1373,10 @@ class AppStore extends ChangeNotifier {
     if (field == 'weight' && s.hintWeight != null) return s.hintWeight;
     if (field == 'reps' && s.hintReps != null) return s.hintReps;
     if (field == 'rir' || index == 0) return null;
-    final above = e.sets[index - 1];
+    final visible = active?.visibleSetsFor(e) ?? e.sets;
+    final position = visible.indexOf(s);
+    if (position <= 0) return null;
+    final above = visible[position - 1];
     return field == 'weight' ? above.weight : above.reps;
   }
 
@@ -1299,9 +1386,11 @@ class AppStore extends ChangeNotifier {
   CompleteResult toggleSet(SessionExercise e, int index) {
     final s = active!;
     final set = e.sets[index];
+    final warmup = s.warmupExercises.contains(e);
+    if (s.warmingUp != warmup) return const CompleteResult.blocked('Switch workout phase before editing these sets.');
     if (set.done) {
       set.done = false;
-      if (rest?.exercise == e.name && rest?.setIndex == index) _dismissRest();
+      if (rest?.exercise == e.name && rest?.setIndex == index && rest?.warmup == warmup) _dismissRest();
       e.collapsed = null;
       changed();
       return const CompleteResult.done();
@@ -1310,7 +1399,7 @@ class AppStore extends ChangeNotifier {
       return CompleteResult.blocked('Calibrate the ${e.method} anchor before continuing.');
     }
     if (settings.requirePreviousSet) {
-      final earlier = e.sets.indexWhere((x) => !x.done);
+      final earlier = s.visibleSetsFor(e).where((x) => !x.done).map(e.sets.indexOf).firstOrNull ?? -1;
       if (earlier >= 0 && earlier < index) {
         return CompleteResult.blocked('Complete set ${earlier + 1} of ${e.name} first.');
       }
@@ -1338,7 +1427,11 @@ class AppStore extends ChangeNotifier {
     }
     if (settings.haptics) alerts.setDone();
     setCelebration++;
-    if (e.complete) {
+    if (warmup) {
+      startRest(e.name, index, set.rest);
+      _finishWarmupPhase();
+      e.collapsed = null;
+    } else if (s.visibleSetsFor(e).every((set) => set.done)) {
       if (rest?.exercise == e.name) _dismissRest();
       e.collapsed = null;
     } else {
@@ -1391,7 +1484,7 @@ class AppStore extends ChangeNotifier {
   /// Applies a calculator target to the next unfinished set.
   String applyRepMaxTarget(String exerciseName, double weight, int reps, int rir) {
     final s = active;
-    final e = s?.exercises.where((x) => x.name == exerciseName).firstOrNull;
+    final e = s?.visibleExercises.where((x) => x.name == exerciseName).firstOrNull;
     if (s == null || e == null) return 'No active workout.';
     if (e.loadMode != 'external') return 'Choose added load or assistance manually for this exercise.';
     final target = e.sets.where((x) => !x.done).firstOrNull;
@@ -1450,6 +1543,7 @@ class AppStore extends ChangeNotifier {
       exercise: exercise,
       setIndex: setIndex,
       countdown: settings.defaultTimerDisplay == 'countdown',
+      warmup: active?.warmingUp ?? false,
     );
     _syncAlerts();
   }
@@ -1529,8 +1623,9 @@ class AppStore extends ChangeNotifier {
   String? setOrderViolation() {
     if (!settings.requirePreviousSet) return null;
     for (final e in active?.exercises ?? <SessionExercise>[]) {
-      final firstOpen = e.sets.indexWhere((s) => !s.done);
-      if (firstOpen >= 0 && e.sets.skip(firstOpen).any((s) => s.done)) {
+      final sets = active!.visibleSetsFor(e);
+      final firstOpen = sets.indexWhere((s) => !s.done);
+      if (firstOpen >= 0 && sets.skip(firstOpen).any((s) => s.done)) {
         return '${e.name}: complete set ${firstOpen + 1} before saving later sets.';
       }
     }

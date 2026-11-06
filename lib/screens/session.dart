@@ -76,11 +76,17 @@ class _SessionScreenState extends State<SessionScreen> {
     if (v != null) s.accepted.add('$field:$v'); // Enter explicitly accepts an unusual value.
     final isLast = field == lastEditable(store, e, s);
     if (isLast && !s.done && store.settings.enterCompletesSet) complete(store, e, index);
+    if (!store.active!.visibleExercises.contains(e)) {
+      FocusScope.of(context).unfocus();
+      return;
+    }
+    final visible = store.active!.visibleSetsFor(e);
+    final position = visible.indexOf(s);
     FocusNode? next;
     if (field == 'weight') next = focusOf(s).reps;
     if (field == 'reps' && rirEditable(store, e, s)) next = focusOf(s).rir;
-    if (next == null && isLast && store.settings.enterMovesToNextSet && index + 1 < e.sets.length) {
-      next = focusOf(e.sets[index + 1]).weight;
+    if (next == null && isLast && store.settings.enterMovesToNextSet && position + 1 < visible.length) {
+      next = focusOf(visible[position + 1]).weight;
     }
     if (next != null) {
       next.requestFocus();
@@ -95,8 +101,10 @@ class _SessionScreenState extends State<SessionScreen> {
     if (field == 'rir') return focusOf(s).reps.requestFocus();
     if (field == 'reps') return focusOf(s).weight.requestFocus();
     // Crossing from this set's weight into the previous set is optional.
-    if (index > 0 && store.settings.backspaceMovesToPreviousSet) {
-      final prev = e.sets[index - 1];
+    final visible = store.active!.visibleSetsFor(e);
+    final position = visible.indexOf(s);
+    if (position > 0 && store.settings.backspaceMovesToPreviousSet) {
+      final prev = visible[position - 1];
       (lastEditable(store, e, prev) == 'rir' ? focusOf(prev).rir : focusOf(prev).reps).requestFocus();
     }
   }
@@ -115,7 +123,7 @@ class _SessionScreenState extends State<SessionScreen> {
     if (violation != null) return notify(context, violation);
     if (s.doneAll == 0) return notify(context, 'No completed sets. Mark at least one set first.');
     // Finishing cannot be undone, so a stray tap mid-workout must not end it.
-    final open = s.exercises.fold(0, (n, e) => n + e.sets.where((x) => !x.done).length);
+    final open = s.exercises.fold(0, (n, e) => n + s.visibleSetsFor(e).where((x) => !x.done).length);
     if (open > 0) {
       final ok = await confirm(
         context,
@@ -231,20 +239,21 @@ class _SessionScreenState extends State<SessionScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(14, 0, 14, 130),
                   children: [
-                    for (final e in session.exercises) ...[
+                    for (final e in session.visibleExercises) ...[
                       _ExerciseBlock(key: ObjectKey(e), exercise: e, screen: this),
                       const SizedBox(height: 12),
                     ],
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final name = await pickExercise(context);
-                        if (name == null || !context.mounted) return;
-                        final error = store.addSessionExercise(name);
-                        if (error != null) notify(context, error);
-                      },
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('Add exercise'),
-                    ),
+                    if (!session.warmingUp)
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final name = await pickExercise(context);
+                          if (name == null || !context.mounted) return;
+                          final error = store.addSessionExercise(name);
+                          if (error != null) notify(context, error);
+                        },
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Add exercise'),
+                      ),
                   ],
                 ),
               ),
@@ -272,13 +281,16 @@ class _Header extends StatelessWidget {
     final store = StoreScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final total = session.totalSets;
+    final sets = [for (final e in session.visibleExercises) ...session.visibleSetsFor(e)];
+    final total = sets.length;
+    final done = sets.where((set) => set.done).length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (session.phase == 'Deload' || (session.phase != null && session.targetRir != null)) ...[
+          if (!session.warmingUp &&
+              (session.phase == 'Deload' || (session.phase != null && session.targetRir != null))) ...[
             Wrap(
               spacing: 8,
               runSpacing: 4,
@@ -298,9 +310,46 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '${session.doneAll}/$total sets',
-                      style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                    PopupMenuButton<String>(
+                      tooltip: 'Workout phase',
+                      onSelected: (phase) {
+                        FocusScope.of(context).unfocus();
+                        if (phase == 'warmup' || phase == 'working') {
+                          store.showWorkoutPhase(warmup: phase == 'warmup');
+                        } else {
+                          final error = store.startWarmups(sets: phase == 'two' ? 2 : 3);
+                          if (error != null) notify(context, error);
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        CheckedPopupMenuItem(
+                          value: 'working',
+                          checked: !session.warmingUp,
+                          child: const Text('Working sets'),
+                        ),
+                        if (session.warmupExercises.isNotEmpty)
+                          CheckedPopupMenuItem(
+                            value: 'warmup',
+                            checked: session.warmingUp,
+                            child: const Text('Warm-up'),
+                          ),
+                        if (session.doneSets == 0 &&
+                            !session.warmupExercises.any((e) => e.sets.any((set) => set.done))) ...[
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(value: 'two', child: Text('Warm-up · 2 sets')),
+                          const PopupMenuItem(value: 'three', child: Text('Warm-up · 3 sets')),
+                        ],
+                      ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$done/$total ${session.warmingUp ? 'warm-up' : 'sets'}',
+                            style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                          ),
+                          Icon(Icons.expand_more_rounded, size: 16, color: cs.onSurfaceVariant),
+                        ],
+                      ),
                     ),
                     Text(
                       session.clockStarted && !session.clockRunning
@@ -317,7 +366,7 @@ class _Header extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: total == 0 ? 0 : session.doneAll / total,
+              value: total == 0 ? 0 : done / total,
               minHeight: 6,
               backgroundColor: cs.surfaceContainerHigh,
             ),
@@ -407,7 +456,10 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final st = context.style;
     final e = exercise;
     final info = store.exercise(e.name);
-    final collapsed = e.collapsed ?? (e.complete && store.settings.collapseCompleted);
+    final visibleSets = session.visibleSetsFor(e);
+    final collapsed =
+        e.collapsed ??
+        (visibleSets.isNotEmpty && visibleSets.every((set) => set.done) && store.settings.collapseCompleted);
     final irregularRest = {for (final s in e.sets) s.rest}.length > 1;
 
     Future<void> substitute() async {
@@ -434,15 +486,15 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           store.changed();
         },
       ),
-      if (session.exercises.indexOf(e) > 0)
+      if (session.visibleExercises.indexOf(e) > 0)
         ('moveUp', Icons.arrow_upward_rounded, 'Move up', () => store.moveSessionExercise(e, -1)),
-      if (session.exercises.indexOf(e) < session.exercises.length - 1)
+      if (session.visibleExercises.indexOf(e) < session.visibleExercises.length - 1)
         ('moveDown', Icons.arrow_downward_rounded, 'Move down', () => store.moveSessionExercise(e, 1)),
-      ('substitute', Icons.swap_horiz_rounded, 'Substitute exercise', substitute),
+      if (!session.warmingUp) ('substitute', Icons.swap_horiz_rounded, 'Substitute exercise', substitute),
       (
         'remove',
         Icons.delete_outline_rounded,
-        'Remove exercise',
+        session.warmingUp ? 'Skip warm-up' : 'Remove exercise',
         () {
           final error = store.removeSessionExercise(e);
           if (error != null) notify(context, error);
@@ -502,7 +554,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                     ),
                   if (collapsed)
                     Text(
-                      '${e.sets.where((x) => x.done).length}/${e.sets.length}',
+                      '${visibleSets.where((x) => x.done).length}/${visibleSets.length}',
                       style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
                     ),
                 ],
@@ -587,13 +639,15 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
             if (!collapsed) ...[
               // No paragraphs of advice inside the workout: it is behind the (i) beside the exercise name.
               _ColumnHeader(exercise: e, unit: session.unit),
-              for (final (i, s) in e.sets.indexed) ...[
+              for (final (position, s) in visibleSets.indexed) ...[
                 Padding(
                   padding: EdgeInsets.symmetric(vertical: st.setGap / 2),
                   child: _SetRow(
                     key: ObjectKey(s),
                     exercise: e,
-                    index: i,
+                    index: e.sets.indexOf(s),
+                    position: position,
+                    count: visibleSets.length,
                     screen: screen,
                     showPlannedRest:
                         !s.done &&
@@ -635,7 +689,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                         backgroundColor: cs.surfaceContainerHigh,
                         foregroundColor: cs.onSurface,
                       ),
-                      onPressed: e.sets.isEmpty ? null : () => removeSetWithUndo(context, store, e, e.sets.last),
+                      onPressed: visibleSets.isEmpty
+                          ? null
+                          : () => removeSetWithUndo(context, store, e, visibleSets.last),
                       icon: const Icon(Icons.remove_rounded),
                     ),
                     const SizedBox(width: 8),
@@ -661,7 +717,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
 
   Future<void> _restEditor(BuildContext context, AppStore store, SessionExercise e) async {
     final session = store.active!;
-    if (session.restLocked) return notify(context, 'Rest times are locked by the active mesocycle.');
+    if (session.restLocked && !session.warmingUp) {
+      return notify(context, 'Rest times are locked by the active mesocycle.');
+    }
     final scopes = store.restScopes(e);
     final timerHere = store.rest?.exercise == e.name;
     if (scopes.isEmpty && !timerHere) {
@@ -819,17 +877,20 @@ void _showAdvice(BuildContext context, SessionExercise e) => showDialog<void>(
 
 /// Plate calculator for [set], or the next unfinished set: its typed weight, else its placeholder. From an
 /// unfinished set, a nearest loadable weight can be put straight into it.
-SetEntry? _plateSet(SessionExercise e) => e.sets.where((x) => !x.done).firstOrNull ?? e.sets.lastOrNull;
+SetEntry? _plateSet(AppStore store, SessionExercise e) {
+  final sets = store.active?.visibleSetsFor(e) ?? e.sets;
+  return sets.where((set) => !set.done).firstOrNull ?? sets.lastOrNull;
+}
 
 /// The weight the inline bar shows: the next unfinished set's typed weight, else its placeholder.
 double? plateTarget(AppStore store, SessionExercise e) {
-  final s = _plateSet(e);
+  final s = _plateSet(store, e);
   return s == null ? null : s.weight ?? store.fallbackValue(e, e.sets.indexOf(s), 'weight')?.toDouble();
 }
 
 void openPlatesFor(BuildContext context, AppStore store, SessionExercise e, [SetEntry? set]) {
   FocusScope.of(context).unfocus();
-  final s = set ?? _plateSet(e);
+  final s = set ?? _plateSet(store, e);
   if (s == null) return;
   final weight = s.weight ?? store.fallbackValue(e, e.sets.indexOf(s), 'weight')?.toDouble();
   if (weight == null || weight <= 0) return notify(context, 'Enter a weight first.');
@@ -860,7 +921,7 @@ class _ColumnHeader extends StatelessWidget {
     final store = StoreScope.of(context);
     final style = Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600);
     final e = exercise;
-    final rir = e.sets.any(
+    final rir = (store.active?.visibleSetsFor(e) ?? e.sets).any(
       (s) => methodSetUsesRir(e.method, s.type) && (store.settings.trackRir || s.targetRir != null),
     );
     final load = e.loadMode == 'external' ? unit.toUpperCase() : loadSuffix(e.loadMode, unit).toUpperCase();
@@ -916,6 +977,8 @@ class _ColumnHeader extends StatelessWidget {
 class _SetRow extends StatelessWidget {
   final SessionExercise exercise;
   final int index;
+  final int position;
+  final int count;
   final _SessionScreenState screen;
   final bool showPlannedRest;
   final String unit;
@@ -924,6 +987,8 @@ class _SetRow extends StatelessWidget {
     super.key,
     required this.exercise,
     required this.index,
+    required this.position,
+    required this.count,
     required this.screen,
     required this.showPlannedRest,
     required this.unit,
@@ -957,7 +1022,7 @@ class _SetRow extends StatelessWidget {
     final rirVisible =
         methodSetUsesRir(e.method, s.type) &&
         (store.settings.trackRir || s.targetRir != null || (e.calibrate && calibrationAnchor(e.method, s.type)));
-    final number = s.warmup ? 'W' : '${e.sets.take(index + 1).where((x) => !x.warmup).length}';
+    final number = s.warmup ? 'W${position + 1}' : '${e.sets.take(index + 1).where((x) => !x.warmup).length}';
 
     String? warning(NumKind kind, num? v) => v == null
         ? null
@@ -968,10 +1033,15 @@ class _SetRow extends StatelessWidget {
     final rirWarn = rirVisible ? warning(NumKind.rir, s.rir) : null;
 
     final timer = store.rest;
-    final nearSet = timer != null && timer.exercise == e.name && timer.setIndex == index && store.settings.nearSetTimer;
+    final nearSet =
+        timer != null &&
+        timer.exercise == e.name &&
+        timer.setIndex == index &&
+        timer.warmup == (store.active?.warmingUp ?? false) &&
+        store.settings.nearSetTimer;
 
     final record = store.recordKind(e, s);
-    final previous = store.lastTimeSets(e.name, store.active?.templateId);
+    final previous = store.active?.warmingUp == true ? null : store.lastTimeSets(e.name, store.active?.templateId);
     final prev = previous != null && index < previous.length && previous[index].done ? previous[index] : null;
     final repsVisible = store.active == null || store.historicalRepsVisible(store.active!);
     final String? lastTime = prev == null || (prev.weight == null && prev.reps == null)
@@ -1000,11 +1070,18 @@ class _SetRow extends StatelessWidget {
         : cs.surface;
 
     final typeButton = Tooltip(
-      message: '${s.type} — Set $number. Tap to change set role; hold for set details.',
+      message: store.active?.warmingUp == true
+          ? 'Warm-up $number. Hold for set details.'
+          : '${s.type} — Set $number. Tap to change set role; hold for set details.',
       child: InkWell(
         borderRadius: st.brSmall,
-        onTap: () => _pickType(context, store),
-        onLongPress: () => showSetDetails(context, store, s, restLocked: store.active?.restLocked ?? false),
+        onTap: store.active?.warmingUp == true ? null : () => _pickType(context, store),
+        onLongPress: () => showSetDetails(
+          context,
+          store,
+          s,
+          restLocked: store.active?.warmingUp == true ? false : store.active?.restLocked ?? false,
+        ),
         child: SizedBox(
           width: 56,
           height: 48,
@@ -1162,7 +1239,7 @@ class _SetRow extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: 2, vertical: st.sp(2)),
       decoration: BoxDecoration(
         color: s.done ? cs.primary.withValues(alpha: 0.12) : cs.surfaceContainerHigh,
-        borderRadius: st.setTile(index, e.sets.length),
+        borderRadius: st.setTile(position, count),
       ),
       child: Opacity(
         opacity: s.done && st.dimCompleted ? 0.55 : 1,
@@ -1185,7 +1262,7 @@ class _SetRow extends StatelessWidget {
       direction: DismissDirection.endToStart,
       dismissThresholds: const {DismissDirection.endToStart: 0.25},
       background: Container(
-        decoration: BoxDecoration(color: cs.error, borderRadius: st.setTile(index, e.sets.length)),
+        decoration: BoxDecoration(color: cs.error, borderRadius: st.setTile(position, count)),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 16),
         child: const Icon(Icons.delete_rounded, color: Colors.white),

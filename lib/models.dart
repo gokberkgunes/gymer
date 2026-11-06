@@ -555,6 +555,8 @@ class Session {
   DateTime startedAt;
   DateTime? finishedAt;
   List<SessionExercise> exercises;
+  List<SessionExercise> warmupExercises;
+  bool warmingUp;
   String? cycleId;
   int? microcycle;
   String? phase;
@@ -575,6 +577,8 @@ class Session {
     required this.startedAt,
     this.finishedAt,
     required this.exercises,
+    List<SessionExercise>? warmupExercises,
+    this.warmingUp = false,
     this.cycleId,
     this.microcycle,
     this.phase,
@@ -584,7 +588,13 @@ class Session {
     this.clockStarted = false,
     this.clockRunningSince,
     this.clockElapsed = 0,
-  });
+  }) : warmupExercises = warmupExercises ?? [];
+
+  List<SessionExercise> get visibleExercises => warmingUp ? warmupExercises : exercises;
+  List<SetEntry> visibleSetsFor(SessionExercise exercise) =>
+      !warmingUp && warmupExercises.isNotEmpty ? exercise.work : exercise.sets;
+  bool get warmupsComplete =>
+      warmupExercises.isNotEmpty && warmupExercises.every((exercise) => exercise.sets.every((set) => set.done));
 
   bool get clockRunning => clockRunningSince != null;
 
@@ -620,6 +630,8 @@ class Session {
     if (clockRunningSince != null) 'clockSince': clockRunningSince!.toUtc().toIso8601String(),
     if (clockElapsed > 0) 'clockElapsed': clockElapsed,
     'exercises': exercises.map((e) => e.toJson()).toList(),
+    if (warmupExercises.isNotEmpty) 'warmupExercises': warmupExercises.map((e) => e.toJson()).toList(),
+    if (warmingUp) 'warmingUp': true,
   };
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
@@ -639,6 +651,10 @@ class Session {
     clockRunningSince: j['clockSince'] == null ? null : DateTime.parse(j['clockSince'] as String).toLocal(),
     clockElapsed: _int(j['clockElapsed']) ?? 0,
     exercises: [for (final e in j['exercises'] as List) SessionExercise.fromJson(e as Map<String, dynamic>)],
+    warmupExercises: [
+      for (final e in j['warmupExercises'] as List? ?? []) SessionExercise.fromJson(e as Map<String, dynamic>),
+    ],
+    warmingUp: j['warmingUp'] as bool? ?? false,
   );
 }
 
@@ -650,6 +666,7 @@ class RestTimer {
   final String exercise;
   final int setIndex;
   final bool countdown;
+  final bool warmup;
 
   const RestTimer({
     required this.startedAt,
@@ -657,6 +674,7 @@ class RestTimer {
     required this.exercise,
     this.setIndex = 0,
     this.countdown = false,
+    this.warmup = false,
   });
 
   DateTime get endsAt => startedAt.add(Duration(seconds: totalSeconds));
@@ -675,6 +693,7 @@ class RestTimer {
     exercise: exercise ?? this.exercise,
     setIndex: setIndex,
     countdown: countdown ?? this.countdown,
+    warmup: warmup,
   );
 
   Map<String, dynamic> toJson() => {
@@ -683,6 +702,7 @@ class RestTimer {
     'exercise': exercise,
     'set': setIndex,
     if (countdown) 'countdown': true,
+    if (warmup) 'warmup': true,
   };
 
   factory RestTimer.fromJson(Map<String, dynamic> j) {
@@ -696,6 +716,7 @@ class RestTimer {
       exercise: _str(j['exercise']),
       setIndex: _int(j['set']) ?? 0,
       countdown: j['countdown'] as bool? ?? false,
+      warmup: j['warmup'] as bool? ?? false,
     );
   }
 }
