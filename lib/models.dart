@@ -581,6 +581,7 @@ class Session {
   String unit;
   DateTime startedAt;
   DateTime? finishedAt;
+  double? bodyweight;
   List<SessionExercise> exercises;
   List<ExerciseCircuit> circuits;
   List<SessionExercise> warmupExercises;
@@ -605,6 +606,7 @@ class Session {
     required this.unit,
     required this.startedAt,
     this.finishedAt,
+    this.bodyweight,
     required this.exercises,
     List<ExerciseCircuit>? circuits,
     List<SessionExercise>? warmupExercises,
@@ -666,6 +668,7 @@ class Session {
     'unit': unit,
     'start': startedAt.toIso8601String(),
     'end': finishedAt?.toIso8601String(),
+    if (bodyweight != null) 'bodyweight': bodyweight,
     if (cycleId != null) 'cycle': cycleId,
     if (microcycle != null) 'micro': microcycle,
     if (phase != null) 'phase': phase,
@@ -689,6 +692,7 @@ class Session {
     unit: j['unit'] as String? ?? 'kg',
     startedAt: DateTime.parse(j['start'] as String),
     finishedAt: j['end'] == null ? null : DateTime.parse(j['end'] as String),
+    bodyweight: _dbl(j['bodyweight']),
     cycleId: j['cycle'] as String?,
     microcycle: _int(j['micro']),
     phase: j['phase'] as String?,
@@ -1024,6 +1028,7 @@ class Settings {
   int defaultRest;
   int defaultSets;
   bool trackRir;
+  bool trackBodyweight;
   bool haptics;
   bool restHaptics;
   bool restSound;
@@ -1076,6 +1081,7 @@ class Settings {
     this.defaultRest = 180,
     this.defaultSets = 3,
     this.trackRir = true,
+    this.trackBodyweight = false,
     this.haptics = true,
     this.restHaptics = true,
     this.restSound = false,
@@ -1161,6 +1167,7 @@ class Settings {
     'defaultRest': defaultRest,
     'defaultSets': defaultSets,
     'trackRir': trackRir,
+    'trackBodyweight': trackBodyweight,
     'haptics': haptics,
     'restHaptics': restHaptics,
     'restSound': restSound,
@@ -1215,6 +1222,7 @@ class Settings {
       defaultRest: _int(j['defaultRest']) ?? d.defaultRest,
       defaultSets: _int(j['defaultSets']) ?? d.defaultSets,
       trackRir: b('trackRir', d.trackRir),
+      trackBodyweight: b('trackBodyweight', d.trackBodyweight),
       haptics: b('haptics', d.haptics),
       restHaptics: b('restHaptics', d.restHaptics),
       restSound: b('restSound', d.restSound),

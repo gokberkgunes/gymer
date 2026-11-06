@@ -14,6 +14,7 @@ import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
 import '../widgets/plate_profile_picker.dart';
 import 'data_io.dart';
+import 'bodyweight.dart';
 import 'exercises.dart';
 import 'rep_max.dart';
 
@@ -117,6 +118,22 @@ class _WorkoutSettings extends StatelessWidget {
         ]),
         const SectionLabel('Workout tracking'),
         _group([
+          Column(
+            children: [
+              _switch(context, 'Track bodyweight', s.trackBodyweight, (x, v) => x.trackBodyweight = v),
+              if (s.trackBodyweight)
+                _row(
+                  context,
+                  'Bodyweight log',
+                  Text(
+                    store.bodyweights.isEmpty
+                        ? 'Open'
+                        : '${formatNumber(store.bodyweights.last.inUnit(s.unit), NumKind.weight)} ${s.unit}',
+                  ),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BodyweightScreen())),
+                ),
+            ],
+          ),
           _row(
             context,
             'Track RIR',

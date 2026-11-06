@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import 'data/seed.dart';
 import 'logic/circuits.dart';
+import 'logic/bodyweight.dart';
 import 'logic/cycle.dart';
 import 'logic/cycle_review.dart';
 import 'logic/estimate.dart';
@@ -23,9 +24,9 @@ import 'models.dart';
 
 class ExercisePoint {
   final DateTime date;
-  final double e1rm;
+  final double value;
   final SetEntry best;
-  const ExercisePoint(this.date, this.e1rm, this.best);
+  const ExercisePoint(this.date, this.value, this.best);
 }
 
 /// Platform side effects the store triggers; a no-op in tests.
@@ -163,6 +164,7 @@ class AppStore extends ChangeNotifier {
   List<Exercise> exercises = [];
   List<Session> history = [];
   List<Mesocycle> cycles = [];
+  List<BodyweightEntry> bodyweights = [];
   Session? active;
   RestTimer? rest;
 
@@ -208,6 +210,10 @@ class AppStore extends ChangeNotifier {
     final newCycles = [for (final c in j['cycles'] as List? ?? []) Mesocycle.fromJson(c as Map<String, dynamic>)]
       ..removeWhere((c) => !c.setupComplete);
     final newActive = j['active'] == null ? null : Session.fromJson(j['active'] as Map<String, dynamic>);
+    final newBodyweights = <String, BodyweightEntry>{
+      for (final entry in j['bodyweights'] as List? ?? [])
+        dateKey(DateTime.parse((entry as Map<String, dynamic>)['date'] as String)): BodyweightEntry.fromJson(entry),
+    }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
     final newRest = r == null || newActive == null ? null : RestTimer.fromJson(r as Map<String, dynamic>);
     settings = newSettings;
@@ -216,6 +222,7 @@ class AppStore extends ChangeNotifier {
     history = newHistory;
     cycles = newCycles;
     active = newActive;
+    bodyweights = newBodyweights;
     rest = newRest;
   }
 
@@ -226,6 +233,7 @@ class AppStore extends ChangeNotifier {
     'exercises': exercises.map((e) => e.toJson()).toList(),
     'history': history.map((s) => s.toJson()).toList(),
     'cycles': cycles.map((c) => c.toJson()).toList(),
+    if (bodyweights.isNotEmpty) 'bodyweights': bodyweights.map((e) => e.toJson()).toList(),
     'active': active?.toJson(),
     'rest': rest?.toJson(),
   };
@@ -292,8 +300,10 @@ class AppStore extends ChangeNotifier {
 
   void updateSettings(void Function(Settings s) edit) {
     final before = settings.unit;
+    final trackedBodyweight = settings.trackBodyweight;
     edit(settings);
     if (settings.unit != before) _convertAllWeights(before, settings.unit);
+    if (!trackedBodyweight && settings.trackBodyweight && active?.bodyweight == null) _refreshActiveBodyweight();
     _syncAlerts();
     changed();
   }
@@ -315,6 +325,7 @@ class AppStore extends ChangeNotifier {
         }
       }
       s.unit = to;
+      s.bodyweight = c(s.bodyweight, src);
     }
 
     history.forEach(session);
@@ -329,6 +340,36 @@ class AppStore extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- Catalog
+
+  double? bodyweightAt(DateTime day, String unit) {
+    if (!settings.trackBodyweight) return null;
+    final available = bodyweights.where((e) => !e.date.isAfter(dateOnly(day))).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    return available.firstOrNull?.inUnit(unit);
+  }
+
+  String? logBodyweight(DateTime day, double value) {
+    if (!settings.trackBodyweight) return 'Enable bodyweight tracking in Settings first.';
+    if (!value.isFinite || value <= 0) return 'Enter a bodyweight greater than zero.';
+    if (dateOnly(day).isAfter(dateOnly(DateTime.now()))) return 'Choose today or an earlier date.';
+    final entry = BodyweightEntry(day, convertWeight(value, settings.unit, 'kg'));
+    bodyweights = [...bodyweights.where((e) => dateKey(e.date) != dateKey(day)), entry]
+      ..sort((a, b) => a.date.compareTo(b.date));
+    _refreshActiveBodyweight();
+    changed();
+    return null;
+  }
+
+  void removeBodyweight(DateTime day) {
+    bodyweights.removeWhere((e) => dateKey(e.date) == dateKey(day));
+    _refreshActiveBodyweight();
+    changed();
+  }
+
+  void _refreshActiveBodyweight() {
+    final session = active;
+    if (session != null && settings.trackBodyweight) session.bodyweight = bodyweightAt(session.startedAt, session.unit);
+  }
 
   Exercise? exercise(String name) {
     final key = name.trim().toLowerCase();
@@ -1052,6 +1093,7 @@ class AppStore extends ChangeNotifier {
       name: t?.name ?? 'Quick workout',
       unit: settings.unit,
       startedAt: now,
+      bodyweight: bodyweightAt(now, settings.unit),
       exercises: [],
       circuits: copyCircuits(t?.circuits ?? []),
       cycleId: cycle?.id,
@@ -2179,6 +2221,7 @@ class AppStore extends ChangeNotifier {
       name: t.name,
       unit: settings.unit,
       startedAt: DateTime(date.year, date.month, date.day, 12),
+      bodyweight: bodyweightAt(date, settings.unit),
       circuits: copyCircuits(t.circuits),
       exercises: [
         for (final te in t.exercises)
@@ -2232,12 +2275,19 @@ class AppStore extends ChangeNotifier {
 
   List<ExercisePoint> progress(String exercise) {
     final points = <ExercisePoint>[];
+    final combined = usesBodyweightProgress(exercise);
     for (final s in history.reversed) {
       SetEntry? best;
       double bestValue = 0;
-      for (final e in s.exercises.where((e) => e.name == exercise && e.loadMode == 'external')) {
+      for (final e in s.exercises.where(
+        (e) =>
+            e.name == exercise &&
+            (combined
+                ? e.loadMode == (this.exercise(exercise)?.loadMode ?? defaultLoadModeFor(exercise))
+                : e.loadMode == 'external'),
+      )) {
         for (final set in e.sets) {
-          final v = set.e1rm ?? 0;
+          final v = (combined ? combinedBodyweightLoad(s, e, set) : set.e1rm) ?? 0;
           if (v > bestValue) {
             bestValue = v;
             best = set;
@@ -2245,11 +2295,15 @@ class AppStore extends ChangeNotifier {
         }
       }
       if (best != null) {
-        points.add(ExercisePoint(s.startedAt, convertWeight(bestValue, s.unit, settings.unit), best));
+        points.add(ExercisePoint(s.startedAt, convertWeight(bestValue, s.unit, settings.unit), _inUnit(best, s.unit)));
       }
     }
-    return points;
+    return points..sort((a, b) => a.date.compareTo(b.date));
   }
+
+  bool usesBodyweightProgress(String name) =>
+      settings.trackBodyweight &&
+      const {'bodyweight', 'assisted'}.contains(exercise(name)?.loadMode ?? defaultLoadModeFor(name));
 
   Set<String> performedExercises() => {
     for (final s in history)
@@ -2308,6 +2362,7 @@ class AppStore extends ChangeNotifier {
     d.applySettings(newSettings);
     await _backupBeforeReplace();
     exercises = newExercises;
+    bodyweights = [];
     templates = d.templates.isEmpty ? seedTemplates() : d.templates;
     history = d.history;
     cycles = d.cycles;
@@ -2345,6 +2400,7 @@ class AppStore extends ChangeNotifier {
     exercises = incoming.exercises;
     history = incoming.history;
     cycles = incoming.cycles;
+    bodyweights = incoming.bodyweights;
     active = incoming.active;
     rest = incoming.rest;
     _syncAlerts();

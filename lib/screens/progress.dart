@@ -9,6 +9,7 @@ import '../logic/methods.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'exercises.dart';
+import 'bodyweight.dart';
 import '../widgets/common.dart';
 
 void openExerciseProgress(BuildContext context, String name) {
@@ -32,9 +33,13 @@ class ExerciseProgressList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (store.settings.trackBodyweight) const BodyweightSummaryCard(),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-          child: Text('Estimated one-rep max per exercise', style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+          child: Text(
+            store.settings.trackBodyweight ? 'Exercise trends' : 'Estimated one-rep max per exercise',
+            style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+          ),
         ),
         if (rows.isEmpty)
           Padding(
@@ -49,8 +54,8 @@ class ExerciseProgressList extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(bottom: context.style.sp(10)),
             child: () {
-              final latest = r.points.last.e1rm;
-              final first = r.points.first.e1rm;
+              final latest = r.points.last.value;
+              final first = r.points.first.value;
               final delta = first == 0 ? 0 : (latest - first) / first * 100;
               return Card(
                 clipBehavior: Clip.antiAlias,
@@ -70,7 +75,8 @@ class ExerciseProgressList extends StatelessWidget {
                                 TextSpan(
                                   children: [
                                     TextSpan(
-                                      text: '${fmtNum(latest.roundToDouble())} ${store.settings.unit}',
+                                      text:
+                                          '${fmtNum(latest.roundToDouble())} ${store.settings.unit}${store.usesBodyweightProgress(r.name) ? ' combined' : ''}',
                                       style: const TextStyle(fontWeight: FontWeight.w600),
                                     ),
                                     if (r.points.length > 1)
@@ -90,7 +96,7 @@ class ExerciseProgressList extends StatelessWidget {
                           height: 36,
                           child: CustomPaint(
                             painter: LineChartPainter(
-                              values: [for (final p in r.points) p.e1rm],
+                              values: [for (final p in r.points) p.value],
                               color: cs.primary,
                               fill: false,
                             ),
@@ -119,12 +125,30 @@ class ExerciseProgressScreen extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final info = store.exercise(name);
     final points = store.progress(name);
+    final combined = store.usesBodyweightProgress(name);
     final unit = store.settings.unit;
-    final best = points.isEmpty ? null : points.reduce((a, b) => a.e1rm >= b.e1rm ? a : b);
+    final best = points.isEmpty ? null : points.reduce((a, b) => a.value >= b.value ? a : b);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(name),
+        title: combined
+            ? LabelWithInfo(
+                Text(name),
+                InfoDot(
+                  tooltip: 'Combined load',
+                  onTap: () => showDialog<void>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('Combined load'),
+                      content: const Text(
+                        'Bodyweight saved with that workout, plus added load or minus assistance. This is a load trend, not an estimated rep max. The weights you enter and automatic progression stay unchanged.',
+                      ),
+                      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
+                    ),
+                  ),
+                ),
+              )
+            : Text(name),
         actions: [
           IconButton(
             tooltip: 'Edit exercise',
@@ -152,7 +176,12 @@ class ExerciseProgressScreen extends StatelessWidget {
           else ...[
             Row(
               children: [
-                Expanded(child: Stat('${fmtNum(best!.e1rm.roundToDouble())} $unit', 'best e1RM')),
+                Expanded(
+                  child: Stat(
+                    '${fmtNum(best!.value.roundToDouble())} $unit',
+                    combined ? 'best combined load' : 'best e1RM',
+                  ),
+                ),
                 Expanded(child: Stat('${fmtNum(best.best.weight)}×${best.best.reps}', 'best set')),
                 Expanded(child: Stat('${points.length}', 'sessions')),
               ],
@@ -168,7 +197,7 @@ class ExerciseProgressScreen extends StatelessWidget {
                       child: CustomPaint(
                         size: Size.infinite,
                         painter: LineChartPainter(
-                          values: [for (final p in points) p.e1rm],
+                          values: [for (final p in points) p.value],
                           color: cs.primary,
                           grid: cs.outlineVariant,
                         ),
@@ -186,8 +215,7 @@ class ExerciseProgressScreen extends StatelessWidget {
                 ),
               ),
             ),
-            const SectionLabel('Rep maxes'),
-            _RepMaxTable(e1rm: points.last.e1rm, unit: unit),
+            if (!combined) ...[const SectionLabel('Rep maxes'), _RepMaxTable(e1rm: points.last.value, unit: unit)],
             const SectionLabel('Exercise history'),
             for (final (sess, ex) in [
               for (final h in store.history)
@@ -210,6 +238,13 @@ class ExerciseProgressScreen extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 4),
+                        if (store.settings.trackBodyweight &&
+                            sess.bodyweight != null &&
+                            const {'bodyweight', 'assisted'}.contains(ex.loadMode))
+                          Text(
+                            'Bodyweight ${formatNumber(sess.bodyweight!, NumKind.weight)} ${sess.unit}',
+                            style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          ),
                         for (final set in ex.sets)
                           Text(
                             [
