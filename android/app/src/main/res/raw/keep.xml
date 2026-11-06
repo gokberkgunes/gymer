@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds strip resources that look unused. These notification icons are looked up by name
+     (from Dart and LiveTimer.kt), so they must be kept explicitly or they vanish from release builds. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_timer,@drawable/ic_rest_*,@drawable/ic_over_*" />

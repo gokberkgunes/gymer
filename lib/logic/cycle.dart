@@ -1,0 +1,313 @@
+/// Mesocycle status, calendar and volume, ported from the Flet storage layer.
+library;
+
+import 'dart:math' as math;
+
+import '../models.dart';
+import 'volume.dart';
+
+class CycleStatus {
+  final DateTime start, end;
+  final int totalDays, totalMicro, buildMicro, deloadMicro, currentMicro, dayInMicro, remainingDays;
+  final String phase; // Upcoming | Build | Deload | Complete
+  final double progress;
+  final int suggestedRir;
+
+  const CycleStatus({
+    required this.start,
+    required this.end,
+    required this.totalDays,
+    required this.totalMicro,
+    required this.buildMicro,
+    required this.deloadMicro,
+    required this.currentMicro,
+    required this.dayInMicro,
+    required this.remainingDays,
+    required this.phase,
+    required this.progress,
+    required this.suggestedRir,
+  });
+
+  bool get running => phase == 'Build' || phase == 'Deload';
+}
+
+/// RIR for a microcycle: step one RIR per week from start toward end, land
+/// exactly on the end RIR in the final build week, deload RIR afterwards.
+int rirForWeek(Mesocycle c, int week) {
+  final total = math.max(1, c.length);
+  final deload = math.min(math.max(0, c.deloadMicro), math.max(0, total - 1));
+  final build = math.max(1, total - deload);
+  int rir;
+  if (deload > 0 && week > build) {
+    rir = c.deloadRir;
+  } else if (build <= 1) {
+    rir = c.endRir;
+  } else {
+    final position = math.min(week, build) - 1;
+    if (position <= 0) {
+      rir = c.startRir;
+    } else if (position >= build - 1) {
+      rir = c.endRir;
+    } else {
+      final direction = c.endRir > c.startRir ? 1 : -1;
+      rir = c.startRir + direction * math.min(position, (c.endRir - c.startRir).abs());
+    }
+  }
+  return c.weekRir[week] ?? rir;
+}
+
+CycleStatus cycleStatus(Mesocycle c, [DateTime? today]) {
+  final start = dateOnly(c.start);
+  final day = dateOnly(today ?? DateTime.now());
+  final micro = math.max(1, c.microDays);
+  final totalMicro = math.max(1, c.length);
+  final totalDays = totalMicro * micro;
+  final deload = math.min(math.max(0, c.deloadMicro), math.max(0, totalMicro - 1));
+  final build = math.max(1, totalMicro - deload);
+  final elapsed = daysBetween(start, day);
+  final upcoming = elapsed < 0, complete = elapsed >= totalDays;
+  final effective = math.min(math.max(elapsed, 0), math.max(0, totalDays - 1));
+  final current = math.min(totalMicro, effective ~/ micro + 1);
+  final phase = upcoming
+      ? 'Upcoming'
+      : complete
+      ? 'Complete'
+      : deload > 0 && current > build
+      ? 'Deload'
+      : 'Build';
+  return CycleStatus(
+    start: start,
+    end: addDays(start, totalDays - 1),
+    totalDays: totalDays,
+    totalMicro: totalMicro,
+    buildMicro: build,
+    deloadMicro: deload,
+    currentMicro: current,
+    dayInMicro: effective % micro + 1,
+    remainingDays: math.max(0, totalDays - math.max(0, elapsed)),
+    phase: phase,
+    progress: upcoming ? 0 : (elapsed / math.max(1, totalDays)).clamp(0.0, 1.0),
+    suggestedRir: upcoming
+        ? c.startRir
+        : complete
+        // A finished cycle reports its final build effort, as the Flet app did.
+        ? c.weekRir[current] ?? c.endRir
+        : rirForWeek(c, current),
+  );
+}
+
+class CycleDay {
+  final DateTime date;
+  final int micro, dayInMicro;
+  final String? templateId;
+  final String status; // done | moved_done | missed | moved | planned | rest
+  final String? sessionId;
+  final DateTime? movedTo;
+  final List<(DateTime, String)> incoming;
+  final bool unplanned;
+
+  /// A session on this date that belongs to another planned day.
+  final bool offPlan;
+  final List<Session> sessions;
+
+  const CycleDay({
+    this.offPlan = false,
+    this.sessions = const [],
+    required this.date,
+    required this.micro,
+    required this.dayInMicro,
+    required this.templateId,
+    required this.status,
+    required this.sessionId,
+    required this.movedTo,
+    required this.incoming,
+    required this.unplanned,
+  });
+}
+
+List<CycleDay> calendarDays(Mesocycle c, List<Session> history) {
+  final status = cycleStatus(c);
+  final byId = {for (final s in history) s.id: s};
+  final linked = {for (final e in c.events.values) ?e.sessionId};
+  final ownByDate = <String, List<Session>>{};
+  for (final s in history) {
+    if (s.cycleId == c.id || linked.contains(s.id)) {
+      ownByDate.putIfAbsent(dateKey(s.startedAt), () => []).add(s);
+    }
+  }
+  final plannedBySession = {
+    for (final e in c.events.entries)
+      if (e.value.sessionId != null) e.value.sessionId!: e.key,
+  };
+  final incoming = <String, List<(DateTime, String)>>{};
+  for (final MapEntry(key: planned, value: e) in c.events.entries) {
+    final target = e.movedTo;
+    if (target == null || e.status != 'planned' || dateKey(target) == planned) continue;
+    final s = e.sessionId == null ? null : byId[e.sessionId];
+    if (s == null || dateKey(s.startedAt) == dateKey(target)) {
+      incoming.putIfAbsent(dateKey(target), () => []).add((DateTime.parse(planned), e.templateId));
+    }
+  }
+
+  return [
+    for (var i = 0; i < status.totalDays; i++)
+      () {
+        final date = addDays(status.start, i);
+        final key = dateKey(date);
+        final dayIn = i % c.microDays + 1;
+        final event = c.events[key];
+        final templateId = event?.templateId ?? c.schedule[dayIn];
+        Session? session = event?.sessionId == null ? null : byId[event!.sessionId];
+        if (session == null && event == null) {
+          session = ownByDate[key]?.where((s) => s.templateId == templateId && !linked.contains(s.id)).firstOrNull;
+        }
+        final String st;
+        if (session != null) {
+          st = dateKey(session.startedAt) == key && event?.status != 'unplanned' ? 'done' : 'moved_done';
+        } else if (event?.status == 'missed') {
+          st = 'missed';
+        } else if (event?.movedTo != null) {
+          st = 'moved';
+        } else {
+          st = templateId == null ? 'rest' : 'planned';
+        }
+        return CycleDay(
+          date: date,
+          micro: i ~/ c.microDays + 1,
+          dayInMicro: dayIn,
+          templateId: templateId,
+          status: st,
+          sessionId: session?.id,
+          movedTo: event?.movedTo,
+          incoming: incoming[key] ?? const [],
+          unplanned: event?.status == 'unplanned',
+          sessions: ownByDate[key] ?? const [],
+          offPlan:
+              st == 'moved_done' ||
+              (ownByDate[key] ?? const []).any((x) {
+                final planned = plannedBySession[x.id];
+                return planned != null ? planned != key : x.id != session?.id;
+              }),
+        );
+      }(),
+  ];
+}
+
+/// After a session is saved, attach it to the one calendar day it fulfils.
+void linkSession(Mesocycle c, Session s) {
+  if (s.templateId == null) return;
+  final date = dateKey(s.startedAt);
+  final candidates = c.events.entries
+      .where(
+        (e) =>
+            e.value.templateId == s.templateId &&
+            (e.value.status == 'planned' || e.value.status == 'missed') &&
+            e.value.sessionId == null &&
+            (e.value.movedTo == null ? e.key : dateKey(e.value.movedTo!)) == date,
+      )
+      .toList();
+  if (candidates.length == 1) {
+    candidates.first.value
+      ..sessionId = s.id
+      ..status = 'planned';
+    return;
+  }
+  if (candidates.isNotEmpty || c.events.containsKey(date)) return;
+  final st = cycleStatus(c, s.startedAt);
+  if (!st.running || c.schedule[st.dayInMicro] != s.templateId) return;
+  c.events[date] = DayEvent(templateId: s.templateId!, sessionId: s.id);
+}
+
+/// RP hypertrophy volume landmarks supplied for the Flet app: weekly sets.
+class Landmark {
+  final String mv, mev, mav, mrv, url;
+  const Landmark(this.mv, this.mev, this.mav, this.url, [this.mrv = 'Not provided']);
+}
+
+const rpLandmarks = <String, Landmark>{
+  'Back': Landmark('2–6', '6–8', '8–20', 'https://rpstrength.com/blogs/articles/back-hypertrophy-training-tips'),
+  'Quads': Landmark('2–4', '4–6', '6–14', 'https://rpstrength.com/blogs/articles/quad-hypertrophy-training-tips'),
+  'Hamstrings': Landmark(
+    '0–2',
+    '2–4',
+    '2–8',
+    'https://rpstrength.com/blogs/articles/hamstring-hypertrophy-training-tips',
+  ),
+  'Glutes': Landmark('2–6', '6–8', '8–24', 'https://rpstrength.com/blogs/articles/glute-hypertrophy-training-tips'),
+  'Chest': Landmark('2–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/chest-hypertrophy-training-tips'),
+  'Front Delts': Landmark(
+    '0–2',
+    '0–2',
+    '4–8',
+    'https://rpstrength.com/blogs/articles/front-delt-hypertrophy-training-tips',
+  ),
+  'Side Delts': Landmark(
+    '2–6',
+    '6–8',
+    '8–24',
+    'https://rpstrength.com/blogs/articles/side-delt-hypertrophy-training-tips',
+  ),
+  'Rear Delts': Landmark(
+    '0–4',
+    '0–4',
+    '4–12',
+    'https://rpstrength.com/blogs/articles/rear-delt-hypertrophy-training-tips',
+  ),
+  'Biceps': Landmark('6–8', '8–10', '14–20', 'https://rpstrength.com/blogs/articles/bicep-hypertrophy-training-tips'),
+  'Triceps': Landmark('0–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/triceps-hypertrophy-training-tips'),
+  'Calves': Landmark('2–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/calves-hypertrophy-training-tips'),
+  'Abs': Landmark('0–4', '0–4', '4–12', 'https://rpstrength.com/blogs/articles/ab-hypertrophy-training-tips'),
+  'Traps': Landmark('0–4', '0–4', '4–12', 'https://rpstrength.com/blogs/articles/trap-hypertrophy-training-tips'),
+  'Forearms': Landmark('0–4', '0–8', '8–24', 'https://rpstrength.com/blogs/articles/forearm-hypertrophy-training-tips'),
+};
+
+/// (MEV, MAV) per muscle, kept for callers that only need those two.
+final volumeLandmarks = <String, (String, String)>{
+  for (final e in rpLandmarks.entries) e.key: (e.value.mev, e.value.mav),
+};
+
+/// Planned work per seven days for the repeating schedule. Weekly sets count
+/// direct (primary) conventional sets as 1 and indirect (secondary) as 0.5;
+/// protocol groups stay separate.
+class WeeklyVolume {
+  final VolumeMetrics direct;
+  final VolumeMetrics indirect;
+  WeeklyVolume(this.direct, this.indirect);
+  double get sets => direct.conventional + 0.5 * indirect.conventional;
+}
+
+Map<String, WeeklyVolume> plannedWeeklyVolume(
+  Mesocycle c,
+  Map<String, WorkoutTemplate> templates,
+  (List<String>, List<String>) Function(String exercise) musclesOf,
+) {
+  final rows = <VolumeRow>[];
+  for (final MapEntry(key: day, value: id) in c.schedule.entries) {
+    final t = templates[id];
+    if (t == null) continue;
+    for (final (i, e) in t.exercises.indexed) {
+      final (primary, secondary) = musclesOf(e.name);
+      for (final s in e.sets) {
+        rows.add(
+          VolumeRow(
+            scope: '$day/$i',
+            type: s.type,
+            active: true,
+            groupStart: s.groupStart,
+            primary: primary,
+            secondary: secondary,
+          ),
+        );
+      }
+    }
+  }
+  final report = summarizeVolume(rows);
+  final factor = 7 / math.max(1, c.microDays);
+  return {
+    for (final m in {...report.direct.keys, ...report.indirect.keys})
+      m: WeeklyVolume(
+        (report.direct[m] ?? VolumeMetrics()).scaled(factor),
+        (report.indirect[m] ?? VolumeMetrics()).scaled(factor),
+      ),
+  };
+}
