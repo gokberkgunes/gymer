@@ -7,6 +7,18 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymer/share").setMethodCallHandler { call, result ->
+            if (call.method != "image") {
+                result.notImplemented()
+            } else {
+                val png = call.argument<ByteArray>("png")
+                if (png == null || png.isEmpty()) {
+                    result.error("share_image", "No workout image was provided.", null)
+                } else {
+                    WorkoutSharing.share(this, png, call.argument<String>("title") ?: "Workout", result)
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymer/live_timer").setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> {

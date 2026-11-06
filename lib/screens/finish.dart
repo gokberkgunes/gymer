@@ -6,6 +6,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
+import '../widgets/workout_share_button.dart';
 
 /// Shown after saving a workout: three headline numbers, any personal bests, how each exercise went against
 /// last time, and the muscle breakdown folded away. Plus the workout celebration.
@@ -27,6 +28,7 @@ class FinishScreen extends StatelessWidget {
           ? AppBar(
               title: const Text('Workout summary'),
               actions: [
+                WorkoutShareButton(summary: s),
                 if (onEdit != null)
                   IconButton(tooltip: 'Edit workout', onPressed: onEdit, icon: const Icon(Icons.edit_outlined)),
               ],
@@ -38,14 +40,27 @@ class FinishScreen extends StatelessWidget {
             child: ListView(
               padding: historical ? subPageInsets : const EdgeInsets.fromLTRB(16, 24, 16, 32),
               children: [
-                Text(
-                  historical ? s.name : 'Workout complete',
-                  style: t.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  historical ? fmtShortDate(s.date) : s.name,
-                  style: t.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            historical ? s.name : 'Workout complete',
+                            style: t.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            historical ? fmtShortDate(s.date) : s.name,
+                            style: t.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!historical) WorkoutShareButton(summary: s),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 Row(

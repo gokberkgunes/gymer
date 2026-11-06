@@ -9,6 +9,13 @@
         android:label="Gymer"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <provider
+            android:name=".WorkoutShareProvider"
+            android:authorities="${applicationId}.workout_share"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/workout_share_paths" />
+        </provider>
         <!-- Switches the status-bar rest timer to counting overtime when rest ends (LiveTimer.kt). -->
         <receiver android:name=".OvertimeReceiver" android:exported="false" />
         <activity
