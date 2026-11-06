@@ -9,6 +9,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
+import '../widgets/exercise_actions.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
 import '../widgets/rest_timer.dart';
@@ -181,11 +182,7 @@ class _SessionScreenState extends State<SessionScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         titleSpacing: 0,
-        title: Text(
-          session.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(session.name, maxLines: 1, overflow: TextOverflow.ellipsis),
         // Header actions are rounded squares (theme shape), never circles; see CLAUDE.md.
         actions: [
           IconButton.filled(
@@ -286,8 +283,7 @@ class _Header extends StatelessWidget {
               spacing: 8,
               runSpacing: 4,
               children: [
-                if (session.targetRir != null && session.phase != null)
-                  _WorkoutTag(label: '${session.targetRir} RIR'),
+                if (session.targetRir != null && session.phase != null) _WorkoutTag(label: '${session.targetRir} RIR'),
                 if (session.phase == 'Deload') const _WorkoutTag(label: 'Deload'),
               ],
             ),
@@ -341,14 +337,8 @@ class _WorkoutTag extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-      ),
+      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(8)),
+      child: Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
     );
   }
 }
@@ -430,12 +420,13 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       if (error != null) notify(context, error);
     }
 
-    final menu = <(IconData, String, VoidCallback)>[
-      (Icons.calculate_outlined, 'Rep max calculator', () => openRepMaxForExercise(context, e.name)),
-      (Icons.timer_outlined, 'Rest timers', () => _restEditor(context, store, e)),
-      (Icons.show_chart_rounded, 'History & progress', () => openExerciseProgress(context, e.name)),
-      (Icons.info_outline_rounded, 'Exercise details', () => openExerciseEditor(context, e.name)),
+    final menu = <(String, IconData, String, VoidCallback)>[
+      ('repMax', Icons.calculate_outlined, 'Rep max calculator', () => openRepMaxForExercise(context, e.name)),
+      ('rest', Icons.timer_outlined, 'Rest timers', () => _restEditor(context, store, e)),
+      ('history', Icons.show_chart_rounded, 'History & progress', () => openExerciseProgress(context, e.name)),
+      ('details', Icons.info_outline_rounded, 'Exercise details', () => openExerciseEditor(context, e.name)),
       (
+        'notes',
         e.notesVisible ? Icons.speaker_notes_off_outlined : Icons.notes_rounded,
         e.notesVisible ? 'Hide set notes' : 'Show set notes',
         () {
@@ -444,11 +435,12 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
         },
       ),
       if (session.exercises.indexOf(e) > 0)
-        (Icons.arrow_upward_rounded, 'Move up', () => store.moveSessionExercise(e, -1)),
+        ('moveUp', Icons.arrow_upward_rounded, 'Move up', () => store.moveSessionExercise(e, -1)),
       if (session.exercises.indexOf(e) < session.exercises.length - 1)
-        (Icons.arrow_downward_rounded, 'Move down', () => store.moveSessionExercise(e, 1)),
-      (Icons.swap_horiz_rounded, 'Substitute exercise', substitute),
+        ('moveDown', Icons.arrow_downward_rounded, 'Move down', () => store.moveSessionExercise(e, 1)),
+      ('substitute', Icons.swap_horiz_rounded, 'Substitute exercise', substitute),
       (
+        'remove',
         Icons.delete_outline_rounded,
         'Remove exercise',
         () {
@@ -457,86 +449,92 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
         },
       ),
     ];
+    final pinned = menu.where((action) => store.settings.pinnedExerciseActions.contains(action.$1)).toList();
     final muscles = info?.primary ?? const <String>[];
 
     final firstAnchor = e.sets.indexWhere((x) => calibrationAnchor(e.method, x.type));
-    final heading = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: InkWell(
-            // No highlight box of its own: the whole card is tinted instead (see _pressed).
-            splashFactory: NoSplash.splashFactory,
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            onHighlightChanged: (v) {
-              if (v) return setState(() => _pressed = true);
-              // Keep the tint briefly after a quick tap so it is visible, then fade it out.
-              Future.delayed(const Duration(milliseconds: 250), () {
-                if (mounted) setState(() => _pressed = false);
-              });
-            },
-            onTap: () {
-              e.collapsed = !collapsed;
-              store.changed();
-            },
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    final heading = ExerciseActionHeader(
+      title: InkWell(
+        // No highlight box of its own: the whole card is tinted instead (see _pressed).
+        splashFactory: NoSplash.splashFactory,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        onHighlightChanged: (v) {
+          if (v) return setState(() => _pressed = true);
+          // Keep the tint briefly after a quick tap so it is visible, then fade it out.
+          Future.delayed(const Duration(milliseconds: 250), () {
+            if (mounted) setState(() => _pressed = false);
+          });
+        },
+        onTap: () {
+          e.collapsed = !collapsed;
+          store.changed();
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(e.name, style: t.titleMedium?.copyWith(fontSize: 18)),
-                      if (e.advice.isNotEmpty)
-                        InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
-                      if ((e.calibrate || e.calibrationEntered) && firstAnchor >= 0)
-                        _CalibrationCard(exercise: e, index: firstAnchor),
-                      if (e.method != 'Straight')
-                        Tooltip(
-                          message: 'Training method; edit the workout to change it',
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: cs.primary.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(
-                              e.method,
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.primary),
-                            ),
-                          ),
+                  Text(e.name, style: t.titleMedium?.copyWith(fontSize: 18)),
+                  if (e.advice.isNotEmpty)
+                    InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
+                  if ((e.calibrate || e.calibrationEntered) && firstAnchor >= 0)
+                    _CalibrationCard(exercise: e, index: firstAnchor),
+                  if (e.method != 'Straight')
+                    Tooltip(
+                      message: 'Training method; edit the workout to change it',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: cs.primary.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(99),
                         ),
-                      if (collapsed)
-                        Text(
-                          '${e.sets.where((x) => x.done).length}/${e.sets.length}',
-                          style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+                        child: Text(
+                          e.method,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.primary),
                         ),
-                    ],
-                  ),
-                  if (muscles.isNotEmpty)
-                    Text(muscles.join(' · '), style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+                      ),
+                    ),
+                  if (collapsed)
+                    Text(
+                      '${e.sets.where((x) => x.done).length}/${e.sets.length}',
+                      style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+                    ),
                 ],
               ),
-            ),
+              if (muscles.isNotEmpty)
+                Text(muscles.join(' · '), style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+            ],
           ),
         ),
-        PopupMenuButton<int>(
-          tooltip: 'Exercise options',
-          icon: Icon(Icons.more_vert_rounded, color: cs.onSurfaceVariant),
-          onSelected: (i) => menu[i].$3(),
-          itemBuilder: (_) => [
-            for (final (i, m) in menu.indexed)
-              PopupMenuItem(
-                value: i,
-                child: Row(children: [Icon(m.$1, size: 20), const SizedBox(width: 12), Text(m.$2)]),
-              ),
-          ],
-        ),
+      ),
+      actions: [
+        for (final action in pinned)
+          IconButton(
+            tooltip: action.$3,
+            icon: Icon(action.$2, color: cs.onSurfaceVariant),
+            onPressed: action.$4,
+          ),
       ],
+      menu: PopupMenuButton<int>(
+        tooltip: 'Exercise options',
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: Icon(Icons.more_vert_rounded, color: cs.onSurfaceVariant),
+        onSelected: (i) => menu[i].$4(),
+        itemBuilder: (_) => [
+          for (final (i, m) in menu.indexed)
+            PopupMenuItem(
+              value: i,
+              child: Row(children: [Icon(m.$2, size: 20), const SizedBox(width: 12), Text(m.$3)]),
+            ),
+        ],
+      ),
     );
 
     final note = info?.note.trim() ?? '';
@@ -813,10 +811,7 @@ void _showAdvice(BuildContext context, SessionExercise e) => showDialog<void>(
     content: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final line in e.advice)
-          Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(line)),
-      ],
+      children: [for (final line in e.advice) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(line))],
     ),
     actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
   ),
@@ -895,7 +890,11 @@ class _ColumnHeader extends StatelessWidget {
                     children: [
                       Text(load, style: style),
                       const SizedBox(width: 4),
-                      Icon(Icons.fitness_center_rounded, size: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(
+                        Icons.fitness_center_rounded,
+                        size: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ],
                   ),
                 ),

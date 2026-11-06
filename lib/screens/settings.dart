@@ -10,6 +10,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
+import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
 import 'data_io.dart';
 import 'exercises.dart';
@@ -134,7 +135,169 @@ class _WorkoutSettings extends StatelessWidget {
                 'Automatically folds an exercise after all of its sets are complete. Use the chevron to reopen it.',
           ),
         ]),
+        const SectionLabel('Customisation'),
+        _group([
+          _row(
+            context,
+            'Exercise shortcuts',
+            Text(
+              '${exerciseActions.where((action) => s.pinnedExerciseActions.contains(action.$1)).length} pinned',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            subtitle: 'Quick access beside the exercise menu',
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _ExerciseShortcutSettings())),
+          ),
+        ]),
       ],
+    );
+  }
+}
+
+class _ExerciseShortcutSettings extends StatelessWidget {
+  const _ExerciseShortcutSettings();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final pinned = exerciseActions.where((action) => store.settings.pinnedExerciseActions.contains(action.$1)).toList();
+
+    void toggle(String key) => store.updateSettings((settings) {
+      final selected = !settings.pinnedExerciseActions.contains(key);
+      settings.pinnedExerciseActions = [
+        for (final action in exerciseActions)
+          if (action.$1 == key ? selected : settings.pinnedExerciseActions.contains(action.$1)) action.$1,
+      ];
+    });
+
+    return _Page(
+      title: 'Exercise shortcuts',
+      children: [
+        const SectionLabel('Preview'),
+        // Desaturate and warm the sample so it reads as a preview, not another setting.
+        ColorFiltered(
+          colorFilter: const ColorFilter.matrix([
+            0.218,
+            0.735,
+            0.074,
+            0,
+            0,
+            0.209,
+            0.702,
+            0.071,
+            0,
+            0,
+            0.191,
+            0.642,
+            0.065,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+          ]),
+          child: Opacity(
+            opacity: 0.72,
+            child: IgnorePointer(
+              child: _SetPreview(
+                header: ExerciseActionHeader(
+                  title: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Bench Press', style: t.titleMedium?.copyWith(fontSize: 18)),
+                        Text('Chest · Triceps', style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    for (final (_, label, icon) in pinned)
+                      Tooltip(
+                        message: label,
+                        child: Center(child: Icon(icon, color: cs.onSurfaceVariant)),
+                      ),
+                  ],
+                  menu: Center(child: Icon(Icons.more_vert_rounded, color: cs.onSurfaceVariant)),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+          child: Text('Tap an action to pin or unpin it.', style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+        ),
+        const SectionLabel('Actions'),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (final (index, (key, label, icon)) in exerciseActions.indexed) ...[
+                if (index > 0) const Divider(indent: 52, endIndent: 16),
+                _ExerciseShortcutRow(
+                  label: label,
+                  icon: icon,
+                  pinned: store.settings.pinnedExerciseActions.contains(key),
+                  onTap: () => toggle(key),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExerciseShortcutRow extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool pinned;
+  final VoidCallback onTap;
+
+  const _ExerciseShortcutRow({required this.label, required this.icon, required this.pinned, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Semantics(
+      toggled: pinned,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: context.style.sp(8)),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: cs.onSurfaceVariant),
+              const SizedBox(width: 16),
+              Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyLarge)),
+              const SizedBox(width: 12),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: pinned ? cs.primary.withValues(alpha: 0.10) : Colors.transparent,
+                  borderRadius: context.style.brSmall,
+                ),
+                child: Icon(
+                  pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                  size: 18,
+                  color: pinned ? cs.primary : cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -554,8 +717,10 @@ class _PlateSettings extends StatelessWidget {
           runSpacing: 6,
           children: [
             // Common sizes plus any custom size the user added; a custom size disappears when switched off.
-            for (final p in {...(lb ? _candidatesLb : _candidatesKg), ...s.plates}.toList()
-              ..sort((a, b) => b.compareTo(a)))
+            for (final p in {
+              ...(lb ? _candidatesLb : _candidatesKg),
+              ...s.plates,
+            }.toList()..sort((a, b) => b.compareTo(a)))
               FilterChip(
                 label: Text(formatNumber(p, NumKind.load), style: const TextStyle(fontFeatures: tabular)),
                 showCheckmark: false,
@@ -1229,7 +1394,8 @@ class _BackgroundChip extends StatelessWidget {
 }
 
 class _SetPreview extends StatelessWidget {
-  const _SetPreview();
+  final Widget? header;
+  const _SetPreview({this.header});
 
   @override
   Widget build(BuildContext context) {
@@ -1298,11 +1464,11 @@ class _SetPreview extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, st.sp(14), 16, st.sp(14)),
+        padding: EdgeInsets.fromLTRB(12, st.sp(14), 12, st.sp(14)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Bench Press', style: t.titleMedium),
+            header ?? Text('Bench Press', style: t.titleMedium),
             SizedBox(height: st.sp(8)),
             setRow(1, '80', '8', '2', true),
             setRow(2, '80', '7', '1', true),

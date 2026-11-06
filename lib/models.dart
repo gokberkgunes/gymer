@@ -895,6 +895,7 @@ class Settings {
   bool showPreviousReps;
   bool dimCompleted;
   bool collapseCompleted;
+  List<String> pinnedExerciseActions;
   bool requirePreviousSet;
   bool updateFollowingDefaults;
   bool enterCompletesSet;
@@ -940,6 +941,7 @@ class Settings {
     this.showPreviousReps = false,
     this.dimCompleted = true,
     this.collapseCompleted = true,
+    List<String>? pinnedExerciseActions,
     this.requirePreviousSet = false,
     this.updateFollowingDefaults = false,
     this.enterCompletesSet = true,
@@ -964,7 +966,8 @@ class Settings {
     this.setSpacing = 3,
     this.fontScale = 1.0,
     this.uiScale = 1.0,
-  }) : setTypes = setTypes ?? List.of(defaultSetTypes),
+  }) : pinnedExerciseActions = pinnedExerciseActions ?? [],
+       setTypes = setTypes ?? List.of(defaultSetTypes),
        increments = increments ?? Map.of(defaultIncrements),
        platesKg = platesKg ?? List.of(defaultPlatesKg),
        platesLb = platesLb ?? List.of(defaultPlatesLb);
@@ -1006,6 +1009,7 @@ class Settings {
     'showPreviousReps': showPreviousReps,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
+    'pinnedExerciseActions': pinnedExerciseActions,
     'requirePreviousSet': requirePreviousSet,
     'updateFollowingDefaults': updateFollowingDefaults,
     'enterCompletesSet': enterCompletesSet,
@@ -1056,6 +1060,9 @@ class Settings {
       showPreviousReps: b('showPreviousReps', d.showPreviousReps),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
+      pinnedExerciseActions: j['pinnedExerciseActions'] is List
+          ? (j['pinnedExerciseActions'] as List).whereType<String>().toList()
+          : null,
       requirePreviousSet: b('requirePreviousSet', d.requirePreviousSet),
       updateFollowingDefaults: b('updateFollowingDefaults', d.updateFollowingDefaults),
       enterCompletesSet: b('enterCompletesSet', d.enterCompletesSet),
