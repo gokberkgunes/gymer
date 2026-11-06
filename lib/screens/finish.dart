@@ -5,8 +5,10 @@ import '../logic/volume.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
+import '../widgets/achievement.dart';
 import '../widgets/common.dart';
 import '../widgets/workout_share_button.dart';
+import 'achievements.dart';
 
 /// Shown after saving a workout: three headline numbers, any personal bests, how each exercise went against
 /// last time, and the muscle breakdown folded away. Plus the workout celebration.
@@ -21,6 +23,9 @@ class FinishScreen extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final s = summary;
+    final settings = StoreScope.of(context).settings;
+    final motion = !MediaQuery.disableAnimationsOf(context);
+    final milestone = !historical && s.achievements.isNotEmpty && settings.achievementCelebration != 'off';
     final pbExercises = {for (final b in s.bests) b.exercise};
 
     return Scaffold(
@@ -75,6 +80,15 @@ class FinishScreen extends StatelessWidget {
                   ],
                 ),
                 if (s.bests.isNotEmpty) ...[const SizedBox(height: 16), PersonalBestCard(s.bests)],
+                if (milestone) ...[
+                  const SizedBox(height: 16),
+                  AchievementUnlockCard(
+                    achievements: s.achievements,
+                    unit: settings.unit,
+                    animate: settings.achievementCelebration == 'glow',
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AchievementsScreen())),
+                  ),
+                ],
                 if (s.exercises.isNotEmpty) ...[
                   SectionLabel(
                     'Exercises',
@@ -100,7 +114,14 @@ class FinishScreen extends StatelessWidget {
               ],
             ),
           ),
-          if (!historical) const Positioned.fill(child: WorkoutCelebration()),
+          if (!historical &&
+              motion &&
+              (settings.workoutCelebrations || (milestone && settings.achievementCelebration == 'confetti')))
+            Positioned.fill(
+              child: WorkoutCelebration(
+                headline: milestone && settings.achievementCelebration == 'confetti' ? 'Achievement unlocked' : null,
+              ),
+            ),
         ],
       ),
     );

@@ -284,7 +284,8 @@ class _SessionScreenState extends State<SessionScreen> {
               ),
             ],
           ),
-          Positioned.fill(child: SetConfetti(trigger: store.setCelebration)),
+          if (store.settings.setCelebrations && !MediaQuery.disableAnimationsOf(context))
+            Positioned.fill(child: SetConfetti(trigger: store.setCelebration)),
           Positioned(
             right: 16,
             bottom: 16,

@@ -8,7 +8,6 @@ import '../models.dart';
 import '../services/platform_alerts.dart';
 import '../store.dart';
 import '../theme.dart';
-import '../widgets/celebration.dart';
 import '../widgets/common.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
@@ -17,6 +16,7 @@ import 'data_io.dart';
 import 'bodyweight.dart';
 import 'exercises.dart';
 import 'rep_max.dart';
+import 'achievements.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -48,7 +48,13 @@ class SettingsScreen extends StatelessWidget {
             'Profiles, bar weight and available plates',
             const _PlateSettings(),
           ),
-          link(Icons.tune_rounded, 'Advanced', 'Celebrations, set rules and keyboard', const _AdvancedSettings()),
+          link(
+            Icons.emoji_events_outlined,
+            'Achievements',
+            'Milestones, progress and celebrations',
+            const AchievementsScreen(),
+          ),
+          link(Icons.tune_rounded, 'Advanced', 'Set rules and keyboard', const _AdvancedSettings()),
           link(Icons.storage_outlined, 'Databases', 'Exercises, set types and rep max', const _DatabaseSettings()),
           link(Icons.save_outlined, 'Data', 'Backups, import and export', const _DataSettings()),
         ]),
@@ -985,16 +991,6 @@ class _AdvancedSettings extends StatelessWidget {
     return _Page(
       title: 'Advanced',
       children: [
-        const SizedBox(height: 8),
-        _group([
-          ListTile(
-            leading: const Icon(Icons.celebration_outlined),
-            title: const Text('Celebrations', style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: const Text('Preview workout celebrations'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CelebrationsPreview())),
-          ),
-        ]),
         const SectionLabel('Workout'),
         _group([
           _switch(
@@ -1191,59 +1187,6 @@ void showRirInfo(BuildContext context) {
       actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
     ),
   );
-}
-
-/// Preview the set confetti and every workout celebration style.
-class CelebrationsPreview extends StatefulWidget {
-  const CelebrationsPreview({super.key});
-
-  @override
-  State<CelebrationsPreview> createState() => _CelebrationsPreviewState();
-}
-
-class _CelebrationsPreviewState extends State<CelebrationsPreview> {
-  int _set = 0, _workout = 0;
-  int? _style;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Celebrations')),
-      body: Stack(
-        children: [
-          ListView(
-            padding: subPageInsets,
-            children: [
-              FilledButton(onPressed: () => setState(() => _set++), child: const Text('Preview set celebration')),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () => setState(() {
-                  _style = null;
-                  _workout++;
-                }),
-                child: const Text('Preview random workout celebration'),
-              ),
-              const SectionLabel('Workout styles'),
-              for (final (i, (message, emojis, _)) in workoutStyles.indexed)
-                ListTile(
-                  title: Text(message),
-                  subtitle: Text(emojis),
-                  onTap: () => setState(() {
-                    _style = i;
-                    _workout++;
-                  }),
-                ),
-            ],
-          ),
-          Positioned.fill(child: SetConfetti(trigger: _set)),
-          if (_workout > 0)
-            Positioned.fill(
-              child: WorkoutCelebration(style: _style, trigger: _workout),
-            ),
-        ],
-      ),
-    );
-  }
 }
 
 class AppearanceScreen extends StatelessWidget {

@@ -1029,6 +1029,9 @@ class Settings {
   int defaultSets;
   bool trackRir;
   bool trackBodyweight;
+  String achievementCelebration; // glow | confetti | off
+  bool setCelebrations;
+  bool workoutCelebrations;
   bool haptics;
   bool restHaptics;
   bool restSound;
@@ -1082,6 +1085,9 @@ class Settings {
     this.defaultSets = 3,
     this.trackRir = true,
     this.trackBodyweight = false,
+    this.achievementCelebration = 'glow',
+    this.setCelebrations = true,
+    this.workoutCelebrations = true,
     this.haptics = true,
     this.restHaptics = true,
     this.restSound = false,
@@ -1168,6 +1174,9 @@ class Settings {
     'defaultSets': defaultSets,
     'trackRir': trackRir,
     'trackBodyweight': trackBodyweight,
+    'achievementCelebration': achievementCelebration,
+    'setCelebrations': setCelebrations,
+    'workoutCelebrations': workoutCelebrations,
     'haptics': haptics,
     'restHaptics': restHaptics,
     'restSound': restSound,
@@ -1223,6 +1232,9 @@ class Settings {
       defaultSets: _int(j['defaultSets']) ?? d.defaultSets,
       trackRir: b('trackRir', d.trackRir),
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
+      achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),
+      setCelebrations: b('setCelebrations', d.setCelebrations),
+      workoutCelebrations: b('workoutCelebrations', d.workoutCelebrations),
       haptics: b('haptics', d.haptics),
       restHaptics: b('restHaptics', d.restHaptics),
       restSound: b('restSound', d.restSound),

@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import 'data/seed.dart';
+import 'logic/achievements.dart';
 import 'logic/circuits.dart';
 import 'logic/bodyweight.dart';
 import 'logic/cycle.dart';
@@ -108,6 +109,7 @@ class FinishSummary {
   final VolumeReport report;
   final List<PersonalBest> bests;
   final List<ExerciseResult> exercises;
+  final List<AchievementProgress> achievements;
   const FinishSummary({
     required this.name,
     required this.unit,
@@ -118,6 +120,7 @@ class FinishSummary {
     required this.report,
     this.bests = const [],
     this.exercises = const [],
+    this.achievements = const [],
   });
 }
 
@@ -166,6 +169,7 @@ class AppStore extends ChangeNotifier {
   List<Session> history = [];
   List<Mesocycle> cycles = [];
   List<BodyweightEntry> bodyweights = [];
+  Set<String> _seenAchievements = {};
   Session? active;
   RestTimer? rest;
 
@@ -217,6 +221,13 @@ class AppStore extends ChangeNotifier {
     }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
     final newRest = r == null || newActive == null ? null : RestTimer.fromJson(r as Map<String, dynamic>);
+    final seen = j['seenAchievements'];
+    final newSeen = seen is List
+        ? seen.whereType<String>().toSet()
+        : {
+            for (final p in achievementProgress(newHistory))
+              if (p.earned) p.achievement.id,
+          };
     settings = newSettings;
     templates = newTemplates;
     exercises = newExercises;
@@ -225,6 +236,7 @@ class AppStore extends ChangeNotifier {
     active = newActive;
     bodyweights = newBodyweights;
     rest = newRest;
+    _seenAchievements = newSeen;
   }
 
   Map<String, dynamic> toJson() => {
@@ -235,6 +247,7 @@ class AppStore extends ChangeNotifier {
     'history': history.map((s) => s.toJson()).toList(),
     'cycles': cycles.map((c) => c.toJson()).toList(),
     if (bodyweights.isNotEmpty) 'bodyweights': bodyweights.map((e) => e.toJson()).toList(),
+    if (_seenAchievements.isNotEmpty) 'seenAchievements': _seenAchievements.toList()..sort(),
     'active': active?.toJson(),
     'rest': rest?.toJson(),
   };
@@ -969,7 +982,7 @@ class AppStore extends ChangeNotifier {
 
   /// Rebuild a saved workout's results from the history that preceded it, in its recorded unit.
   /// Reading a summary never saves, links a calendar day or changes an active workout.
-  FinishSummary summarizeSession(Session session) {
+  FinishSummary summarizeSession(Session session, {List<AchievementProgress> achievements = const []}) {
     final earlier = history.where((s) => s.id != session.id && s.startedAt.isBefore(session.startedAt)).toList()
       ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
     final (bests, results) = _sessionHighlights(session, earlier);
@@ -983,6 +996,7 @@ class AppStore extends ChangeNotifier {
       report: sessionVolume(session),
       bests: bests,
       exercises: results,
+      achievements: achievements,
     );
   }
 
@@ -2141,7 +2155,17 @@ class AppStore extends ChangeNotifier {
       }
     }
     // Records compare against earlier sessions, so collect them first.
-    final summary = summarizeSession(s);
+    final alreadyEarned = {
+      for (final p in achievementProgress(history))
+        if (p.earned) p.achievement.id,
+    };
+    final earned = achievementProgress([...history, s]).where((p) => p.earned).toList();
+    final unlocked = [
+      for (final p in earned)
+        if (!alreadyEarned.contains(p.achievement.id) && !_seenAchievements.contains(p.achievement.id)) p,
+    ];
+    _seenAchievements.addAll(earned.map((p) => p.achievement.id));
+    final summary = summarizeSession(s, achievements: unlocked);
     history = [s, ...history];
     final c = cycles.where((c) => c.id == s.cycleId).firstOrNull ?? activeCycle;
     if (c != null) linkSession(c, s);
@@ -2422,6 +2446,10 @@ class AppStore extends ChangeNotifier {
     bodyweights = [];
     templates = d.templates.isEmpty ? seedTemplates() : d.templates;
     history = d.history;
+    _seenAchievements = {
+      for (final p in achievementProgress(history))
+        if (p.earned) p.achievement.id,
+    };
     cycles = d.cycles;
     settings = newSettings;
     active = null;
@@ -2458,6 +2486,7 @@ class AppStore extends ChangeNotifier {
     history = incoming.history;
     cycles = incoming.cycles;
     bodyweights = incoming.bodyweights;
+    _seenAchievements = incoming._seenAchievements;
     active = incoming.active;
     rest = incoming.rest;
     _syncAlerts();

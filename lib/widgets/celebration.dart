@@ -233,7 +233,8 @@ class WorkoutCelebration extends StatefulWidget {
   /// Index into [workoutStyles]; random (never repeating) when null.
   final int? style;
   final int trigger;
-  const WorkoutCelebration({super.key, this.style, this.trigger = 0});
+  final String? headline;
+  const WorkoutCelebration({super.key, this.style, this.trigger = 0, this.headline});
 
   @override
   State<WorkoutCelebration> createState() => _WorkoutCelebrationState();
@@ -329,7 +330,7 @@ class _WorkoutCelebrationState extends State<WorkoutCelebration> with SingleTick
     ];
     setState(() {
       _particles = particles;
-      _message = message;
+      _message = widget.headline ?? message;
       _border = colors.first;
     });
     _c.forward(from: 0);
