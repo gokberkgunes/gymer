@@ -46,12 +46,13 @@ String circuitDescription(ExerciseCircuit circuit) => circuit.exercises.length =
 List<List<SessionExercise>> exerciseBlocks(Session session) {
   final blocks = <List<SessionExercise>>[];
   final visited = <String>{};
-  for (final exercise in session.visibleExercises) {
-    final circuit = session.warmingUp ? null : circuitFor(session.circuits, exercise.name);
+  final visible = session.visibleExercises;
+  for (final exercise in visible) {
+    final circuit = circuitFor(session.circuits, exercise.name);
     if (circuit == null) {
       blocks.add([exercise]);
     } else if (visited.add(circuit.id)) {
-      blocks.add([for (final name in circuit.exercises) ...session.exercises.where((e) => e.name == name)]);
+      blocks.add([for (final name in circuit.exercises) ...visible.where((e) => e.name == name)]);
     }
   }
   return blocks;
@@ -85,11 +86,12 @@ List<List<int>> _turns(SessionExercise exercise) {
 }
 
 /// The actual workout order, shared by navigation, rest timers and time estimates.
-/// Manual warm-ups precede a circuit; the separate ramp phase passes no circuits.
+/// Manual warm-ups precede a circuit; generated ramps are inserted separately.
 List<WorkoutStep> workoutSteps(
   List<SessionExercise> exercises,
   List<ExerciseCircuit> circuits, {
   bool hideWarmups = false,
+  Set<String> hideWarmupsFor = const {},
 }) {
   final steps = <WorkoutStep>[];
   final visited = <String>{};
@@ -100,13 +102,16 @@ List<WorkoutStep> workoutSteps(
         : [for (final name in circuit.exercises) ...exercises.where((e) => e.name == name)];
     if (circuit == null || members.length < 2) {
       for (final (index, set) in exercise.sets.indexed) {
-        if (!hideWarmups || !set.warmup) steps.add(WorkoutStep(exercise, index, set.rest));
+        if (!set.warmup || (!hideWarmups && !hideWarmupsFor.contains(exercise.name))) {
+          steps.add(WorkoutStep(exercise, index, set.rest));
+        }
       }
       continue;
     }
     if (!visited.add(circuit.id)) continue;
     if (!hideWarmups) {
       for (final member in members) {
+        if (hideWarmupsFor.contains(member.name)) continue;
         for (final (index, set) in member.sets.indexed) {
           if (set.warmup) steps.add(WorkoutStep(member, index, set.rest));
         }
@@ -139,15 +144,25 @@ List<WorkoutStep> workoutSteps(
   return steps;
 }
 
-List<WorkoutStep> sessionSteps(Session session) => workoutSteps(
-  session.visibleExercises,
-  session.warmingUp ? [] : session.circuits,
-  hideWarmups: !session.warmingUp && session.warmupExercises.isNotEmpty,
-);
+List<WorkoutStep> sessionSteps(Session session) {
+  final steps = workoutSteps(
+    session.exercises,
+    session.circuits,
+    hideWarmupsFor: session.warmupExercises.map((e) => e.name).toSet(),
+  );
+  final warmup = session.activeWarmup;
+  if (warmup == null) return steps;
+  final circuit = circuitFor(session.circuits, warmup.name);
+  final position = steps.indexWhere(
+    (step) => step.exercise.name == warmup.name || (circuit != null && circuit.exercises.contains(step.exercise.name)),
+  );
+  steps.insertAll(position < 0 ? 0 : position, workoutSteps([warmup], []));
+  return steps;
+}
 
 /// After any member's completion, suggest the earliest unfinished step in that group.
 WorkoutStep? nextCircuitStep(Session session, SessionExercise exercise) {
-  if (session.warmingUp) return null;
+  if (session.isWarmupExercise(exercise)) return null;
   final circuit = circuitFor(session.circuits, exercise.name);
   if (circuit == null) return null;
   return sessionSteps(session)

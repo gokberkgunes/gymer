@@ -112,9 +112,10 @@ void main() {
     store.startSession(legs);
     final press = store.active!.exercises.first;
     expect(store.active!.phase, 'Deload');
-    expect(press.sets, hasLength(1));
+    // Half of three working sets rounds to two, rather than flooring to one.
+    expect(press.sets, hasLength(2));
     // 90% of 102.5 rounded down on Leg Press's 5 kg plate-loaded lattice.
-    expect((press.sets.single.weight, press.sets.single.targetReps, press.sets.single.targetRir), (87.5, 8, 4));
+    expect(press.sets.map((set) => (set.weight, set.targetReps, set.targetRir)), everyElement((87.5, 8, 4)));
   });
 
   test('alerts follow the workout and rest timer', () async {

@@ -59,7 +59,7 @@ class FinishScreen extends StatelessWidget {
                     ],
                   ],
                 ),
-                if (s.bests.isNotEmpty) ...[const SizedBox(height: 16), _Bests(s.bests)],
+                if (s.bests.isNotEmpty) ...[const SizedBox(height: 16), PersonalBestCard(s.bests)],
                 if (s.exercises.isNotEmpty) ...[
                   SectionLabel(
                     'Exercises',
@@ -134,9 +134,10 @@ class _Stat extends StatelessWidget {
 
 /// Personal bests: a monochrome trophy in the accent colour heads the card, and each record is a row with
 /// the exercise and kind on the left and the new value, accent-coloured, on the right.
-class _Bests extends StatelessWidget {
+class PersonalBestCard extends StatelessWidget {
   final List<PersonalBest> bests;
-  const _Bests(this.bests);
+  final String? title;
+  const PersonalBestCard(this.bests, {super.key, this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -165,7 +166,7 @@ class _Bests extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  bests.length == 1 ? 'New personal best' : '${bests.length} personal bests',
+                  title ?? (bests.length == 1 ? 'New personal best' : '${bests.length} personal bests'),
                   style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),

@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'data/seed.dart';
 import 'logic/circuits.dart';
 import 'logic/cycle.dart';
+import 'logic/cycle_review.dart';
 import 'logic/estimate.dart';
 import 'logic/legacy_import.dart';
 import 'logic/methods.dart';
@@ -116,6 +117,28 @@ class FinishSummary {
     required this.report,
     this.bests = const [],
     this.exercises = const [],
+  });
+}
+
+class CycleSummary {
+  final String unit;
+  final DateTime start, end;
+  final int workouts, attended, scheduled, sets, records;
+  final Duration duration;
+  final List<PersonalBest> bests;
+  final List<CycleStrengthChange> strength;
+  const CycleSummary({
+    required this.unit,
+    required this.start,
+    required this.end,
+    required this.workouts,
+    required this.attended,
+    required this.scheduled,
+    required this.sets,
+    required this.records,
+    required this.duration,
+    required this.bests,
+    required this.strength,
   });
 }
 
@@ -375,6 +398,7 @@ class AppStore extends ChangeNotifier {
       }
       for (final s in [...history, ?active]) {
         renameCircuitExercise(s.circuits, from, updated.name);
+        if (s.warmupExercise == from) s.warmupExercise = updated.name;
         for (final e in [...s.exercises, ...s.warmupExercises]) {
           if (e.name == from) e.name = updated.name;
         }
@@ -485,7 +509,7 @@ class AppStore extends ChangeNotifier {
     final steps = sessionSteps(s);
     return estimateWorkout(
       rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
-      circuitIds: [for (final step in steps) s.warmingUp ? null : circuitFor(s.circuits, step.exercise.name)?.id],
+      circuitIds: [for (final step in steps) circuitFor(s.circuits, step.exercise.name)?.id],
       setSeconds: (n) => setSecondsFor(n, t.setSeconds),
       setOverhead: t.setOverhead,
       transition: t.transition,
@@ -509,8 +533,10 @@ class AppStore extends ChangeNotifier {
   void saveCycle(Mesocycle c) {
     if (!cycles.any((x) => x.id == c.id)) cycles = [...cycles, c];
     for (final x in cycles) {
+      if (x.active && x.id != c.id) x.endedAt ??= dateOnly(DateTime.now());
       x.active = x.id == c.id;
     }
+    c.endedAt = null;
     changed();
   }
 
@@ -547,8 +573,161 @@ class AppStore extends ChangeNotifier {
   }
 
   void endCycle(Mesocycle c) {
-    c.active = false;
+    c
+      ..active = false
+      ..endedAt = dateOnly(DateTime.now());
     changed();
+  }
+
+  List<Session> _cycleSessions(Mesocycle cycle) {
+    final linked = {for (final event in cycle.events.values) ?event.sessionId};
+    return history.where((s) => (s.cycleId == cycle.id || linked.contains(s.id)) && s.doneSets > 0).toList()
+      ..sort((a, b) => a.startedAt.compareTo(b.startedAt));
+  }
+
+  CycleSummary summarizeCycle(Mesocycle cycle, {DateTime? at}) {
+    final sessions = _cycleSessions(cycle);
+    final status = cycleStatus(cycle);
+    final today = dateOnly(at ?? DateTime.now());
+    var end = cycle.endedAt ?? status.end;
+    if (end.isAfter(status.end)) end = status.end;
+    if (end.isAfter(today)) end = today;
+    final due = calendarDays(
+      cycle,
+      history,
+    ).where((d) => d.templateId != null && !d.unplanned && !d.date.isAfter(end)).toList();
+    final completed = {for (final s in sessions) s.id};
+    final attended = {
+      for (final d in due)
+        if (completed.contains(d.sessionId)) d.sessionId,
+    };
+    final bests = <(String, String), PersonalBest>{};
+    var records = 0;
+    for (final session in sessions) {
+      for (final best in summarizeSession(session).bests) {
+        records++;
+        bests[(best.exercise.toLowerCase(), best.kind)] = best;
+      }
+    }
+    return CycleSummary(
+      unit: settings.unit,
+      start: dateOnly(cycle.start),
+      end: end.isBefore(cycle.start) ? dateOnly(cycle.start) : end,
+      workouts: sessions.length,
+      attended: attended.length,
+      scheduled: due.length,
+      sets: sessions.fold(0, (n, s) => n + s.doneSets),
+      records: records,
+      duration: sessions.fold(Duration.zero, (total, s) => total + s.duration),
+      bests: bests.values.toList(),
+      strength: cycleStrengthChanges(cycle, sessions, settings.unit),
+    );
+  }
+
+  /// A detached draft: no shared maps, calendar events, template changes or activation until Start.
+  Mesocycle cloneCycle(Mesocycle source, {DateTime? start, int loadPercent = 100}) {
+    final json = source.toJson();
+    final match = RegExp(r'^(.*) · (\d+)$').firstMatch(source.name);
+    json
+      ..['id'] = 'C${DateTime.now().microsecondsSinceEpoch}'
+      ..['name'] = match == null ? '${source.name} · 2' : '${match.group(1)} · ${int.parse(match.group(2)!) + 1}'
+      ..['start'] = dateKey(start ?? DateTime.now())
+      ..['active'] = false
+      ..['setupComplete'] = false
+      ..['events'] = <String, dynamic>{}
+      ..remove('endedAt')
+      ..remove('startingLoads');
+    final draft = Mesocycle.fromJson(json);
+    draft.schedule.removeWhere((_, id) => template(id) == null);
+    draft
+      ..startingLoadUnit = settings.unit
+      ..startingLoads = cycleStartingLoads(source, loadPercent: loadPercent);
+    return draft;
+  }
+
+  /// Last compatible build loads of this cycle; absent loads stay unknown and are never guessed.
+  Map<String, List<SessionExercise>> cycleStartingLoads(Mesocycle source, {int loadPercent = 100}) {
+    if (loadPercent <= 0 || loadPercent > 200) throw ArgumentError.value(loadPercent, 'loadPercent');
+    final sessions = _cycleSessions(source).reversed.where(
+      (s) => s.phase == 'Build' || (s.phase == null && cycleStatus(source, s.startedAt).phase == 'Build'),
+    );
+    double? scaled(String name, double? weight) {
+      if (weight == null || weight <= 0) return null;
+      final target = weight * loadPercent / 100;
+      if (platesApply(name)) {
+        final plan = plates(target, name: name);
+        return plan.exact?.total ?? plan.below?.total ?? plan.above?.total;
+      }
+      final step = incrementFor(name, settings.unit) ?? practicalWeightStep(target, settings.unit, null);
+      return snapWeight(math.max(step, (target / step + 1e-9).floor() * step));
+    }
+
+    final result = <String, List<SessionExercise>>{};
+    for (final id in source.schedule.values.toSet()) {
+      final plan = template(id);
+      if (plan == null) continue;
+      final exercises = <SessionExercise>[];
+      for (final planned in plan.exercises) {
+        final mode = exercise(planned.name)?.loadMode ?? defaultLoadModeFor(planned.name);
+        final method = canonicalMethod(planned.method);
+        if (mode != 'external' || method == 'Mechanical Drop Set') continue;
+        SessionExercise? reference;
+        String? unit;
+        for (final session in sessions.where((s) => s.templateId == id)) {
+          reference = session.exercises
+              .where(
+                (e) =>
+                    e.name.toLowerCase() == planned.name.toLowerCase() &&
+                    e.method == method &&
+                    e.loadMode == mode &&
+                    e.sets.length == planned.sets.length &&
+                    planned.sets.indexed.every((entry) {
+                      final previous = e.sets[entry.$1];
+                      final set = entry.$2;
+                      return canonicalSetType(previous.type) == canonicalSetType(set.type) &&
+                          previous.groupStart == set.groupStart &&
+                          previous.context == contextFor(planned.name, set);
+                    }) &&
+                    e.work.any((s) => s.done && (s.weight ?? 0) > 0),
+              )
+              .firstOrNull;
+          if (reference != null) {
+            unit = session.unit;
+            break;
+          }
+        }
+        final sets = <SetEntry>[];
+        for (final (i, set) in planned.sets.indexed) {
+          final context = contextFor(planned.name, set);
+          final previous = reference != null && i < reference.sets.length ? reference.sets[i] : null;
+          final compatible =
+              previous != null &&
+              previous.done &&
+              previous.context == context &&
+              canonicalSetType(previous.type) == canonicalSetType(set.type) &&
+              previous.groupStart == set.groupStart;
+          final weight = compatible
+              ? convertWeight(previous.weight ?? 0, unit!, settings.unit)
+              : reference == null
+              ? set.weight
+              : null;
+          sets.add(
+            SetEntry(
+              type: set.type,
+              groupStart: set.groupStart,
+              rest: set.rest,
+              context: context,
+              weight: isWarmup(set.type) ? null : scaled(planned.name, weight),
+            ),
+          );
+        }
+        if (sets.any((s) => s.weight != null)) {
+          exercises.add(SessionExercise(name: planned.name, method: method, loadMode: mode, sets: sets));
+        }
+      }
+      if (exercises.isNotEmpty) result[id] = exercises;
+    }
+    return result;
   }
 
   void deleteCycle(Mesocycle c) {
@@ -807,10 +986,10 @@ class AppStore extends ChangeNotifier {
     final i = blocks.indexWhere((block) => block.contains(e));
     if (i < 0 || i + delta < 0 || i + delta >= blocks.length) return;
     blocks.insert(i + delta, blocks.removeAt(i));
-    final list = session.visibleExercises;
-    list
-      ..clear()
-      ..addAll(blocks.expand((block) => block));
+    session.exercises = [
+      for (final visible in blocks.expand((block) => block))
+        session.exercises.firstWhere((exercise) => exercise.name == visible.name),
+    ];
     changed();
   }
 
@@ -819,7 +998,11 @@ class AppStore extends ChangeNotifier {
     e.sets.insert(index.clamp(0, e.sets.length), set);
     _reconcileSession(e);
     e.collapsed = false;
-    if (active?.warmupExercises.contains(e) == true && !set.done) active!.warmingUp = true;
+    if (active?.isWarmupExercise(e) == true && !set.done) {
+      active!
+        ..warmingUp = true
+        ..warmupExercise = e.name;
+    }
     changed();
   }
 
@@ -890,72 +1073,93 @@ class AppStore extends ChangeNotifier {
     changed();
   }
 
-  /// Builds a temporary whole-workout warm-up phase. Working rows remain untouched.
-  String? startWarmups({int sets = 3}) {
+  /// The header starts the next unwarmed exercise; each exercise menu can choose explicitly.
+  SessionExercise? get nextWarmupExercise {
+    final session = active;
+    if (session == null) return null;
+    final candidates = session.exercises.where(
+      (e) => e.loadMode == 'external' && !e.work.any((s) => s.done) && session.warmupFor(e.name) == null,
+    );
+    return candidates.where((e) => e.work.any((s) => (s.weight ?? s.hintWeight ?? 0) > 0)).firstOrNull ??
+        candidates.firstOrNull;
+  }
+
+  /// Replace only this exercise's working rows with its ramp, keeping every other card visible.
+  String? startWarmups({int sets = 3, String? exerciseName}) {
     final session = active;
     if (session == null) return 'Start a workout first.';
     if (sets != 2 && sets != 3) return 'Choose two or three warm-up sets.';
-    if (session.doneSets > 0) return 'Start warm-ups before completing working sets.';
-    if (session.warmupExercises.any((exercise) => exercise.sets.any((set) => set.done))) {
-      return 'Warm-ups are already underway. Switch phases to return to them.';
+    final target = exerciseName == null
+        ? nextWarmupExercise
+        : session.exercises.where((e) => e.name == exerciseName).firstOrNull;
+    if (target == null) return 'No exercise is waiting for warm-ups.';
+    if (target.work.any((set) => set.done)) return 'Start warm-ups before completing this exercise’s working sets.';
+    if (target.loadMode != 'external') return 'Warm-up ramps require an external working load.';
+    if (session.warmupFor(target.name)?.sets.any((set) => set.done) == true) {
+      return 'Warm-ups are already underway. Use Show warm-up to return to them.';
     }
-    final warmups = <SessionExercise>[];
-    var hasWorkingLoad = false;
-    for (final exercise in session.exercises) {
-      if (exercise.loadMode != 'external') continue;
-      final source = exercise.work.where((set) => (set.weight ?? set.hintWeight ?? 0) > 0).firstOrNull;
-      if (source == null) continue;
-      hasWorkingLoad = true;
-      final usesBar = platesApply(exercise.name);
-      final ramp = warmupRamp(
-        source.weight ?? source.hintWeight!,
-        sets: sets,
-        increment: incrementFor(exercise.name, session.unit) ?? 0.5,
-        bar: usesBar ? plates(source.weight ?? source.hintWeight!, name: exercise.name).bar : 0,
-        plates: usesBar ? settings.plates : null,
-        pairs: usesBar ? settings.platePairs : null,
-      );
-      if (ramp.isEmpty) continue;
-      warmups.add(
-        SessionExercise(
-          name: exercise.name,
-          sets: [
-            for (final step in ramp)
-              SetEntry(
-                type: 'Warm-up',
-                weight: step.weight,
-                reps: step.reps,
-                rest: 60,
-                context: source.context,
-                prescribed: true,
-              ),
-          ],
-        ),
-      );
-    }
-    if (warmups.isEmpty) {
-      return hasWorkingLoad
-          ? 'No warm-up loads are available with this plate setup.'
-          : 'Enter working weights first, then start warm-ups.';
-    }
+    final source = target.work.where((set) => (set.weight ?? set.hintWeight ?? 0) > 0).firstOrNull;
+    if (source == null) return 'Enter a working weight for ${target.name} first.';
+    final usesBar = platesApply(target.name);
+    final ramp = warmupRamp(
+      source.weight ?? source.hintWeight!,
+      sets: sets,
+      increment: incrementFor(target.name, session.unit) ?? 0.5,
+      bar: usesBar ? plates(source.weight ?? source.hintWeight!, name: target.name).bar : 0,
+      plates: usesBar ? settings.plates : null,
+      pairs: usesBar ? settings.platePairs : null,
+    );
+    if (ramp.isEmpty) return 'No warm-up loads are available with this plate setup.';
+    session.warmupExercises.removeWhere((e) => e.name == target.name);
+    session.warmupExercises.add(
+      SessionExercise(
+        name: target.name,
+        sets: [
+          for (final step in ramp)
+            SetEntry(
+              type: 'Warm-up',
+              weight: step.weight,
+              reps: step.reps,
+              rest: 60,
+              context: source.context,
+              prescribed: true,
+            ),
+        ],
+      ),
+    );
     session
-      ..warmupExercises = warmups
+      ..warmupExercise = target.name
       ..warmingUp = true;
     _dismissRest();
     changed();
     return null;
   }
 
-  void showWorkoutPhase({required bool warmup}) {
+  void showWorkoutPhase({required bool warmup, String? exerciseName}) {
     final session = active;
     if (session == null || (warmup && session.warmupExercises.isEmpty)) return;
+    if (warmup) {
+      final target = exerciseName == null
+          ? session.warmupFor(session.warmupExercise ?? '') ?? session.warmupExercises.firstOrNull
+          : session.warmupFor(exerciseName);
+      if (target == null) return;
+      session.warmupExercise = target.name;
+      target.collapsed = false;
+    } else {
+      final working = session.exercises.where((e) => e.name == session.activeWarmup?.name).firstOrNull;
+      if (working != null && working.collapsed == true) working.collapsed = false;
+    }
     session.warmingUp = warmup;
     changed();
   }
 
   void _finishWarmupPhase() {
     final session = active;
-    if (session != null && session.warmingUp && (session.warmupExercises.isEmpty || session.warmupsComplete)) {
+    final warmup = session?.activeWarmup;
+    if (session != null && session.warmingUp && (warmup == null || warmup.sets.every((set) => set.done))) {
+      final name = warmup?.name ?? session.warmupExercise;
+      final working = session.exercises.where((e) => e.name == name).firstOrNull;
+      if (working != null && working.collapsed == true) working.collapsed = false;
       session.warmingUp = false;
     }
   }
@@ -984,8 +1188,59 @@ class AppStore extends ChangeNotifier {
       );
     }
     final e = SessionExercise(name: te.name, method: method, loadMode: loadMode, sets: sets);
+    final starting = _cycleStartingExercise(te.name, method, session);
+    if (starting != null) {
+      for (final (i, set) in e.sets.indexed) {
+        set.hintWeight = starting.sets[i].weight;
+      }
+    }
     _applyGuidance(e, session, cycle);
     return e;
+  }
+
+  /// A cloned starting plan applies only until this exercise has been trained in its new cycle.
+  /// Changed methods, roles or load meaning require a fresh baseline instead of reusing an old load.
+  SessionExercise? _cycleStartingExercise(String name, String method, Session session) {
+    final cycle = cycles.where((c) => c.id == session.cycleId).firstOrNull;
+    if (cycle == null || session.phase != 'Build') return null;
+    if (history.any(
+      (s) =>
+          s.cycleId == cycle.id &&
+          s.templateId == session.templateId &&
+          s.phase != 'Deload' &&
+          s.exercises.any(
+            (e) => e.name.toLowerCase() == name.toLowerCase() && e.method == method && e.work.any((set) => set.done),
+          ),
+    )) {
+      return null;
+    }
+    final starting = cycle.startingLoads[session.templateId]
+        ?.where((e) => e.name.toLowerCase() == name.toLowerCase() && e.method == method)
+        .firstOrNull;
+    final plan = template(
+      session.templateId,
+    )?.exercises.where((e) => e.name.toLowerCase() == name.toLowerCase()).firstOrNull;
+    if (starting == null ||
+        plan == null ||
+        canonicalMethod(plan.method) != method ||
+        starting.sets.length != plan.sets.length ||
+        starting.loadMode != (exercise(name)?.loadMode ?? defaultLoadModeFor(name))) {
+      return null;
+    }
+    for (final (i, set) in plan.sets.indexed) {
+      final seed = starting.sets[i];
+      if (canonicalSetType(set.type) != canonicalSetType(seed.type) ||
+          set.groupStart != seed.groupStart ||
+          contextFor(name, set) != seed.context) {
+        return null;
+      }
+    }
+    return SessionExercise(
+      name: name,
+      method: method,
+      loadMode: starting.loadMode,
+      sets: [for (final set in starting.sets) _inUnit(set, cycle.startingLoadUnit, session.unit)],
+    );
   }
 
   /// Progression, calibration and the advice lines shown under an exercise.
@@ -996,7 +1251,9 @@ class AppStore extends ChangeNotifier {
     final contextError = contextProblem(e.sets);
     Recommendation? rec;
     if (inBuild && e.loadMode == 'external') {
-      final previous = _latestMethodSession(e.name, method, session.templateId);
+      final previous = _cycleStartingExercise(e.name, method, session) == null
+          ? _latestMethodSession(e.name, method, session.templateId)
+          : null;
       final straightOk = method != 'Straight' || _straightGuidanceAllowed(e);
       if (previous != null && straightOk) {
         rec = recommend(
@@ -1091,6 +1348,19 @@ class AppStore extends ChangeNotifier {
   Calibration? calibrationFor(String name, String method, Session session) {
     final info = exercise(name);
     if (info != null && info.loadMode != 'external') return null;
+    final starting = _cycleStartingExercise(
+      name,
+      method,
+      session,
+    )?.sets.where((s) => calibrationAnchor(method, s.type) && (s.weight ?? 0) > 0).firstOrNull;
+    if (starting != null) {
+      final reps = method == 'Cluster'
+          ? clusterTargetReps
+          : method == 'Straight'
+          ? ((info?.repMin ?? lowRepLimit) + (info?.repMax ?? highRepLimit)) ~/ 2
+          : calibrationTargetReps;
+      return Calibration(starting.weight!, reps, session.targetRir, method != 'Cluster');
+    }
     SetEntry? latest;
     search:
     for (final s in history) {
@@ -1443,7 +1713,9 @@ class AppStore extends ChangeNotifier {
     final s = active!;
     final set = e.sets[index];
     final warmup = s.warmupExercises.contains(e);
-    if (s.warmingUp != warmup) return const CompleteResult.blocked('Switch workout phase before editing these sets.');
+    if (!s.visibleExercises.contains(e)) {
+      return const CompleteResult.blocked('Show this exercise’s sets before editing them.');
+    }
     if (set.done) {
       set
         ..done = false
@@ -1627,7 +1899,7 @@ class AppStore extends ChangeNotifier {
       exercise: exercise,
       setIndex: setIndex,
       countdown: settings.defaultTimerDisplay == 'countdown',
-      warmup: active?.warmingUp ?? false,
+      warmup: active?.activeWarmup?.name == exercise,
     );
     _syncAlerts();
   }

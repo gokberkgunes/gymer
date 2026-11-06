@@ -585,6 +585,7 @@ class Session {
   List<ExerciseCircuit> circuits;
   List<SessionExercise> warmupExercises;
   bool warmingUp;
+  String? warmupExercise;
   String? cycleId;
   int? microcycle;
   String? phase;
@@ -608,6 +609,7 @@ class Session {
     List<ExerciseCircuit>? circuits,
     List<SessionExercise>? warmupExercises,
     this.warmingUp = false,
+    this.warmupExercise,
     this.cycleId,
     this.microcycle,
     this.phase,
@@ -620,9 +622,23 @@ class Session {
   }) : circuits = circuits ?? [],
        warmupExercises = warmupExercises ?? [];
 
-  List<SessionExercise> get visibleExercises => warmingUp ? warmupExercises : exercises;
+  SessionExercise? warmupFor(String name) => warmupExercises.where((e) => e.name == name).firstOrNull;
+  bool isWarmupExercise(SessionExercise exercise) => warmupExercises.contains(exercise);
+
+  SessionExercise? get activeWarmup {
+    if (!warmingUp) return null;
+    if (warmupExercise != null) return warmupFor(warmupExercise!);
+    // Older sessions stored a whole-workout phase without a selected exercise.
+    return warmupExercises.where((e) => !e.complete).firstOrNull ?? warmupExercises.firstOrNull;
+  }
+
+  List<SessionExercise> get visibleExercises {
+    final warmup = activeWarmup;
+    return [for (final exercise in exercises) warmup?.name == exercise.name ? warmup! : exercise];
+  }
+
   List<SetEntry> visibleSetsFor(SessionExercise exercise) =>
-      !warmingUp && warmupExercises.isNotEmpty ? exercise.work : exercise.sets;
+      !isWarmupExercise(exercise) && warmupFor(exercise.name) != null ? exercise.work : exercise.sets;
   bool get warmupsComplete =>
       warmupExercises.isNotEmpty && warmupExercises.every((exercise) => exercise.sets.every((set) => set.done));
 
@@ -663,6 +679,7 @@ class Session {
     if (circuits.isNotEmpty) 'circuits': circuits.map((c) => c.toJson()).toList(),
     if (warmupExercises.isNotEmpty) 'warmupExercises': warmupExercises.map((e) => e.toJson()).toList(),
     if (warmingUp) 'warmingUp': true,
+    if (warmupExercise != null) 'warmupExercise': warmupExercise,
   };
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
@@ -687,6 +704,7 @@ class Session {
       for (final e in j['warmupExercises'] as List? ?? []) SessionExercise.fromJson(e as Map<String, dynamic>),
     ],
     warmingUp: j['warmingUp'] as bool? ?? false,
+    warmupExercise: j['warmupExercise'] as String?,
   );
 }
 
@@ -807,6 +825,9 @@ class Mesocycle {
   bool restLock;
   bool active;
   bool setupComplete;
+  DateTime? endedAt;
+  String startingLoadUnit;
+  Map<String, List<SessionExercise>> startingLoads;
   Map<int, String> schedule;
   Map<String, DayEvent> events;
 
@@ -829,9 +850,13 @@ class Mesocycle {
     this.restLock = false,
     this.active = true,
     this.setupComplete = true,
+    this.endedAt,
+    this.startingLoadUnit = 'kg',
+    Map<String, List<SessionExercise>>? startingLoads,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
-  }) : weekRir = weekRir ?? {},
+  }) : startingLoads = startingLoads ?? {},
+       weekRir = weekRir ?? {},
        schedule = schedule ?? {},
        events = events ?? {};
 
@@ -859,6 +884,11 @@ class Mesocycle {
     'restLock': restLock,
     'active': active,
     if (!setupComplete) 'setupComplete': false,
+    if (endedAt != null) 'endedAt': dateKey(endedAt!),
+    if (startingLoads.isNotEmpty) ...{
+      'startingLoadUnit': startingLoadUnit,
+      'startingLoads': {for (final e in startingLoads.entries) e.key: e.value.map((x) => x.toJson()).toList()},
+    },
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
   };
@@ -882,6 +912,12 @@ class Mesocycle {
     restLock: j['restLock'] as bool? ?? false,
     active: j['active'] as bool? ?? true,
     setupComplete: j['setupComplete'] as bool? ?? true,
+    endedAt: j['endedAt'] == null ? null : DateTime.parse(j['endedAt'] as String),
+    startingLoadUnit: j['startingLoadUnit'] as String? ?? 'kg',
+    startingLoads: {
+      for (final e in (j['startingLoads'] as Map? ?? {}).entries)
+        e.key as String: [for (final x in e.value as List) SessionExercise.fromJson(x as Map<String, dynamic>)],
+    },
     schedule: {for (final e in (j['schedule'] as Map? ?? {}).entries) int.parse('${e.key}'): e.value as String},
     events: {
       for (final e in (j['events'] as Map? ?? {}).entries)

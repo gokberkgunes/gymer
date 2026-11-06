@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymer/logic/circuits.dart';
 import 'package:gymer/logic/warmup.dart';
 import 'package:gymer/main.dart';
 import 'package:gymer/models.dart';
@@ -128,7 +129,76 @@ void main() {
     store.dispose();
   });
 
-  testWidgets('workout shows only the warm-up rows, then replaces them with working rows', (tester) async {
+  test('warm-ups replace one exercise, allow other working sets, and resume the selected exercise', () async {
+    final store = await rampStore();
+    final copy = AppStore();
+    addTearDown(store.dispose);
+    addTearDown(copy.dispose);
+    store.templates.single.exercises.add(
+      TemplateExercise(name: 'Row', sets: [for (var i = 0; i < 2; i++) TemplateSet(weight: 40, reps: 8)]),
+    );
+    store.startSession(store.templates.single);
+    final session = store.active!;
+    final press = session.exercises.first, row = session.exercises.last;
+    expect(store.startWarmups(sets: 2, exerciseName: press.name), isNull);
+    final warmup = session.activeWarmup!;
+    expect(session.visibleExercises, [warmup, row]);
+    expect(store.toggleSet(row, 0).ok, isTrue);
+    expect(store.rest?.warmup, isFalse);
+    expect(session.activeWarmup, warmup);
+    for (var i = 0; i < warmup.sets.length; i++) {
+      expect(store.toggleSet(warmup, i).ok, isTrue);
+    }
+    expect(session.visibleExercises, [press, row]);
+    expect(store.rest?.warmup, isTrue);
+    store.toggleSet(press, 0);
+    // Other exercises can start their ramp after working sets have been logged elsewhere.
+    store.toggleSet(row, 0);
+    expect(store.startWarmups(sets: 2, exerciseName: row.name), isNull);
+    store.toggleSet(session.activeWarmup!, 0);
+    await copy.importJson(jsonEncode(store.toJson()));
+    final resumed = copy.active!;
+    expect(resumed.warmupExercise, 'Row');
+    expect(resumed.visibleExercises.first, resumed.exercises.first);
+    expect(resumed.visibleExercises.last, resumed.activeWarmup);
+    expect(resumed.exercises.first.sets.first.done, isTrue);
+    expect(resumed.activeWarmup!.sets.first.done, isTrue);
+    expect(copy.rest?.warmup, isTrue);
+  });
+
+  test('a linked warm-up keeps its partner visible without exposing its own working sets', () async {
+    final store = await rampStore(manualWarmup: true);
+    addTearDown(store.dispose);
+    store.templates.single
+      ..exercises.add(
+        TemplateExercise(
+          name: 'Row',
+          sets: [
+            TemplateSet(type: 'Warm-up', weight: 10, reps: 8),
+            TemplateSet(weight: 40, reps: 8),
+          ],
+        ),
+      )
+      ..circuits.add(ExerciseCircuit(id: 'a', exercises: ['Ramp press', 'Row'], rest: 90));
+    store.startSession(store.templates.single);
+    store.startWarmups(sets: 2);
+    final session = store.active!;
+    final press = session.exercises.first, row = session.exercises.last;
+    final warmup = session.activeWarmup!;
+    expect(exerciseBlocks(session).single, [warmup, row]);
+    expect(session.visibleSetsFor(row).first.warmup, isTrue);
+    expect(session.visibleSetsFor(press).any((set) => set.warmup), isFalse);
+    expect(sessionSteps(session).where((step) => step.exercise == press).every((step) => !step.set.warmup), isTrue);
+    expect(sessionSteps(session).where((step) => step.exercise == row).first.set.warmup, isTrue);
+    expect(nextCircuitStep(session, row)?.exercise, warmup);
+    store.toggleSet(warmup, 0);
+    store.toggleSet(warmup, 1);
+    expect(session.visibleExercises, [press, row]);
+    expect(session.doneSets, 0);
+    expect(store.templateChanged(), isFalse);
+  });
+
+  testWidgets('an exercise replaces its warm-up rows with working rows when finished', (tester) async {
     final store = await rampStore();
     await tester.pumpWidget(GymerApp(store: store));
     await tester.tap(find.text('Ramp test'));

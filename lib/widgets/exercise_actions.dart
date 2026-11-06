@@ -8,6 +8,7 @@ const exerciseActions = <(String, String, IconData)>[
   ('details', 'Exercise details', Icons.info_outline_rounded),
   ('exerciseNote', 'Exercise note', Icons.sticky_note_2_outlined),
   ('circuit', 'Superset / circuit', Icons.link_rounded),
+  ('warmup', 'Warm-up / working sets', Icons.local_fire_department_outlined),
   ('notes', 'Set notes', Icons.notes_rounded),
   ('moveUp', 'Move up', Icons.arrow_upward_rounded),
   ('moveDown', 'Move down', Icons.arrow_downward_rounded),

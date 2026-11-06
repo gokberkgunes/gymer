@@ -9,7 +9,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
-import 'cycle.dart';
+import 'cycle_summary.dart';
 import 'finish.dart';
 import 'progress.dart';
 import 'session.dart' show pickSetType, showSetDetails;
@@ -187,7 +187,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         '${c.length} ${c.periodNoun(plural: c.length != 1)}',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => editPastCycle(context, c),
+                      onTap: () => openCycleSummary(context, c),
                     ),
                   ],
                 ],

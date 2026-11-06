@@ -3,12 +3,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../logic/cycle.dart';
+import '../logic/numbers.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'history.dart';
 import 'home.dart';
+import 'cycle_summary.dart';
 
 class CycleScreen extends StatelessWidget {
   const CycleScreen({super.key});
@@ -34,6 +36,7 @@ class CycleScreen extends StatelessWidget {
                   if (v == 'edit') editCycle(context, cycle);
                   if (v == 'rir') editWeeklyRir(context, cycle);
                   if (v == 'extend') _extend(context, store, cycle);
+                  if (v == 'summary') openCycleSummary(context, cycle);
                   if (v == 'end' &&
                       await confirm(
                         context,
@@ -42,10 +45,11 @@ class CycleScreen extends StatelessWidget {
                         action: 'End',
                       )) {
                     store.endCycle(cycle);
-                    if (context.mounted) notify(context, 'Mesocycle ended.');
+                    if (context.mounted) openCycleSummary(context, cycle);
                   }
                 },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'summary', child: Text('Cycle summary')),
                   PopupMenuItem(value: 'edit', child: Text('Edit settings')),
                   PopupMenuItem(value: 'rir', child: Text('Edit weekly RIR')),
                   PopupMenuItem(value: 'extend', child: Text('Extend mesocycle')),
@@ -56,6 +60,8 @@ class CycleScreen extends StatelessWidget {
         ),
         if (cycle == null)
           const _Empty()
+        else if (pending == null && cycleStatus(cycle).phase == 'Complete')
+          CycleSummaryContent(cycle: cycle)
         else ...[
           if (pending != null) _SetupBanner(cycle: pending),
           CycleStatusCard(cycle: cycle),
@@ -90,8 +96,7 @@ class CycleScreen extends StatelessWidget {
                   ListTile(
                     title: Text(c.name),
                     subtitle: Text('${fmtShortDate(c.start)} · ${c.length} × ${c.microDays} days'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => editPastCycle(context, c),
+                    onTap: () => openCycleSummary(context, c),
                   ),
                 ],
               ],
@@ -553,7 +558,8 @@ class _RirStrip extends StatelessWidget {
 
 class _Schedule extends StatelessWidget {
   final Mesocycle cycle;
-  const _Schedule({required this.cycle});
+  final VoidCallback? onChanged;
+  const _Schedule({required this.cycle, this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -574,7 +580,7 @@ class _Schedule extends StatelessWidget {
                 } else {
                   cycle.schedule[d] = id;
                 }
-                store.changed();
+                (onChanged ?? store.changed)();
               },
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: context.style.sp(12)),
@@ -1091,6 +1097,18 @@ void editPastCycle(BuildContext context, Mesocycle cycle) {
   );
 }
 
+Future<bool> startNextCycle(BuildContext context, Mesocycle source) async {
+  final store = StoreScope.read(context);
+  final draft = store.cloneCycle(source);
+  return await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => CycleEditor(cycle: draft, isNew: true, cloneSource: source),
+        ),
+      ) ??
+      false;
+}
+
 /// Mirrors deloads.effort_error(): deload effort must be easier than the final build week.
 String? deloadEffortError(Mesocycle c) {
   if (c.deloadMicro >= c.length) return 'Keep at least one build week.';
@@ -1108,8 +1126,16 @@ class CycleEditor extends StatefulWidget {
   final Mesocycle cycle;
   final bool isNew;
   final bool past;
+  final Mesocycle? cloneSource;
   final void Function(Mesocycle)? onCreated;
-  const CycleEditor({super.key, required this.cycle, required this.isNew, this.onCreated, this.past = false});
+  const CycleEditor({
+    super.key,
+    required this.cycle,
+    required this.isNew,
+    this.onCreated,
+    this.past = false,
+    this.cloneSource,
+  });
 
   @override
   State<CycleEditor> createState() => _CycleEditorState();
@@ -1118,6 +1144,7 @@ class CycleEditor extends StatefulWidget {
 class _CycleEditorState extends State<CycleEditor> {
   late final Mesocycle _d = Mesocycle.fromJson(widget.cycle.toJson());
   late final _name = TextEditingController(text: _d.name);
+  int _loadPercent = 100;
 
   @override
   void dispose() {
@@ -1156,6 +1183,18 @@ class _CycleEditorState extends State<CycleEditor> {
     final store = StoreScope.read(context);
     if (widget.isNew) {
       _apply(_d);
+      if (widget.cloneSource != null) {
+        _d.schedule.removeWhere((_, id) => store.template(id) == null);
+        if (_d.schedule.isEmpty) {
+          return notify(context, 'Assign at least one workout day before starting the mesocycle.');
+        }
+        _d
+          ..setupComplete = true
+          ..startingLoads.removeWhere((id, _) => !_d.schedule.containsValue(id));
+        store.saveCycle(_d);
+        Navigator.pop(context, true);
+        return;
+      }
       widget.onCreated?.call(_d);
     } else {
       _apply(widget.cycle);
@@ -1243,11 +1282,26 @@ class _CycleEditorState extends State<CycleEditor> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(context)),
-        title: Text(widget.isNew ? 'New mesocycle' : (widget.past ? 'Previous mesocycle' : 'Edit mesocycle')),
+        title: Text(
+          widget.cloneSource != null
+              ? 'Next mesocycle'
+              : widget.isNew
+              ? 'New mesocycle'
+              : (widget.past ? 'Previous mesocycle' : 'Edit mesocycle'),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: TextButton(onPressed: error == null ? _save : null, child: Text(widget.isNew ? 'Next' : 'Save')),
+            child: TextButton(
+              onPressed: error == null ? _save : null,
+              child: Text(
+                widget.cloneSource != null
+                    ? 'Start'
+                    : widget.isNew
+                    ? 'Next'
+                    : 'Save',
+              ),
+            ),
           ),
         ],
       ),
@@ -1258,6 +1312,32 @@ class _CycleEditorState extends State<CycleEditor> {
             controller: _name,
             decoration: const InputDecoration(labelText: 'Mesocycle name'),
           ),
+          if (widget.cloneSource != null) ...[
+            const SectionLabel('Starting loads'),
+            _StartingLoadSetup(
+              draft: _d,
+              percent: _loadPercent,
+              onChanged: (percent) => setState(() {
+                _loadPercent = percent;
+                _d
+                  ..startingLoadUnit = store.settings.unit
+                  ..startingLoads = store.cycleStartingLoads(widget.cloneSource!, loadPercent: percent);
+              }),
+            ),
+            SectionLabel('Repeating ${_d.microDays}-day schedule'),
+            _Schedule(cycle: _d, onChanged: () => setState(() {})),
+            SectionLabel(
+              'Weekly RIR',
+              trailing: TextButton(
+                onPressed: () async {
+                  await editWeeklyRir(context, _d);
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Edit'),
+              ),
+            ),
+            _RirStrip(cycle: _d),
+          ],
           const SectionLabel('Structure'),
           group([
             ListTile(
@@ -1328,7 +1408,7 @@ class _CycleEditorState extends State<CycleEditor> {
               child: Text(
                 'Weight kept is based on your last matching workout before deload. For example, 90% of 100 '
                 '${store.settings.unit} is about 90 ${store.settings.unit}. Sets kept is a percentage of planned working '
-                'sets; the result rounds down, with at least one set: 50% of 3 sets becomes 1. Intensifier and cluster '
+                'sets; the result rounds to the nearest set, with at least one set: 50% of 3 sets becomes 2. Intensifier and cluster '
                 'methods normally become one straight set.',
                 style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
@@ -1374,8 +1454,111 @@ class _CycleEditorState extends State<CycleEditor> {
   }
 }
 
-void editWeeklyRir(BuildContext context, Mesocycle cycle) {
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => WeeklyRirEditor(cycle: cycle)));
+class _StartingLoadSetup extends StatelessWidget {
+  final Mesocycle draft;
+  final int percent;
+  final ValueChanged<int> onChanged;
+  const _StartingLoadSetup({required this.draft, required this.percent, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final plans = draft.startingLoads.entries.where((e) => draft.schedule.containsValue(e.key)).toList();
+    return Card(
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: context.style.sp(8)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: LabelWithInfo(
+                    const Text('Last build loads'),
+                    InfoDot(
+                      tooltip: 'Starting loads',
+                      onTap: () => _infoDialog(context, 'Starting loads', const [
+                        (
+                          '',
+                          'Scale the last compatible build loads from the previous cycle. Saved workout defaults are used when there is no matching history; unknown loads stay blank. Loads round down to available plates or the exercise increment, with the bar as the minimum. Bodyweight and assisted exercises are unchanged. This applies only to the first workout of each exercise in the new cycle; calibration and later progression still work as usual.',
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: percent > 50 ? () => onChanged(percent - 5) : null,
+                  icon: const Icon(Icons.remove_rounded),
+                ),
+                SizedBox(
+                  width: 52,
+                  child: Text(
+                    '$percent%',
+                    textAlign: TextAlign.center,
+                    style: t.titleMedium?.copyWith(fontFeatures: tabular),
+                  ),
+                ),
+                IconButton(
+                  onPressed: percent < 150 ? () => onChanged(percent + 5) : null,
+                  icon: const Icon(Icons.add_rounded),
+                ),
+              ],
+            ),
+          ),
+          if (plans.isNotEmpty)
+            ExpansionTile(
+              title: const Text('View loads'),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              children: [
+                for (final plan in plans) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        store.template(plan.key)?.name ?? 'Workout',
+                        style: t.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  ),
+                  for (final exercise in plan.value)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              exercise.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.bodyMedium,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Text(
+                              '${exercise.work.where((s) => s.weight != null).map((s) => formatNumber(s.weight!, NumKind.weight)).toSet().join(' / ')} ${draft.startingLoadUnit}',
+                              textAlign: TextAlign.right,
+                              style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> editWeeklyRir(BuildContext context, Mesocycle cycle) {
+  return Navigator.of(context).push(MaterialPageRoute(builder: (_) => WeeklyRirEditor(cycle: cycle)));
 }
 
 /// Per-week RIR targets with the Steady and "Ramp 4 → 1" presets.
