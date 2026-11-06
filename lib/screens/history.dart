@@ -419,6 +419,9 @@ class _SessionEditorState extends State<SessionEditor> {
     setState(() {
       final old = _s.startedAt;
       _s.startedAt = DateTime(picked.year, picked.month, picked.day, old.hour, old.minute);
+      // Keep the recorded duration: finish moves with the start.
+      final end = _s.finishedAt;
+      if (end != null) _s.finishedAt = end.add(_s.startedAt.difference(old));
     });
   }
 
@@ -664,6 +667,7 @@ class _SessionEditorState extends State<SessionEditor> {
             Padding(
               padding: const EdgeInsets.only(left: 50, top: 2),
               child: TextFormField(
+                key: ObjectKey(set),
                 initialValue: set.note,
                 decoration: const InputDecoration(hintText: 'Note'),
                 onChanged: (v) => set.note = v,

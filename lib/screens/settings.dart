@@ -813,6 +813,7 @@ Future<void> _editPlatePairs(BuildContext context, double plate) async {
       final pairs = unit == 'lb' ? profile.pairsLb : profile.pairsKg;
       if (count == 0) {
         plates.remove(plate);
+        pairs.remove(plate); // re-adding the size later starts from the default again
       } else {
         pairs[plate] = count;
       }

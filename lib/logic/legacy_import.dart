@@ -80,7 +80,7 @@ Map<String, String> readBackupZip(List<int> bytes) {
   final files = <String, String>{};
   for (final f in archive.files) {
     if (!f.isFile) continue;
-    files[f.name.split('/').last] = utf8.decode(f.content, allowMalformed: true);
+    files[f.name.split(RegExp(r'[\\/]')).last] = utf8.decode(f.content, allowMalformed: true);
   }
   if (!files.containsKey('workouts.csv') && !files.containsKey('sets.csv')) {
     throw const FormatException('This ZIP is not a GYMER backup.');
@@ -104,7 +104,19 @@ String? _text(String? v) => (v ?? '').trim().isEmpty ? null : v!.trim();
 
 const _accentNames = {'purple': 0, 'green': 1, 'orange': 2, 'red': 2, 'blue': 3, 'teal': 4, 'pink': 5};
 
+/// Converts a Flet backup. A file with unexpected columns or values gets a plain message instead of a
+/// null-check error; nothing has been replaced at this point.
 LegacyData convertLegacy(Map<String, String> files) {
+  try {
+    return _convertLegacy(files);
+  } on FormatException {
+    rethrow;
+  } on Error catch (e) {
+    throw FormatException('This backup does not look like a complete GYMER export ($e).');
+  }
+}
+
+LegacyData _convertLegacy(Map<String, String> files) {
   List<Map<String, String>> csv(String name) => files[name] == null ? const [] : parseCsv(files[name]!);
   final notes = <String>[];
   final s = {for (final r in csv('settings.csv')) r['key']!: r['value'] ?? ''};
@@ -178,7 +190,7 @@ LegacyData convertLegacy(Map<String, String> files) {
                         for (final t in perSet)
                           TemplateSet(
                             type: canonicalSetType(t['set_type']),
-                            weight: _weightIn(t['weight'], t['weight_unit'] ?? r['default_weight_unit'], unitSetting),
+                            weight: _weightIn(t['weight'], _text(t['weight_unit']) ?? r['default_weight_unit'], unitSetting),
                             reps: _int(t['reps']),
                             rest: _parseRest(t['rest_seconds']) ?? rest,
                             groupStart: t['protocol_group_start'] == '1',
@@ -212,12 +224,17 @@ LegacyData convertLegacy(Map<String, String> files) {
     // planned rows are kept so History shows what was missed.
     if (!rows.any((r) => r['completed'] != '0')) continue;
     final first = rows.first;
-    final unit = first['weight_unit'] == 'lb' ? 'lb' : 'kg';
+    final unit = (first['weight_unit'] ?? '').trim().toLowerCase() == 'lb' ? 'lb' : 'kg';
     final start = DateTime.parse(first['date']!);
-    final byExercise = <String, List<Map<String, String>>>{};
+    // The same exercise done twice with different methods (e.g. straight sets then a back-off block)
+    // stays two entries instead of being merged and re-sorted together.
+    final byExercise = <(String, String), List<Map<String, String>>>{};
     for (final r in rows) {
-      byExercise.putIfAbsent(r['exercise_name'] ?? '', () => []).add(r);
+      byExercise.putIfAbsent((r['exercise_name'] ?? '', canonicalMethod(r['training_method'])), () => []).add(r);
     }
+    final seconds = _int(
+      first['duration_seconds'] ?? first['session_seconds'] ?? first['elapsed_seconds'] ?? first['clock_seconds'],
+    );
     history.add(
       Session(
         id: id,
@@ -225,13 +242,13 @@ LegacyData convertLegacy(Map<String, String> files) {
         name: _text(first['workout_name']) ?? 'Workout',
         unit: unit,
         startedAt: start,
-        finishedAt: start,
+        finishedAt: seconds != null && seconds > 0 ? start.add(Duration(seconds: seconds)) : start,
         cycleId: _text(first['cycle_id']),
         microcycle: _int(first['cycle_microcycle']),
         phase: _text(first['cycle_phase']),
         targetRir: _int(first['cycle_target_rir']),
         exercises: [
-          for (final MapEntry(key: name, value: sets) in byExercise.entries)
+          for (final MapEntry(key: (name, _), value: sets) in byExercise.entries)
             SessionExercise(
               name: name,
               method: canonicalMethod(sets.first['training_method']),
@@ -399,7 +416,7 @@ int? _parseRest(String? raw) {
 double? _weightIn(String? raw, String? from, String to) {
   final w = _num(raw);
   if (w == null) return null;
-  final src = from == 'lb' ? 'lb' : 'kg';
+  final src = (from ?? '').trim().toLowerCase() == 'lb' ? 'lb' : 'kg';
   return src == to ? w : (src == 'kg' ? w * 2.2046226218 : w / 2.2046226218);
 }
 

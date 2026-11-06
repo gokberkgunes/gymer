@@ -127,6 +127,7 @@ class CycleDay {
 
 List<CycleDay> calendarDays(Mesocycle c, List<Session> history) {
   final status = cycleStatus(c);
+  final micro = math.max(1, c.microDays); // same guard as cycleStatus: never divide by zero
   final byId = {for (final s in history) s.id: s};
   final linked = {for (final e in c.events.values) ?e.sessionId};
   final ownByDate = <String, List<Session>>{};
@@ -154,7 +155,7 @@ List<CycleDay> calendarDays(Mesocycle c, List<Session> history) {
       () {
         final date = addDays(status.start, i);
         final key = dateKey(date);
-        final dayIn = i % c.microDays + 1;
+        final dayIn = i % micro + 1;
         final event = c.events[key];
         final templateId = event?.templateId ?? c.schedule[dayIn];
         Session? session = event?.sessionId == null ? null : byId[event!.sessionId];
@@ -173,7 +174,7 @@ List<CycleDay> calendarDays(Mesocycle c, List<Session> history) {
         }
         return CycleDay(
           date: date,
-          micro: i ~/ c.microDays + 1,
+          micro: i ~/ micro + 1,
           dayInMicro: dayIn,
           templateId: templateId,
           status: st,

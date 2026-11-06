@@ -266,7 +266,6 @@ String? _qualityProblem(String method, List<SetEntry> work, int? expected, int? 
   final reps = [for (final w in work) w.reps ?? 0];
   if (weights.any((v) => v <= 0) || reps.any((v) => v <= 0)) return 'a segment has invalid load or reps';
   final setups = [for (final w in work) w.context.setup.trim()];
-  if (setups.any((v) => v.isEmpty)) return 'setup/variation is not recorded for every segment';
   if (plan != null) {
     if (plan.length != work.length || [for (final r in plan) canonicalSetType(r.type)].join('|') != roles.join('|')) {
       return 'the current segment sequence differs from the recorded protocol';
@@ -278,8 +277,8 @@ String? _qualityProblem(String method, List<SetEntry> work, int? expected, int? 
   final now = plan ?? work;
   for (var i = 0; i < work.length - 1; i++) {
     final intended = work[i].rest, actual = work[i].actualRest, current = now[i].rest;
-    if (actual == null) return 'inter-segment rest is unknown; record actual rest after each preceding segment';
-    if (actual != intended || current != intended) {
+    // Actual rest is optional: unknown is accepted, but a recorded or planned difference is not.
+    if ((actual != null && actual != intended) || current != intended) {
       return 'recorded or planned inter-segment rests differ; progress manually';
     }
   }
@@ -303,7 +302,8 @@ String? _qualityProblem(String method, List<SetEntry> work, int? expected, int? 
   if (method != 'Cluster') {
     final anchors = method == 'AMRAP' ? work : work.take(1);
     const knownStops = {'target_rir', 'technical_failure', 'muscular_failure'};
-    if (anchors.any((a) => !knownStops.contains(a.stopReason))) {
+    // An unrecorded stop reason is accepted; only an explicit unsafe or unclear one needs manual review.
+    if (anchors.any((a) => a.stopReason.isNotEmpty && !knownStops.contains(a.stopReason))) {
       return 'an anchor stop reason is unknown, safety-limited or requires manual review';
     }
     if (anchors.any((a) => a.stopReason == 'muscular_failure' && a.rir != null && a.rir != 0)) {

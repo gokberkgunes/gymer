@@ -662,7 +662,7 @@ class CycleHeatmap extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final days = calendarDays(cycle, store.history);
-    final perRow = cycle.microDays;
+    final perRow = math.max(1, cycle.microDays);
     const weekdays = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
     final cell = math.max(compact ? 12.0 : 10.0, math.min(28.0, 300 / perRow));
 
@@ -892,9 +892,14 @@ class CycleHeatmap extends StatelessWidget {
     } else if (action == 'move') {
       final picked = await showDatePicker(
         context: context,
-        initialDate: d.movedTo ?? dateOnly(DateTime.now()),
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
+        initialDate: (d.movedTo ?? dateOnly(DateTime.now())).isBefore(cycleStatus(cycle).start)
+            ? cycleStatus(cycle).start
+            : (d.movedTo ?? dateOnly(DateTime.now())).isAfter(cycleStatus(cycle).end)
+            ? cycleStatus(cycle).end
+            : (d.movedTo ?? dateOnly(DateTime.now())),
+        // A workout moved outside the cycle would vanish from its calendar.
+        firstDate: cycleStatus(cycle).start,
+        lastDate: cycleStatus(cycle).end,
       );
       if (picked == null) return;
       cycle.events[key] = DayEvent(templateId: d.templateId!, movedTo: dateKey(picked) == key ? null : picked);
@@ -1321,11 +1326,27 @@ class _CycleEditorState extends State<CycleEditor> {
                 _loadPercent = percent;
                 _d
                   ..startingLoadUnit = store.settings.unit
-                  ..startingLoads = store.cycleStartingLoads(widget.cloneSource!, loadPercent: percent);
+                  ..startingLoads = store.cycleStartingLoads(
+                    widget.cloneSource!,
+                    loadPercent: percent,
+                    templateIds: _d.schedule.values,
+                  );
               }),
             ),
             SectionLabel('Repeating ${_d.microDays}-day schedule'),
-            _Schedule(cycle: _d, onChanged: () => setState(() {})),
+            _Schedule(
+              cycle: _d,
+              onChanged: () => setState(() {
+                // A workout assigned to a day after the draft was made needs its own starting loads.
+                _d
+                  ..startingLoadUnit = store.settings.unit
+                  ..startingLoads = store.cycleStartingLoads(
+                    widget.cloneSource!,
+                    loadPercent: _loadPercent,
+                    templateIds: _d.schedule.values,
+                  );
+              }),
+            ),
             SectionLabel(
               'Weekly RIR',
               trailing: TextButton(

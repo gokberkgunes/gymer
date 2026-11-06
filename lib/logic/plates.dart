@@ -85,7 +85,7 @@ class _PlateStack {
   final int plate;
   final int count;
   final _PlateStack? previous;
-  const _PlateStack(this.plate, this.count, this.previous);
+  _PlateStack(this.plate, this.count, this.previous);
 
   /// Sorted heaviest first; cached because tie-breaking compares the same stacks many times.
   late final List<int> expanded = () {

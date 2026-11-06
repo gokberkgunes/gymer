@@ -57,7 +57,7 @@ void main() {
     );
   });
 
-  test('drop set progresses only with complete protocol evidence', () {
+  test('drop set progresses unless a recorded observation contradicts the protocol', () {
     const ctx = SetContext(setup: 'stack');
     List<SetEntry> drop({bool evidence = true}) => [
       SetEntry(
@@ -77,8 +77,11 @@ void main() {
     Recommendation run(List<SetEntry> rows) =>
         recommend(previous: rows, method: 'Drop Set', targetRir: 2, unit: 'kg', increment: 2.5)!;
 
-    // Unknown actual rest after the anchor: the gate holds the load.
-    expect(run(drop(evidence: false)).action, 'hold');
+    // Unknown actual rest is accepted; a recorded rest that differs from the plan holds the load.
+    expect(run(drop(evidence: false)).action, 'increase');
+    final differs = drop();
+    differs[0].actualRest = 30;
+    expect(run(differs).action, 'hold');
     final r = run(drop());
     expect(r.action, 'increase');
     expect(r.weight, greaterThan(100));

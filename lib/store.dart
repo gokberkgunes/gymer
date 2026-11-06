@@ -192,8 +192,16 @@ class AppStore extends ChangeNotifier {
       } catch (e) {
         debugPrint('gymer: unreadable data file, keeping a copy: $e');
         final copy = '${file.path}.corrupt-${DateTime.now().millisecondsSinceEpoch}';
-        await file.copy(copy);
-        unreadableCopy = copy;
+        try {
+          await file.copy(copy);
+          unreadableCopy = copy;
+        } catch (copyError) {
+          // Without a safe copy the unreadable file is the only trace of the user's data: leave it
+          // untouched rather than overwrite it with fresh data.
+          debugPrint('gymer: could not keep a copy of the unreadable data file: $copyError');
+          unreadableCopy = file.path;
+          _writesBlocked = true;
+        }
       }
     }
     exercises = List.of(seedExercises);
@@ -217,8 +225,8 @@ class AppStore extends ChangeNotifier {
     final newActive = j['active'] == null ? null : Session.fromJson(j['active'] as Map<String, dynamic>);
     // One damaged measurement must not make the whole data file unreadable; skip it.
     final newBodyweights = <String, BodyweightEntry>{
-      for (final entry in j['bodyweights'] as List? ?? [])
-        if (_tryBodyweight(entry) case final parsed?) dateKey(parsed.date): parsed,
+      for (final parsed in [for (final entry in j['bodyweights'] as List? ?? []) ?_tryBodyweight(entry)])
+        dateKey(parsed.date): parsed,
     }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
     final newRest = r == null || newActive == null ? null : RestTimer.fromJson(r as Map<String, dynamic>);
@@ -269,9 +277,12 @@ class AppStore extends ChangeNotifier {
     debugPrint('gymer: save failed: $e');
   });
 
+  /// Set when the unreadable data file could not be copied aside; nothing may overwrite it then.
+  bool _writesBlocked = false;
+
   Future<void> _write() async {
     final file = _file;
-    if (file == null) return;
+    if (file == null || _writesBlocked) return;
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(jsonEncode(toJson()), flush: true);
@@ -504,8 +515,17 @@ class AppStore extends ChangeNotifier {
     final e = name == null ? null : exercise(name);
     final own = unit == 'lb' ? e?.barLb : e?.barKg;
     final bar = own ?? (e?.equipment == 'Plate loaded' ? 0.0 : settings.bar);
-    return planPlates(target, bar, settings.plates, pairs: settings.platePairs);
+    final pairs = settings.platePairs;
+    // The inline bar asks on every rebuild; plans are pure, so remember the latest few.
+    final key = '$target|$bar|${settings.plates.join(',')}|${pairs?.entries.map((e) => '${e.key}x${e.value}').join(',')}';
+    final cached = _planCache.remove(key);
+    final plan = cached ?? planPlates(target, bar, settings.plates, pairs: pairs);
+    _planCache[key] = plan; // re-insert: most recently used last
+    if (_planCache.length > 64) _planCache.remove(_planCache.keys.first);
+    return plan;
   }
+
+  final _planCache = <String, PlatePlan>{};
 
   void addSetType(String name) {
     final n = name.trim();
@@ -710,7 +730,11 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Last compatible build loads of this cycle; absent loads stay unknown and are never guessed.
-  Map<String, List<SessionExercise>> cycleStartingLoads(Mesocycle source, {int loadPercent = 100}) {
+  Map<String, List<SessionExercise>> cycleStartingLoads(
+    Mesocycle source, {
+    int loadPercent = 100,
+    Iterable<String>? templateIds,
+  }) {
     if (loadPercent <= 0 || loadPercent > 200) throw ArgumentError.value(loadPercent, 'loadPercent');
     final sessions = _cycleSessions(source).reversed.where(
       (s) => s.phase == 'Build' || (s.phase == null && cycleStatus(source, s.startedAt).phase == 'Build'),
@@ -727,7 +751,7 @@ class AppStore extends ChangeNotifier {
     }
 
     final result = <String, List<SessionExercise>>{};
-    for (final id in source.schedule.values.toSet()) {
+    for (final id in (templateIds ?? source.schedule.values).toSet()) {
       final plan = template(id);
       if (plan == null) continue;
       final exercises = <SessionExercise>[];
@@ -1116,6 +1140,9 @@ class AppStore extends ChangeNotifier {
 
   /// Undo for [removeSet]: puts the same set back where it was.
   void restoreSet(SessionExercise e, int index, SetEntry set) {
+    // The snackbar can outlive the workout: never put a set into a saved or discarded one.
+    final session = active;
+    if (session == null || !(session.exercises.contains(e) || session.warmupExercises.contains(e))) return;
     e.sets.insert(index.clamp(0, e.sets.length), set);
     _reconcileSession(e);
     e.collapsed = false;
@@ -2500,7 +2527,6 @@ class AppStore extends ChangeNotifier {
     d.applySettings(newSettings);
     await _backupBeforeReplace();
     exercises = newExercises;
-    bodyweights = [];
     templates = d.templates.isEmpty ? seedTemplates() : d.templates;
     history = d.history;
     _seenAchievements = {
@@ -2511,6 +2537,7 @@ class AppStore extends ChangeNotifier {
     settings = newSettings;
     active = null;
     rest = null;
+    _writesBlocked = false; // the user chose what to keep
     _syncAlerts();
     changed();
     return [
@@ -2546,6 +2573,7 @@ class AppStore extends ChangeNotifier {
     _seenAchievements = incoming._seenAchievements;
     active = incoming.active;
     rest = incoming.rest;
+    _writesBlocked = false; // the user chose what to keep
     _syncAlerts();
     changed();
   }

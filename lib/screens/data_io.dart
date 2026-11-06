@@ -73,7 +73,13 @@ Future<void> restoreBackup(BuildContext context) async {
   final file = await FilePicker.pickFile();
   if (file == null || !context.mounted) return;
   try {
-    await store.importJson(utf8.decode(await file.readAsBytes()));
+    final String text;
+    try {
+      text = utf8.decode(await file.readAsBytes());
+    } on FormatException {
+      throw const FormatException('This file is not a Gymer backup.');
+    }
+    await store.importJson(text);
     if (context.mounted) _say(context, 'Backup restored.');
   } on FormatException catch (e) {
     if (context.mounted) _say(context, e.message);

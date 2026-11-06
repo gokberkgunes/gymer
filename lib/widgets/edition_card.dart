@@ -33,7 +33,7 @@ class TiltCard extends StatefulWidget {
 }
 
 class _TiltCardState extends State<TiltCard> with SingleTickerProviderStateMixin {
-  late final _back = AnimationController(vsync: this, duration: const Duration(milliseconds: 320))
+  late final AnimationController _back = AnimationController(vsync: this, duration: const Duration(milliseconds: 320))
     ..addListener(() => setState(() => _tilt = Offset.lerp(_from, Offset.zero, Curves.easeOutBack.transform(_back.value))!));
   Offset _tilt = Offset.zero;
   Offset _from = Offset.zero;

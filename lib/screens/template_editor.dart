@@ -149,6 +149,9 @@ class _TemplateEditorState extends State<TemplateEditor> {
   Future<void> _addExercise() async {
     final name = await pickExercise(context);
     if (name == null || !mounted) return;
+    if (_d.exercises.any((x) => x.name.toLowerCase() == name.toLowerCase())) {
+      return notify(context, '$name is already in this workout.');
+    }
     final s = _store.settings;
     setState(
       () => _d.exercises.add(
@@ -165,6 +168,9 @@ class _TemplateEditorState extends State<TemplateEditor> {
   Future<void> _chooseExercise(TemplateExercise e) async {
     final name = await pickExercise(context);
     if (name == null || !mounted || name.toLowerCase() == e.name.toLowerCase()) return;
+    if (_d.exercises.any((x) => x != e && x.name.toLowerCase() == name.toLowerCase())) {
+      return notify(context, '$name is already in this workout.');
+    }
     final latest = _store.previousSets(name);
     final context0 = _store.exercise(name)?.context ?? const SetContext();
     setState(() {
@@ -280,14 +286,18 @@ class _TemplateEditorState extends State<TemplateEditor> {
     );
     if (saved == true) {
       setState(() {
+        final before = s.context;
         s.context = inherit ? null : SetContext(setup: setup.text.trim(), loadBasis: load, repBasis: reps, side: side);
-        // A changed context clears the set's inherited load/rep defaults.
-        s
-          ..weight = null
-          ..reps = null;
+        // A changed context clears the set's inherited load/rep defaults; an unchanged one keeps them.
+        if (s.context != before) {
+          s
+            ..weight = null
+            ..reps = null;
+        }
       });
     }
-    setup.dispose();
+    // The dialog is still animating out; release the controller after it is gone.
+    WidgetsBinding.instance.addPostFrameCallback((_) => setup.dispose());
   }
 
   @override
@@ -370,7 +380,31 @@ class _TemplateEditorState extends State<TemplateEditor> {
               onChoose: () => _chooseExercise(e),
               onDetails: () async {
                 if (e.name.isEmpty) return _chooseExercise(e);
-                await openExerciseEditor(context, e.name);
+                final store = StoreScope.read(context);
+                final old = e.name;
+                final before = {for (final x in store.exercises) x.name};
+                final oldContext = store.exercise(old)?.context;
+                await openExerciseEditor(context, old);
+                if (!mounted) return;
+                // The editor changes the stored templates; this screen edits a copy, so follow its changes.
+                final now = store.exercise(old);
+                final renamed = now == null ? store.exercises.map((x) => x.name).where((n) => !before.contains(n)).firstOrNull : null;
+                if (renamed != null) {
+                  renameCircuitExercise(_d.circuits, old, renamed);
+                  for (final x in _d.exercises.where((x) => x.name == old)) {
+                    x.name = renamed;
+                  }
+                }
+                final current = store.exercise(renamed ?? old);
+                if (oldContext != null && current != null && current.context != oldContext) {
+                  for (final x in _d.exercises.where((x) => x.name == current.name)) {
+                    for (final set in x.sets.where((set) => set.context == null)) {
+                      set
+                        ..weight = null
+                        ..reps = null;
+                    }
+                  }
+                }
                 setState(() {});
               },
               onMove: (delta) => setState(() {

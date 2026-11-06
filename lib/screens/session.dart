@@ -28,6 +28,11 @@ import 'template_editor.dart';
 /// Focus nodes for one set's numeric fields.
 class _SetFocus {
   final weight = FocusNode(), reps = FocusNode(), rir = FocusNode();
+  FocusNode forField(String field) => switch (field) {
+    'weight' => weight,
+    'reps' => reps,
+    _ => rir,
+  };
   void dispose() {
     weight.dispose();
     reps.dispose();
@@ -82,7 +87,18 @@ class _SessionScreenState extends State<SessionScreen> {
     };
     if (v != null) s.accepted.add('$field:$v'); // Enter explicitly accepts an unusual value.
     final isLast = field == lastEditable(store, e, s);
-    if (isLast && !s.done && store.settings.enterCompletesSet) complete(store, e, index);
+    if (isLast && !s.done && store.settings.enterCompletesSet) {
+      if (!complete(store, e, index) && !s.done) {
+        // The set could not be completed: go back to the first empty box instead of moving on.
+        final missing = [
+          if (s.weight == null) focusOf(s).weight,
+          if (s.reps == null) focusOf(s).reps,
+          if (s.rir == null && rirEditable(store, e, s)) focusOf(s).rir,
+        ].firstOrNull;
+        (missing ?? focusOf(s).forField(field)).requestFocus();
+        return;
+      }
+    }
     if (!store.active!.visibleExercises.contains(e)) {
       FocusScope.of(context).unfocus();
       return;
@@ -121,13 +137,15 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
-  void complete(AppStore store, SessionExercise e, int index) {
+  /// Returns whether the set is now complete (or was just un-completed).
+  bool complete(AppStore store, SessionExercise e, int index) {
     final wasDone = e.sets[index].done;
     final result = store.toggleSet(e, index);
     if (result.message != null) notify(context, result.message!);
-    if (!result.ok || wasDone || store.active == null) return;
+    if (!result.ok) return false;
+    if (wasDone || store.active == null) return true;
     final next = nextCircuitStep(store.active!, e);
-    if (next == null) return;
+    if (next == null) return true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final target = keyOf(next.set).currentContext;
@@ -135,6 +153,7 @@ class _SessionScreenState extends State<SessionScreen> {
         Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 240), alignment: 0.25);
       }
     });
+    return true;
   }
 
   // ---- Actions ----
@@ -836,7 +855,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                       if (v == 'circuit') {
                         seconds = circuit!.rest;
                       } else if (v == 'timer') {
-                        seconds = store.rest!.totalSeconds;
+                        seconds = store.rest?.totalSeconds ?? seconds;
                       } else if (v != null) {
                         final values = {for (final i in scopes[v]!) e.sets[i].rest};
                         seconds = values.length == 1 ? values.first : -1;
@@ -1136,7 +1155,9 @@ class _ColumnHeader extends StatelessWidget {
     final style = Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600);
     final e = exercise;
     final rir = (store.active?.visibleSetsFor(e) ?? e.sets).any(
-      (s) => methodSetUsesRir(e.method, s.type) && (store.settings.trackRir || s.targetRir != null),
+      (s) =>
+          methodSetUsesRir(e.method, s.type) &&
+          (store.settings.trackRir || (e.calibrate && calibrationAnchor(e.method, s.type))),
     );
     final load = e.loadMode == 'external' ? unit.toUpperCase() : loadSuffix(e.loadMode, unit).toUpperCase();
     Widget cap(String text, int flex) => Expanded(
@@ -1240,7 +1261,7 @@ class _SetRow extends StatelessWidget {
     final weightKind = e.loadMode == 'external' ? NumKind.weight : NumKind.load;
     final rirVisible =
         methodSetUsesRir(e.method, s.type) &&
-        (store.settings.trackRir || s.targetRir != null || (e.calibrate && calibrationAnchor(e.method, s.type)));
+        (store.settings.trackRir || (e.calibrate && calibrationAnchor(e.method, s.type)));
     final number = s.warmup ? 'W${position + 1}' : '${e.sets.take(index + 1).where((x) => !x.warmup).length}';
 
     String? warning(NumKind kind, num? v) => v == null
@@ -1597,7 +1618,12 @@ Future<void> showSetDetails(
   int? linkedRest,
 }) async {
   final setup = TextEditingController(text: s.context.setup);
-  var load = s.context.loadBasis, reps = s.context.repBasis, side = s.context.side, stop = s.stopReason;
+  // Imported or older data may hold a value the pickers do not offer; show it as unset instead of asserting.
+  String known(String value, Map<String, String> options) => options.containsKey(value) ? value : '';
+  var load = known(s.context.loadBasis, SetContext.loadBasisLabels),
+      reps = known(s.context.repBasis, SetContext.repBasisLabels),
+      side = known(s.context.side, SetContext.sideLabels),
+      stop = known(s.stopReason, stopReasons);
   var rest = linkedRest ?? s.rest;
   final actual = TextEditingController(text: s.actualRest?.toString() ?? '');
   Widget dropdown(String label, String value, Map<String, String> options, ValueChanged<String> onChanged) =>
@@ -1681,8 +1707,11 @@ Future<void> showSetDetails(
       ..actualRest = int.tryParse(actual.text.trim());
     store.changed();
   }
-  setup.dispose();
-  actual.dispose();
+  // The dialog is still animating out; release the controllers once it is gone.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    setup.dispose();
+    actual.dispose();
+  });
 }
 
 class _CalibrationCard extends StatelessWidget {
