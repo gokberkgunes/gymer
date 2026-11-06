@@ -87,13 +87,14 @@ class _PlateStack {
   final _PlateStack? previous;
   const _PlateStack(this.plate, this.count, this.previous);
 
-  List<int> expanded() {
+  /// Sorted heaviest first; cached because tie-breaking compares the same stacks many times.
+  late final List<int> expanded = () {
     final result = <int>[];
     for (_PlateStack? stack = this; stack != null; stack = stack.previous) {
       result.addAll(List.filled(stack.count, stack.plate));
     }
     return result..sort((a, b) => b.compareTo(a));
-  }
+  }();
 }
 
 /// Fewest plates per side; ties prefer heavier plates. [pairs] limits the available pairs of each size
@@ -123,7 +124,7 @@ PlatePlan planPlates(double target, double bar, List<double> plates, {Map<double
   final count = List.filled(limit + 1, none)..[0] = 0;
   final stacks = List<_PlateStack?>.filled(limit + 1, null);
   bool heavier(_PlateStack candidate, _PlateStack current) {
-    final a = candidate.expanded(), b = current.expanded();
+    final a = candidate.expanded, b = current.expanded;
     for (var i = 0; i < a.length; i++) {
       if (a[i] != b[i]) return a[i] > b[i];
     }
@@ -148,7 +149,7 @@ PlatePlan planPlates(double target, double bar, List<double> plates, {Map<double
     }
   }
   PlateLoad load(int s) {
-    final side = [for (final plate in stacks[s]?.expanded() ?? <int>[]) plate / _grid];
+    final side = [for (final plate in stacks[s]?.expanded ?? <int>[]) plate / _grid];
     return PlateLoad(bar + 2 * s / _grid, side);
   }
 

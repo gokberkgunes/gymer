@@ -215,9 +215,10 @@ class AppStore extends ChangeNotifier {
     final newCycles = [for (final c in j['cycles'] as List? ?? []) Mesocycle.fromJson(c as Map<String, dynamic>)]
       ..removeWhere((c) => !c.setupComplete);
     final newActive = j['active'] == null ? null : Session.fromJson(j['active'] as Map<String, dynamic>);
+    // One damaged measurement must not make the whole data file unreadable; skip it.
     final newBodyweights = <String, BodyweightEntry>{
       for (final entry in j['bodyweights'] as List? ?? [])
-        dateKey(DateTime.parse((entry as Map<String, dynamic>)['date'] as String)): BodyweightEntry.fromJson(entry),
+        if (_tryBodyweight(entry) case final parsed?) dateKey(parsed.date): parsed,
     }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
     final newRest = r == null || newActive == null ? null : RestTimer.fromJson(r as Map<String, dynamic>);
@@ -237,6 +238,14 @@ class AppStore extends ChangeNotifier {
     bodyweights = newBodyweights;
     rest = newRest;
     _seenAchievements = newSeen;
+  }
+
+  static BodyweightEntry? _tryBodyweight(Object? entry) {
+    try {
+      return BodyweightEntry.fromJson(entry as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
   Map<String, dynamic> toJson() => {

@@ -62,13 +62,17 @@ class _PlatesSheetState extends State<_PlatesSheet> {
                     label:
                         '${w(load.total)} total. Plates on each side: '
                         '${plateGroups(load.perSide, groupRepeated: true).map((group) => '${group.count} × ${formatNumber(group.weight, NumKind.load)} $unit').join(', ')}',
-                    child: CustomPaint(
-                      painter: BarPainter(
+                    child: AnimatedPlateBar(
+                      plates: load.perSide,
+                      animateInitial: true,
+                      painter: (keep, t) => BarPainter(
                         plates: load.perSide,
                         heaviest: heaviest,
                         unit: unit,
                         bar: cs.onSurfaceVariant.withValues(alpha: 0.55),
                         groupRepeated: store.settings.groupRepeatedPlates,
+                        keep: keep,
+                        t: t,
                       ),
                     ),
                   ),
@@ -180,15 +184,17 @@ class PlateBar extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: CustomPaint(
-            size: Size.infinite,
-            painter: BarPainter(
+          child: AnimatedPlateBar(
+            plates: load?.perSide ?? const [],
+            painter: (keep, t) => BarPainter(
               plates: load?.perSide ?? const [],
               heaviest: store.settings.plates.fold(0.0, math.max),
               unit: unit,
               bar: cs.onSurfaceVariant.withValues(alpha: 0.55),
               compact: true,
               groupRepeated: store.settings.groupRepeatedPlates,
+              keep: keep,
+              t: t,
             ),
           ),
         ),
@@ -197,6 +203,63 @@ class PlateBar extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Draws a [BarPainter] and slides newly added plates onto the bar from the outer end. Plates already
+/// on the bar (the same leading plates as before) stay still, so small edits only move what changed.
+/// The sheet animates when it opens; the inline bar only when its load changes. Reduced motion skips it.
+class AnimatedPlateBar extends StatefulWidget {
+  final List<double> plates;
+  final bool animateInitial;
+  final BarPainter Function(int keep, double t) painter;
+  const AnimatedPlateBar({super.key, required this.plates, required this.painter, this.animateInitial = false});
+
+  @override
+  State<AnimatedPlateBar> createState() => _AnimatedPlateBarState();
+}
+
+class _AnimatedPlateBarState extends State<AnimatedPlateBar> with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 700), value: 1);
+  late int _keep = widget.animateInitial ? 0 : widget.plates.length;
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (widget.animateInitial && widget.plates.isNotEmpty && !MediaQuery.disableAnimationsOf(context)) {
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void didUpdateWidget(AnimatedPlateBar old) {
+    super.didUpdateWidget(old);
+    if (listEquals(old.plates, widget.plates)) return;
+    var common = 0;
+    while (common < old.plates.length && common < widget.plates.length && old.plates[common] == widget.plates[common]) {
+      common++;
+    }
+    _keep = common;
+    if (common < widget.plates.length && !MediaQuery.disableAnimationsOf(context)) {
+      _controller.forward(from: 0);
+    } else {
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (context, _) => CustomPaint(size: Size.infinite, painter: widget.painter(_keep, _controller.value)),
+  );
 }
 
 /// One side of the bar: the shaft and collar in grey, then the plates from the collar outwards, heaviest
@@ -210,6 +273,10 @@ class BarPainter extends CustomPainter {
   final Color bar;
   final bool compact;
   final bool groupRepeated;
+
+  /// Plates before this index are static; later ones slide in as [t] runs from 0 to 1.
+  final int keep;
+  final double t;
   BarPainter({
     required this.plates,
     required this.heaviest,
@@ -217,6 +284,8 @@ class BarPainter extends CustomPainter {
     required this.bar,
     this.compact = false,
     this.groupRepeated = false,
+    this.keep = 1 << 20,
+    this.t = 1,
   });
 
   @override
@@ -280,7 +349,30 @@ class BarPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     var x = collarX + 10;
+    var plateIndex = 0;
+    var newOrder = 0;
+    var firstNew = -1;
     for (final (index, group) in groups.indexed) {
+      if (plateIndex >= keep && firstNew < 0) firstNew = index;
+      plateIndex += group.count;
+    }
+    final fresh = firstNew < 0 ? 0 : groups.length - firstNew;
+    plateIndex = 0;
+    for (final (index, group) in groups.indexed) {
+      final isNew = plateIndex >= keep && t < 1;
+      plateIndex += group.count;
+      double slide = 1;
+      if (isNew) {
+        final start = newOrder++ * 0.5 / math.max(1, fresh);
+        slide = Curves.easeOutCubic.transform(((t - start) / 0.5).clamp(0.0, 1.0));
+        if (slide <= 0) {
+          x += thickness(group.weight) * scale + gap * scale;
+          continue;
+        }
+        canvas
+          ..saveLayer(null, Paint()..color = Color.fromRGBO(255, 255, 255, slide))
+          ..translate((1 - slide) * 36, 0);
+      }
       final p = group.weight;
       final (color, ink) = _plateColors[plateColorClass(p, unit)]!;
       final fill = Paint()..color = color;
@@ -328,6 +420,7 @@ class BarPainter extends CustomPainter {
         quantity.paint(canvas, Offset.zero);
         canvas.restore();
       }
+      if (isNew) canvas.restore();
       x += w + gap * scale;
     }
   }
@@ -335,6 +428,8 @@ class BarPainter extends CustomPainter {
   @override
   bool shouldRepaint(BarPainter old) =>
       old.compact != compact ||
+      old.keep != keep ||
+      old.t != t ||
       old.groupRepeated != groupRepeated ||
       !listEquals(old.plates, plates) ||
       old.unit != unit ||

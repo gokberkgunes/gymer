@@ -1023,6 +1023,14 @@ class PlateProfile {
   }
 }
 
+PlateProfile? _tryPlateProfile(Object? profile) {
+  try {
+    return PlateProfile.fromJson(profile as Map<String, dynamic>);
+  } catch (_) {
+    return null; // A damaged profile is dropped rather than making the data file unreadable.
+  }
+}
+
 class Settings {
   String unit;
   int defaultRest;
@@ -1284,9 +1292,7 @@ class Settings {
       barLb: _dbl(j['barLb']) ?? d.barLb,
       platesKg: _plates(j['platesKg'], formerPlatesKg),
       platesLb: _plates(j['platesLb'], formerPlatesLb),
-      plateProfiles: (j['plateProfiles'] as List?)
-          ?.map((profile) => PlateProfile.fromJson(profile as Map<String, dynamic>))
-          .toList(),
+      plateProfiles: (j['plateProfiles'] as List?)?.map(_tryPlateProfile).nonNulls.toList(),
       selectedPlateProfile: _str(j['selectedPlateProfile']).isEmpty ? 'gym' : j['selectedPlateProfile'] as String,
       groupRepeatedPlates: b('groupRepeatedPlates', d.groupRepeatedPlates),
       accent: _int(j['accent']) ?? d.accent,

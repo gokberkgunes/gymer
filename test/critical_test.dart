@@ -47,6 +47,34 @@ void main() {
     final unavailable = planPlates(100, 20, [20, 15], pairs: inventory);
     expect(unavailable.exact, isNull); // There is only one pair of 20s.
     expect((unavailable.below!.total, unavailable.above!.total), (90, 120));
+    // Heavy loads stay cheap to plan, and ties prefer the heavier plate.
+    expect(planPlates(310, 20, [20, 10, 5, 2.5, 1.25]).exact!.perSide, [...List.filled(7, 20.0), 5.0]);
+  });
+
+  test('one damaged bodyweight entry or plate profile never makes a backup unreadable', () async {
+    final store = AppStore();
+    addTearDown(store.dispose);
+    final data = store.toJson();
+    final settings = {
+      ...data['settings'] as Map<String, dynamic>,
+      'plateProfiles': [
+        {'id': 'bad', 'name': 'Broken', 'platesKg': ['x']},
+        {'id': 'gym', 'name': 'Gym'},
+      ],
+      'selectedPlateProfile': 'gym',
+    };
+    await store.importJson(
+      jsonEncode({
+        ...data,
+        'settings': settings,
+        'bodyweights': [
+          {'date': '2026-01-01', 'kg': -5},
+          {'date': '2026-01-02', 'kg': 80},
+        ],
+      }),
+    );
+    expect(store.bodyweights.map((e) => e.kg), [80]);
+    expect(store.settings.plateProfiles.map((p) => p.id), ['gym']);
   });
 
   test('resumed warm-ups never change working loads, volume or the next workout', () async {
