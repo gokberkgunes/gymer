@@ -317,6 +317,23 @@ class TemplateExercise {
   }
 }
 
+/// Exercises performed in alternating rounds, with one shared rest between rounds.
+class ExerciseCircuit {
+  final String id;
+  List<String> exercises;
+  int rest;
+
+  ExerciseCircuit({required this.id, required this.exercises, this.rest = 120});
+
+  Map<String, dynamic> toJson() => {'id': id, 'exercises': exercises, 'rest': rest};
+
+  factory ExerciseCircuit.fromJson(Map<String, dynamic> j) => ExerciseCircuit(
+    id: j['id'] as String,
+    exercises: (j['exercises'] as List).cast<String>().toList(),
+    rest: math.max(0, _int(j['rest']) ?? 120),
+  );
+}
+
 class WorkoutTemplate {
   final String id;
   String name;
@@ -326,17 +343,19 @@ class WorkoutTemplate {
   int transition;
   int sessionOverhead;
   List<TemplateExercise> exercises;
+  List<ExerciseCircuit> circuits;
 
   WorkoutTemplate({
     required this.id,
     required this.name,
     required this.exercises,
+    List<ExerciseCircuit>? circuits,
     this.description = '',
     this.setSeconds = 45,
     this.setOverhead = 30,
     this.transition = 300,
     this.sessionOverhead = 300,
-  });
+  }) : circuits = circuits ?? [];
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -347,6 +366,7 @@ class WorkoutTemplate {
     'transition': transition,
     'sessionOverhead': sessionOverhead,
     'exercises': exercises.map((e) => e.toJson()).toList(),
+    if (circuits.isNotEmpty) 'circuits': circuits.map((c) => c.toJson()).toList(),
   };
 
   factory WorkoutTemplate.fromJson(Map<String, dynamic> j) => WorkoutTemplate(
@@ -358,6 +378,7 @@ class WorkoutTemplate {
     transition: _int(j['transition']) ?? 300,
     sessionOverhead: _int(j['sessionOverhead']) ?? 300,
     exercises: [for (final e in j['exercises'] as List) TemplateExercise.fromJson(e as Map<String, dynamic>)],
+    circuits: [for (final c in j['circuits'] as List? ?? []) ExerciseCircuit.fromJson(c as Map<String, dynamic>)],
   );
 }
 
@@ -375,6 +396,9 @@ class SetEntry {
   SetContext context;
   String stopReason;
   int? actualRest;
+
+  /// Effective planned rest when this linked set was completed; keeps past rounds unchanged.
+  int? circuitRestAfter;
 
   /// Placeholders: what the field shows while empty. Never an observation.
   double? hintWeight;
@@ -405,6 +429,7 @@ class SetEntry {
     this.context = const SetContext(),
     this.stopReason = '',
     this.actualRest,
+    this.circuitRestAfter,
     this.hintWeight,
     this.hintReps,
     this.targetReps,
@@ -435,6 +460,7 @@ class SetEntry {
     if (!context.isEmpty) 'context': context.toJson(),
     if (stopReason.isNotEmpty) 'stop': stopReason,
     if (actualRest != null) 'actualRest': actualRest,
+    if (circuitRestAfter != null) 'circuitRest': circuitRestAfter,
     if (hintWeight != null) 'hw': hintWeight,
     if (hintReps != null) 'hr': hintReps,
     if (targetReps != null) 'tr': targetReps,
@@ -455,6 +481,7 @@ class SetEntry {
     context: SetContext.fromJson(j['context'] as Map<String, dynamic>?),
     stopReason: _str(j['stop']),
     actualRest: _int(j['actualRest']),
+    circuitRestAfter: _int(j['circuitRest']),
     hintWeight: _dbl(j['hw']),
     hintReps: _int(j['hr']),
     targetReps: _int(j['tr']),
@@ -555,6 +582,7 @@ class Session {
   DateTime startedAt;
   DateTime? finishedAt;
   List<SessionExercise> exercises;
+  List<ExerciseCircuit> circuits;
   List<SessionExercise> warmupExercises;
   bool warmingUp;
   String? cycleId;
@@ -577,6 +605,7 @@ class Session {
     required this.startedAt,
     this.finishedAt,
     required this.exercises,
+    List<ExerciseCircuit>? circuits,
     List<SessionExercise>? warmupExercises,
     this.warmingUp = false,
     this.cycleId,
@@ -588,7 +617,8 @@ class Session {
     this.clockStarted = false,
     this.clockRunningSince,
     this.clockElapsed = 0,
-  }) : warmupExercises = warmupExercises ?? [];
+  }) : circuits = circuits ?? [],
+       warmupExercises = warmupExercises ?? [];
 
   List<SessionExercise> get visibleExercises => warmingUp ? warmupExercises : exercises;
   List<SetEntry> visibleSetsFor(SessionExercise exercise) =>
@@ -630,6 +660,7 @@ class Session {
     if (clockRunningSince != null) 'clockSince': clockRunningSince!.toUtc().toIso8601String(),
     if (clockElapsed > 0) 'clockElapsed': clockElapsed,
     'exercises': exercises.map((e) => e.toJson()).toList(),
+    if (circuits.isNotEmpty) 'circuits': circuits.map((c) => c.toJson()).toList(),
     if (warmupExercises.isNotEmpty) 'warmupExercises': warmupExercises.map((e) => e.toJson()).toList(),
     if (warmingUp) 'warmingUp': true,
   };
@@ -651,6 +682,7 @@ class Session {
     clockRunningSince: j['clockSince'] == null ? null : DateTime.parse(j['clockSince'] as String).toLocal(),
     clockElapsed: _int(j['clockElapsed']) ?? 0,
     exercises: [for (final e in j['exercises'] as List) SessionExercise.fromJson(e as Map<String, dynamic>)],
+    circuits: [for (final c in j['circuits'] as List? ?? []) ExerciseCircuit.fromJson(c as Map<String, dynamic>)],
     warmupExercises: [
       for (final e in j['warmupExercises'] as List? ?? []) SessionExercise.fromJson(e as Map<String, dynamic>),
     ],

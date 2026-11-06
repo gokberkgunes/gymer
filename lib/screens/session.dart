@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/circuits.dart';
 import '../logic/estimate.dart';
 import '../logic/methods.dart';
 import '../logic/numbers.dart';
@@ -9,6 +10,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
+import '../widgets/circuit_editor.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
@@ -41,6 +43,9 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final _focus = Expando<_SetFocus>();
   final _allFocus = <_SetFocus>[];
+  final _setKeys = Expando<GlobalKey>();
+
+  GlobalKey keyOf(SetEntry set) => _setKeys[set] ??= GlobalKey();
 
   _SetFocus focusOf(SetEntry s) {
     final existing = _focus[s];
@@ -85,8 +90,13 @@ class _SessionScreenState extends State<SessionScreen> {
     FocusNode? next;
     if (field == 'weight') next = focusOf(s).reps;
     if (field == 'reps' && rirEditable(store, e, s)) next = focusOf(s).rir;
-    if (next == null && isLast && store.settings.enterMovesToNextSet && position + 1 < visible.length) {
-      next = focusOf(visible[position + 1]).weight;
+    if (next == null && isLast && store.settings.enterMovesToNextSet) {
+      final linked = s.done ? nextCircuitStep(store.active!, e) : null;
+      if (linked != null) {
+        next = focusOf(linked.set).weight;
+      } else if (position + 1 < visible.length) {
+        next = focusOf(visible[position + 1]).weight;
+      }
     }
     if (next != null) {
       next.requestFocus();
@@ -110,8 +120,19 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   void complete(AppStore store, SessionExercise e, int index) {
+    final wasDone = e.sets[index].done;
     final result = store.toggleSet(e, index);
     if (result.message != null) notify(context, result.message!);
+    if (!result.ok || wasDone || store.active == null) return;
+    final next = nextCircuitStep(store.active!, e);
+    if (next == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = keyOf(next.set).currentContext;
+      if (target != null) {
+        Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 240), alignment: 0.25);
+      }
+    });
   }
 
   // ---- Actions ----
@@ -239,10 +260,15 @@ class _SessionScreenState extends State<SessionScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(14, 0, 14, 130),
                   children: [
-                    for (final e in session.visibleExercises) ...[
-                      _ExerciseBlock(key: ObjectKey(e), exercise: e, screen: this),
-                      const SizedBox(height: 12),
-                    ],
+                    for (final block in exerciseBlocks(session))
+                      Column(
+                        children: [
+                          for (final e in block) ...[
+                            _ExerciseBlock(key: ObjectKey(e), exercise: e, screen: this),
+                            const SizedBox(height: 12),
+                          ],
+                        ],
+                      ),
                     if (!session.warmingUp)
                       OutlinedButton.icon(
                         onPressed: () async {
@@ -457,6 +483,10 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final e = exercise;
     final info = store.exercise(e.name);
     final note = info?.note.trim() ?? '';
+    final circuit = session.warmingUp ? null : circuitFor(session.circuits, e.name);
+    final scheduledSteps = {for (final step in sessionSteps(session)) step.set: step};
+    final blocks = exerciseBlocks(session);
+    final blockIndex = blocks.indexWhere((block) => block.contains(e));
     final visibleSets = session.visibleSetsFor(e);
     final collapsed =
         e.collapsed ??
@@ -478,6 +508,8 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       ('rest', Icons.timer_outlined, 'Rest timers', () => _restEditor(context, store, e)),
       ('history', Icons.show_chart_rounded, 'History & progress', () => openExerciseProgress(context, e.name)),
       ('details', Icons.info_outline_rounded, 'Exercise details', () => openExerciseEditor(context, e.name)),
+      if (!session.warmingUp)
+        ('circuit', Icons.link_rounded, 'Superset / circuit', () => _circuitEditor(context, store, e)),
       (
         'exerciseNote',
         Icons.sticky_note_2_outlined,
@@ -493,10 +525,20 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           store.changed();
         },
       ),
-      if (session.visibleExercises.indexOf(e) > 0)
-        ('moveUp', Icons.arrow_upward_rounded, 'Move up', () => store.moveSessionExercise(e, -1)),
-      if (session.visibleExercises.indexOf(e) < session.visibleExercises.length - 1)
-        ('moveDown', Icons.arrow_downward_rounded, 'Move down', () => store.moveSessionExercise(e, 1)),
+      if (blockIndex > 0)
+        (
+          'moveUp',
+          Icons.arrow_upward_rounded,
+          circuit == null ? 'Move up' : 'Move group up',
+          () => store.moveSessionExercise(e, -1),
+        ),
+      if (blockIndex < blocks.length - 1)
+        (
+          'moveDown',
+          Icons.arrow_downward_rounded,
+          circuit == null ? 'Move down' : 'Move group down',
+          () => store.moveSessionExercise(e, 1),
+        ),
       if (!session.warmingUp) ('substitute', Icons.swap_horiz_rounded, 'Substitute exercise', substitute),
       (
         'remove',
@@ -513,6 +555,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
 
     final firstAnchor = e.sets.indexWhere((x) => calibrationAnchor(e.method, x.type));
     final heading = ExerciseActionHeader(
+      minimumTitleWidth: circuit == null ? 96 : (note.isEmpty ? 144 : 160),
       title: InkWell(
         // No highlight box of its own: the whole card is tinted instead (see _pressed).
         splashFactory: NoSplash.splashFactory,
@@ -543,6 +586,15 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                     builder: (context, constraints) => Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (circuit != null) ...[
+                          CircuitPill(
+                            circuits: session.circuits,
+                            circuit: circuit,
+                            exercise: e.name,
+                            onTap: () => _circuitEditor(context, store, e),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Flexible(
                           child: Tooltip(
                             message: e.name,
@@ -674,17 +726,19 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                 Padding(
                   padding: EdgeInsets.symmetric(vertical: st.setGap / 2),
                   child: _SetRow(
-                    key: ObjectKey(s),
+                    key: screen.keyOf(s),
                     exercise: e,
                     index: e.sets.indexOf(s),
                     position: position,
                     count: visibleSets.length,
                     screen: screen,
+                    plannedRest: scheduledSteps[s]?.restAfter ?? s.rest,
+                    sharedRest: scheduledSteps[s]?.circuit != null && scheduledSteps[s]!.endsTurn,
                     showPlannedRest:
                         !s.done &&
                         (store.settings.plannedRestDisplay == 'always' ||
                             (store.settings.plannedRestDisplay == 'smart' &&
-                                (irregularRest || !isStraightType(s.type)))),
+                                (circuit != null || irregularRest || !isStraightType(s.type)))),
                     unit: session.unit,
                   ),
                 ),
@@ -752,8 +806,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       return notify(context, 'Rest times are locked by the active mesocycle.');
     }
     final scopes = store.restScopes(e);
+    final circuit = session.warmingUp ? null : circuitFor(session.circuits, e.name);
     final timerHere = store.rest?.exercise == e.name;
-    if (scopes.isEmpty && !timerHere) {
+    if (scopes.isEmpty && !timerHere && circuit == null) {
       return notify(context, 'No unfinished rests or running timer for this exercise.');
     }
     const labels = {
@@ -763,8 +818,8 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       'after_protocol': 'After protocol groups',
       'all_pending': 'All unfinished entries',
     };
-    String? scope;
-    var seconds = 0;
+    String? scope = circuit == null ? null : 'circuit';
+    var seconds = circuit?.rest ?? 0;
     String? error;
     await showDialog<void>(
       context: context,
@@ -772,6 +827,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
         builder: (c, setDialog) {
           String preview() {
             if (scope == null) return 'Choose which rests to change.';
+            if (scope == 'circuit') return 'Shared rest between rounds of ${circuit!.exercises.join(' → ')}.';
             if (scope == 'timer') {
               return "Changes only the running timer's total duration. Elapsed time and planned rests stay as recorded. Zero dismisses this timer.";
             }
@@ -794,6 +850,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'Apply to unfinished entries / timer'),
                     items: [
+                      if (circuit != null) const DropdownMenuItem(value: 'circuit', child: Text('Rest between rounds')),
                       for (final MapEntry(key: k, value: v) in scopes.entries)
                         DropdownMenuItem(
                           value: k,
@@ -804,7 +861,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                     onChanged: (v) => setDialog(() {
                       scope = v;
                       error = null;
-                      if (v == 'timer') {
+                      if (v == 'circuit') {
+                        seconds = circuit!.rest;
+                      } else if (v == 'timer') {
                         seconds = store.rest!.totalSeconds;
                       } else if (v != null) {
                         final values = {for (final i in scopes[v]!) e.sets[i].rest};
@@ -843,7 +902,10 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                 onPressed: scope == null || seconds < 0
                     ? null
                     : () {
-                        if (scope == 'timer') {
+                        if (scope == 'circuit') {
+                          circuit!.rest = seconds;
+                          store.changed();
+                        } else if (scope == 'timer') {
                           store.setRestTotal(seconds);
                         } else {
                           store.setPlannedRests(e, scopes[scope]!, seconds);
@@ -857,6 +919,20 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
         },
       ),
     );
+  }
+
+  Future<void> _circuitEditor(BuildContext context, AppStore store, SessionExercise e) async {
+    final session = store.active;
+    if (session == null || session.warmingUp) return;
+    final saved = await editExerciseCircuit(
+      context,
+      exercise: e.name,
+      exercises: session.exercises.map((e) => e.name).toList(),
+      circuits: session.circuits,
+      defaultRest: e.restSeconds,
+      restLocked: session.restLocked,
+    );
+    if (saved) store.changed();
   }
 }
 
@@ -1012,6 +1088,8 @@ class _SetRow extends StatelessWidget {
   final int count;
   final _SessionScreenState screen;
   final bool showPlannedRest;
+  final int plannedRest;
+  final bool sharedRest;
   final String unit;
 
   const _SetRow({
@@ -1022,6 +1100,8 @@ class _SetRow extends StatelessWidget {
     required this.count,
     required this.screen,
     required this.showPlannedRest,
+    required this.plannedRest,
+    required this.sharedRest,
     required this.unit,
   });
 
@@ -1091,8 +1171,8 @@ class _SetRow extends StatelessWidget {
               child: Text(signedRest(timer.remainingSeconds), style: restStyle),
             ),
           )
-        : showPlannedRest
-        ? Text(formatDuration(s.rest), style: restStyle.copyWith(color: cs.onSurfaceVariant))
+        : showPlannedRest && plannedRest > 0
+        ? Text(formatDuration(plannedRest), style: restStyle.copyWith(color: cs.onSurfaceVariant))
         : null;
 
     // Inputs sit one step lighter than the set tile.
@@ -1112,6 +1192,7 @@ class _SetRow extends StatelessWidget {
           store,
           s,
           restLocked: store.active?.warmingUp == true ? false : store.active?.restLocked ?? false,
+          linkedRest: s.done && s.circuitRestAfter != null ? s.circuitRestAfter : (sharedRest ? plannedRest : null),
         ),
         child: SizedBox(
           width: 56,
@@ -1374,10 +1455,11 @@ Future<void> showSetDetails(
   SetEntry s, {
   bool restLocked = false,
   bool historical = false,
+  int? linkedRest,
 }) async {
   final setup = TextEditingController(text: s.context.setup);
   var load = s.context.loadBasis, reps = s.context.repBasis, side = s.context.side, stop = s.stopReason;
-  var rest = s.rest;
+  var rest = linkedRest ?? s.rest;
   final actual = TextEditingController(text: s.actualRest?.toString() ?? '');
   Widget dropdown(String label, String value, Map<String, String> options, ValueChanged<String> onChanged) =>
       DropdownButtonFormField<String>(
@@ -1424,8 +1506,9 @@ Future<void> showSetDetails(
             const SizedBox(height: 10),
             DurationField(
               seconds: rest,
-              label: 'Planned rest after segment',
-              readOnly: restLocked && !historical,
+              label: linkedRest == null ? 'Planned rest after segment' : 'Linked rest after segment',
+              readOnly: linkedRest != null || (restLocked && !historical),
+              tooltip: linkedRest == null ? null : 'Shared rest is set for the whole superset or circuit',
               onChanged: (v) => rest = v,
             ),
             const SizedBox(height: 10),
@@ -1455,7 +1538,7 @@ Future<void> showSetDetails(
     s
       ..context = SetContext(setup: setup.text.trim(), loadBasis: load, repBasis: reps, side: side)
       ..stopReason = stop
-      ..rest = rest
+      ..rest = linkedRest == null ? rest : s.rest
       ..actualRest = int.tryParse(actual.text.trim());
     store.changed();
   }

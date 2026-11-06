@@ -7,6 +7,7 @@ const exerciseActions = <(String, String, IconData)>[
   ('history', 'History & progress', Icons.show_chart_rounded),
   ('details', 'Exercise details', Icons.info_outline_rounded),
   ('exerciseNote', 'Exercise note', Icons.sticky_note_2_outlined),
+  ('circuit', 'Superset / circuit', Icons.link_rounded),
   ('notes', 'Set notes', Icons.notes_rounded),
   ('moveUp', 'Move up', Icons.arrow_upward_rounded),
   ('moveDown', 'Move down', Icons.arrow_downward_rounded),
@@ -20,14 +21,22 @@ class ExerciseActionHeader extends StatelessWidget {
   final Widget title;
   final List<Widget> actions;
   final Widget menu;
+  final double minimumTitleWidth;
 
-  const ExerciseActionHeader({super.key, required this.title, required this.actions, required this.menu});
+  const ExerciseActionHeader({
+    super.key,
+    required this.title,
+    required this.actions,
+    required this.menu,
+    this.minimumTitleWidth = 96,
+  });
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       const menuWidth = 28.0;
-      final titleWidth = (constraints.maxWidth * 0.36).clamp(96.0, 144.0).toDouble();
+      final maxTitleWidth = minimumTitleWidth > 144 ? minimumTitleWidth : 144.0;
+      final titleWidth = (constraints.maxWidth * 0.36).clamp(minimumTitleWidth, maxTitleWidth).toDouble();
       final available = (constraints.maxWidth - titleWidth - menuWidth).clamp(0.0, double.infinity).toDouble();
       final actionWidth = actions.isEmpty ? 0.0 : (available / actions.length).clamp(0.0, 32.0).toDouble();
       final iconSize = (actionWidth - 4).clamp(12.0, 20.0).toDouble();

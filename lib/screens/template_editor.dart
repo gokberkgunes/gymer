@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/circuits.dart';
 import '../logic/estimate.dart';
 import '../logic/methods.dart';
 import '../logic/numbers.dart';
@@ -8,6 +9,7 @@ import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/circuit_editor.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
 import 'exercises.dart';
@@ -103,6 +105,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
         ..addAll(_d.exercises.where((e) => e.name.trim().isEmpty));
     });
     if (_nameInvalid || _missingName.isNotEmpty) return;
+    reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
     for (final e in _d.exercises) {
       e.reconcile();
       if (e.workSets == 0) return notify(context, '${e.name}: Add at least one working set.');
@@ -165,6 +168,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
     final latest = _store.previousSets(name);
     final context0 = _store.exercise(name)?.context ?? const SetContext();
     setState(() {
+      renameCircuitExercise(_d.circuits, e.name, name);
       e.name = name;
       _missingName.remove(e);
       for (final (i, s) in e.sets.indexed) {
@@ -193,6 +197,23 @@ class _TemplateEditorState extends State<TemplateEditor> {
       }
       e.reconcile();
     });
+  }
+
+  Future<void> _editCircuit(TemplateExercise e) async {
+    final saved = await editExerciseCircuit(
+      context,
+      exercise: e.name,
+      exercises: _d.exercises.map((e) => e.name).toList(),
+      circuits: _d.circuits,
+      defaultRest: e.restSeconds,
+      restLocked: _store.activeCycle?.restLock ?? false,
+    );
+    if (saved && mounted) setState(() {});
+  }
+
+  String? _circuitLabel(TemplateExercise e) {
+    final circuit = circuitFor(_d.circuits, e.name);
+    return circuit == null ? null : circuitBadge(_d.circuits, circuit, e.name);
   }
 
   Future<void> _editContext(TemplateExercise e, TemplateSet s) async {
@@ -343,6 +364,8 @@ class _TemplateEditorState extends State<TemplateEditor> {
               invalidName: _missingName.contains(e),
               restLocked: restLocked,
               groupsLocked: _groupsLocked,
+              circuitLabel: _circuitLabel(e),
+              onCircuit: () => _editCircuit(e),
               onChanged: () => setState(() {}),
               onChoose: () => _chooseExercise(e),
               onDetails: () async {
@@ -353,8 +376,12 @@ class _TemplateEditorState extends State<TemplateEditor> {
               onMove: (delta) => setState(() {
                 final j = (i + delta).clamp(0, _d.exercises.length - 1);
                 _d.exercises.insert(j, _d.exercises.removeAt(i));
+                reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
               }),
-              onRemove: () => setState(() => _d.exercises.removeAt(i)),
+              onRemove: () => setState(() {
+                _d.exercises.removeAt(i);
+                reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
+              }),
               onAddGroup: () => _addGroup(e),
               onEditContext: (s) => _editContext(e, s),
             ),
@@ -416,6 +443,8 @@ class _ExerciseCard extends StatelessWidget {
   final TemplateExercise exercise;
   final bool invalidName, restLocked, groupsLocked;
   final VoidCallback onChanged, onChoose, onDetails, onRemove, onAddGroup;
+  final VoidCallback onCircuit;
+  final String? circuitLabel;
   final ValueChanged<int> onMove;
   final ValueChanged<TemplateSet> onEditContext;
 
@@ -431,6 +460,8 @@ class _ExerciseCard extends StatelessWidget {
     required this.onMove,
     required this.onRemove,
     required this.onAddGroup,
+    required this.onCircuit,
+    this.circuitLabel,
     required this.onEditContext,
   });
 
@@ -627,17 +658,31 @@ class _ExerciseCard extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 6),
-            ActionChip(
-              avatar: const Icon(Icons.tune_rounded, size: 16),
-              label: Text('Method: ${e.method}'),
-              onPressed: groupsLocked && grouped
-                  ? null
-                  : () async {
-                      final m = await pickMethod(context, e.method);
-                      if (m == null) return;
-                      e.replan(method: m);
-                      onChanged();
-                    },
+            Row(
+              children: [
+                Flexible(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.tune_rounded, size: 16),
+                    label: Text('Method: ${e.method}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onPressed: groupsLocked && grouped
+                        ? null
+                        : () async {
+                            final m = await pickMethod(context, e.method);
+                            if (m == null) return;
+                            e.replan(method: m);
+                            onChanged();
+                          },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: circuitLabel == null ? 'Superset / circuit' : 'Edit group $circuitLabel',
+                  icon: circuitLabel == null
+                      ? const Icon(Icons.link_rounded)
+                      : Text(circuitLabel!, style: t.labelMedium),
+                  onPressed: onCircuit,
+                ),
+              ],
             ),
             ...rows,
             Row(

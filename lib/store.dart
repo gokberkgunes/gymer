@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import 'data/seed.dart';
+import 'logic/circuits.dart';
 import 'logic/cycle.dart';
 import 'logic/estimate.dart';
 import 'logic/legacy_import.dart';
@@ -365,12 +366,14 @@ class AppStore extends ChangeNotifier {
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     if (from != updated.name) {
       for (final t in templates) {
+        renameCircuitExercise(t.circuits, from, updated.name);
         for (final e in t.exercises) {
           if (e.name == from) e.name = updated.name;
         }
       }
       for (final s in [...history, ?active]) {
-        for (final e in s.exercises) {
+        renameCircuitExercise(s.circuits, from, updated.name);
+        for (final e in [...s.exercises, ...s.warmupExercises]) {
           if (e.name == from) e.name = updated.name;
         }
       }
@@ -454,26 +457,33 @@ class AppStore extends ChangeNotifier {
 
   int setSecondsFor(String exerciseName, int fallback) => exercise(exerciseName)?.setSeconds ?? fallback;
 
-  TimingBreakdown templateTiming(WorkoutTemplate t) => estimateWorkout(
-    rows: [
+  TimingBreakdown templateTiming(WorkoutTemplate t) {
+    final steps = workoutSteps([
       for (final e in t.exercises)
-        for (final s in e.sets) (e.name, s.rest),
-    ],
-    setSeconds: (n) => setSecondsFor(n, t.setSeconds),
-    setOverhead: t.setOverhead,
-    transition: t.transition,
-    sessionOverhead: t.sessionOverhead,
-  );
+        SessionExercise(
+          name: e.name,
+          method: e.method,
+          sets: [for (final s in e.sets) SetEntry(type: s.type, rest: s.rest, groupStart: s.groupStart)],
+        ),
+    ], t.circuits);
+    return estimateWorkout(
+      rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
+      circuitIds: [for (final step in steps) circuitFor(t.circuits, step.exercise.name)?.id],
+      setSeconds: (n) => setSecondsFor(n, t.setSeconds),
+      setOverhead: t.setOverhead,
+      transition: t.transition,
+      sessionOverhead: t.sessionOverhead,
+    );
+  }
 
   int estimateActiveSeconds() {
     final s = active;
     if (s == null) return 0;
     final t = template(s.templateId) ?? WorkoutTemplate(id: '', name: '', exercises: []);
+    final steps = sessionSteps(s);
     return estimateWorkout(
-      rows: [
-        for (final e in s.visibleExercises)
-          for (final set in s.visibleSetsFor(e)) (e.name, set.rest),
-      ],
+      rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
+      circuitIds: [for (final step in steps) s.warmingUp ? null : circuitFor(s.circuits, step.exercise.name)?.id],
       setSeconds: (n) => setSecondsFor(n, t.setSeconds),
       setOverhead: t.setOverhead,
       transition: t.transition,
@@ -604,6 +614,7 @@ class AppStore extends ChangeNotifier {
     context: s.context,
     stopReason: s.stopReason,
     actualRest: s.actualRest,
+    circuitRestAfter: s.circuitRestAfter,
   );
 
   /// Latest values of [exercise] by set position in sessions of [templateId]
@@ -756,12 +767,16 @@ class AppStore extends ChangeNotifier {
   static double _tenth(double v) => (v * 10).round() / 10;
 
   void moveSessionExercise(SessionExercise e, int delta) {
-    final list = active?.visibleExercises;
-    final i = list?.indexOf(e) ?? -1;
-    if (list == null || i < 0 || i + delta < 0 || i + delta >= list.length) return;
+    final session = active;
+    if (session == null) return;
+    final blocks = exerciseBlocks(session);
+    final i = blocks.indexWhere((block) => block.contains(e));
+    if (i < 0 || i + delta < 0 || i + delta >= blocks.length) return;
+    blocks.insert(i + delta, blocks.removeAt(i));
+    final list = session.visibleExercises;
     list
-      ..removeAt(i)
-      ..insert(i + delta, e);
+      ..clear()
+      ..addAll(blocks.expand((block) => block));
     changed();
   }
 
@@ -821,6 +836,7 @@ class AppStore extends ChangeNotifier {
       unit: settings.unit,
       startedAt: now,
       exercises: [],
+      circuits: copyCircuits(t?.circuits ?? []),
       cycleId: cycle?.id,
       microcycle: status?.currentMicro,
       phase: status?.phase,
@@ -834,6 +850,7 @@ class AppStore extends ChangeNotifier {
       );
     }
     active = session;
+    reconcileCircuits(session.circuits, session.exercises.map((e) => e.name));
     rest = null;
     _syncAlerts();
     changed();
@@ -1187,6 +1204,7 @@ class AppStore extends ChangeNotifier {
     final old = {for (final e in s.exercises) e.name.toLowerCase(): e};
     final cycle = cycles.where((c) => c.id == s.cycleId).firstOrNull;
     s.name = t.name;
+    s.circuits = copyCircuits(t.circuits);
     s.exercises = [
       for (final te in t.exercises)
         () {
@@ -1216,6 +1234,7 @@ class AppStore extends ChangeNotifier {
     ];
     // Preserve completed warm-ups when the plan is edited, and discard ramps for removed exercises.
     s.warmupExercises.removeWhere((warmup) => !s.exercises.any((exercise) => exercise.name == warmup.name));
+    reconcileCircuits(s.circuits, s.exercises.map((e) => e.name));
     _finishWarmupPhase();
   }
 
@@ -1268,6 +1287,7 @@ class AppStore extends ChangeNotifier {
     if (e.sets.any((s) => s.done)) return 'Completed exercises cannot be removed from the current session.';
     active?.exercises.remove(e);
     active?.warmupExercises.removeWhere((warmup) => identical(warmup, e) || warmup.name == e.name);
+    if (active != null) reconcileCircuits(active!.circuits, active!.exercises.map((e) => e.name));
     _finishWarmupPhase();
     if (rest?.exercise == e.name) _dismissRest();
     changed();
@@ -1281,6 +1301,7 @@ class AppStore extends ChangeNotifier {
       return 'That exercise is already in the current workout.';
     }
     final info = addExercise(newName);
+    renameCircuitExercise(s.circuits, e.name, info.name);
     s.warmupExercises.removeWhere((warmup) => warmup.name == e.name);
     _finishWarmupPhase();
     final latest = _latestSetValues(info.name, null, anyWorkout: true) ?? const <SetEntry>[];
@@ -1298,6 +1319,7 @@ class AppStore extends ChangeNotifier {
         ..prescribed = false
         ..stopReason = ''
         ..actualRest = null
+        ..circuitRestAfter = null
         ..targetReps = null
         ..context = info.context
         ..hintWeight = prev != null && prev.done && prev.context == info.context ? prev.weight : null
@@ -1389,8 +1411,14 @@ class AppStore extends ChangeNotifier {
     final warmup = s.warmupExercises.contains(e);
     if (s.warmingUp != warmup) return const CompleteResult.blocked('Switch workout phase before editing these sets.');
     if (set.done) {
-      set.done = false;
-      if (rest?.exercise == e.name && rest?.setIndex == index && rest?.warmup == warmup) _dismissRest();
+      set
+        ..done = false
+        ..circuitRestAfter = null;
+      final circuit = warmup ? null : circuitFor(s.circuits, e.name);
+      if ((rest?.exercise == e.name && rest?.setIndex == index && rest?.warmup == warmup) ||
+          (circuit != null && rest?.warmup == false && circuit.exercises.contains(rest?.exercise))) {
+        _dismissRest();
+      }
       e.collapsed = null;
       changed();
       return const CompleteResult.done();
@@ -1399,6 +1427,10 @@ class AppStore extends ChangeNotifier {
       return CompleteResult.blocked('Calibrate the ${e.method} anchor before continuing.');
     }
     if (settings.requirePreviousSet) {
+      final next = nextCircuitStep(s, e);
+      if (!set.warmup && next != null && (next.exercise != e || next.index != index)) {
+        return CompleteResult.blocked('Complete ${next.exercise.name} set ${next.index + 1} first.');
+      }
       final earlier = s.visibleSetsFor(e).where((x) => !x.done).map(e.sets.indexOf).firstOrNull ?? -1;
       if (earlier >= 0 && earlier < index) {
         return CompleteResult.blocked('Complete set ${earlier + 1} of ${e.name} first.');
@@ -1427,7 +1459,24 @@ class AppStore extends ChangeNotifier {
     }
     if (settings.haptics) alerts.setDone();
     setCelebration++;
-    if (warmup) {
+    final circuit = warmup || set.warmup ? null : circuitFor(s.circuits, e.name);
+    if (circuit != null) {
+      final steps = sessionSteps(s).where((step) => step.circuit == circuit).toList();
+      final step = steps.where((step) => step.exercise == e && step.index == index).firstOrNull;
+      final roundComplete = step != null && steps.where((other) => other.round == step.round).every((s) => s.set.done);
+      final pending = steps.any((s) => !s.set.done);
+      if (step != null && !step.endsTurn) {
+        set.circuitRestAfter = set.rest;
+        startRest(e.name, index, set.rest);
+      } else if (roundComplete && pending) {
+        set.circuitRestAfter = circuit.rest;
+        startRest(e.name, index, circuit.rest);
+      } else {
+        set.circuitRestAfter = 0;
+        _dismissRest();
+      }
+      e.collapsed = null;
+    } else if (warmup) {
       startRest(e.name, index, set.rest);
       _finishWarmupPhase();
       e.collapsed = null;
@@ -1437,6 +1486,7 @@ class AppStore extends ChangeNotifier {
     } else {
       startRest(e.name, index, set.rest);
     }
+    nextCircuitStep(s, e)?.exercise.collapsed = false;
     changed();
     return const CompleteResult.done();
   }
@@ -1622,6 +1672,18 @@ class AppStore extends ChangeNotifier {
   /// Set order violation when "require previous set" is on.
   String? setOrderViolation() {
     if (!settings.requirePreviousSet) return null;
+    final session = active;
+    if (session != null) {
+      final steps = sessionSteps(session);
+      for (final circuit in session.circuits) {
+        final group = steps.where((step) => step.circuit == circuit).toList();
+        final open = group.indexWhere((step) => !step.set.done);
+        if (open >= 0 && group.skip(open).any((step) => step.set.done)) {
+          final next = group[open];
+          return 'Complete ${next.exercise.name} set ${next.index + 1} before saving later sets.';
+        }
+      }
+    }
     for (final e in active?.exercises ?? <SessionExercise>[]) {
       final sets = active!.visibleSetsFor(e);
       final firstOpen = sets.indexWhere((s) => !s.done);
@@ -1647,7 +1709,9 @@ class AppStore extends ChangeNotifier {
       for (final e in t.exercises)
         for (final set in e.sets) (e.name, canonicalMethod(e.method), set.rest, set.type, set.groupStart),
     ];
-    return sig(a) != sig(b);
+    return sig(a) != sig(b) ||
+        jsonEncode(s.circuits.map((c) => c.toJson()).toList()) !=
+            jsonEncode(t.circuits.map((c) => c.toJson()).toList());
   }
 
   /// Saves the workout; returns null when nothing was completed.
@@ -1696,6 +1760,7 @@ class AppStore extends ChangeNotifier {
 
   /// Persist the session's exercise/set/rest/type structure, not performance.
   void _saveStructure(Session s, WorkoutTemplate t) {
+    t.circuits = copyCircuits(s.circuits);
     final old = {for (final e in t.exercises) e.name.toLowerCase(): e};
     t.exercises = [
       for (final e in s.exercises)
@@ -1818,6 +1883,7 @@ class AppStore extends ChangeNotifier {
       name: t.name,
       unit: settings.unit,
       startedAt: DateTime(date.year, date.month, date.day, 12),
+      circuits: copyCircuits(t.circuits),
       exercises: [
         for (final te in t.exercises)
           SessionExercise(

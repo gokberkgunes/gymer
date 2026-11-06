@@ -18,6 +18,7 @@ class TimingBreakdown {
 /// [rows] are the planned entries in order as (exercise, rest after it).
 TimingBreakdown estimateWorkout({
   required List<(String, int)> rows,
+  List<String?>? circuitIds,
   required int Function(String exercise) setSeconds,
   required int setOverhead,
   required int transition,
@@ -30,7 +31,7 @@ TimingBreakdown estimateWorkout({
     names.add(name);
     lifting += setSeconds(name);
     if (i == rows.length - 1) continue;
-    if (rows[i + 1].$1 == name) {
+    if (rows[i + 1].$1 == name || (circuitIds != null && circuitIds[i] != null && circuitIds[i] == circuitIds[i + 1])) {
       rest += restAfter;
     } else {
       transitions += transition;

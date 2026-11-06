@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/circuits.dart';
 import '../logic/methods.dart';
 import '../logic/numbers.dart';
 import '../models.dart';
@@ -356,6 +357,7 @@ class _SessionEditorState extends State<SessionEditor> {
       return;
     }
     _s.name = _name.text.trim().isEmpty ? widget.original.name : _name.text.trim();
+    reconcileCircuits(_s.circuits, _s.exercises.map((e) => e.name));
     if (widget.draft) {
       if (_s.doneAll == 0) return notify(context, 'Mark at least one set complete.');
       store.saveCalendarSession(widget.cycle!, widget.plannedKey!, _s, unplanned: widget.unplanned);
@@ -448,7 +450,12 @@ class _SessionEditorState extends State<SessionEditor> {
                   child: InkWell(
                     onTap: () async {
                       final name = await pickExercise(context);
-                      if (name != null) setState(() => e.name = name);
+                      if (name != null) {
+                        setState(() {
+                          renameCircuitExercise(_s.circuits, e.name, name);
+                          e.name = name;
+                        });
+                      }
                     },
                     child: Text(e.name, style: t.titleMedium?.copyWith(fontSize: 18)),
                   ),
@@ -527,6 +534,7 @@ class _SessionEditorState extends State<SessionEditor> {
     final usesRir = methodSetUsesRir(e.method, set.type);
     final number = set.warmup ? 'W' : '${e.sets.take(i + 1).where((x) => !x.warmup).length}';
     final weightKind = e.loadMode == 'external' ? NumKind.weight : NumKind.load;
+    final step = workoutSteps(_s.exercises, _s.circuits).where((step) => step.set == set).firstOrNull;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -619,6 +627,7 @@ class _SessionEditorState extends State<SessionEditor> {
                   e.sets.remove(set);
                   if (e.sets.isEmpty) {
                     _s.exercises.remove(e);
+                    reconcileCircuits(_s.circuits, _s.exercises.map((e) => e.name));
                   } else {
                     _reconcile(e);
                   }
@@ -642,7 +651,15 @@ class _SessionEditorState extends State<SessionEditor> {
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.tune_rounded, size: 18),
                 onPressed: () async {
-                  await showSetDetails(context, store, set, historical: true);
+                  await showSetDetails(
+                    context,
+                    store,
+                    set,
+                    historical: true,
+                    linkedRest: set.done && set.circuitRestAfter != null
+                        ? set.circuitRestAfter
+                        : (step?.circuit != null && step!.endsTurn ? step.restAfter : null),
+                  );
                   setState(() {});
                 },
               ),
@@ -651,7 +668,9 @@ class _SessionEditorState extends State<SessionEditor> {
                   [
                     if (!set.context.isEmpty) set.context.summary(),
                     if (set.stopReason.isNotEmpty) 'Stop: ${stopReasons[set.stopReason]}',
-                    'Planned rest after: ${set.rest}s',
+                    if (step?.circuit case final circuit?)
+                      '${circuitDescription(circuit)} ${circuitBadge(_s.circuits, circuit, e.name)}',
+                    'Planned rest after: ${step?.restAfter ?? set.rest}s',
                     if (set.actualRest != null) 'Actual rest after: ${set.actualRest}s',
                     if (set.targetRir != null) 'Target ${set.targetRir} RIR',
                   ].join(' · '),
