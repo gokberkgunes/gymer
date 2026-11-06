@@ -751,7 +751,22 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                             onTap: () => openPlatesFor(context, store, e),
                             child: SizedBox(
                               height: compactButton.height,
-                              child: PlateBar(target: plateTarget(store, e), exercise: e.name),
+                              child: Builder(
+                                builder: (context) {
+                                  final plateSet = _plateSet(store, e);
+                                  if (plateSet == null) return PlateBar(target: plateTarget(store, e), exercise: e.name);
+                                  // While the weight is being written and still empty, show the bare bar
+                                  // instead of the placeholder's plates.
+                                  final focus = screen.focusOf(plateSet).weight;
+                                  return ListenableBuilder(
+                                    listenable: focus,
+                                    builder: (context, _) => PlateBar(
+                                      target: focus.hasFocus && plateSet.weight == null ? 0 : plateTarget(store, e),
+                                      exercise: e.name,
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),

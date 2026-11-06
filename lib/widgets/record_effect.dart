@@ -6,7 +6,7 @@ import '../theme.dart';
 
 /// A looping holographic finish for a completed personal-best set. Values and layout stay still.
 class RecordEffect extends StatefulWidget {
-  static const duration = Duration(milliseconds: 3200);
+  static const duration = Duration(milliseconds: 4200);
   final bool active;
   final bool enabled;
   final bool outline;
@@ -63,7 +63,7 @@ class _RecordEffectState extends State<RecordEffect> with SingleTickerProviderSt
       animation: _controller,
       child: widget.child,
       builder: (context, child) {
-        final t = reducedMotion ? 0.4 : _controller.value;
+        final t = reducedMotion ? 0.9 : _controller.value; // 0.9 is the resting finish, without the sweep
         // Paint beneath the values so the stronger foil never washes out their contrast.
         // Keep the tree stable when enabled or undone so fields retain their focus and editing state.
         return RepaintBoundary(
@@ -77,6 +77,8 @@ class _RecordEffectState extends State<RecordEffect> with SingleTickerProviderSt
   }
 }
 
+/// A calm foil finish: one soft prismatic band glides across the tile, then it rests for a moment while a
+/// thin colour-shifting edge keeps a faint life. Everything is drawn beneath the values, from theme colours.
 class _RecordHologram extends CustomPainter {
   final double t;
   final ColorScheme colors;
@@ -84,31 +86,21 @@ class _RecordHologram extends CustomPainter {
   final bool outline;
   const _RecordHologram(this.t, this.colors, this.radius, this.outline);
 
+  /// The sweep takes the first part of each cycle; the rest is a pause.
+  static const _sweepShare = 0.38;
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final shape = radius.toRRect(rect);
-    final energy = 0.9 + 0.1 * math.cos(t * math.pi * 2);
-    final travel = t;
-    final palette = [colors.primary, colors.info, colors.success, colors.primary];
+    final sweep = (t / _sweepShare).clamp(0.0, 1.0);
+    final eased = Curves.easeInOutCubic.transform(sweep);
+    final glow = math.sin(sweep * math.pi); // 0 at rest, 1 mid-sweep
+    final pulse = 0.5 + 0.5 * math.sin(t * math.pi * 2);
+
     canvas.save();
     canvas.clipRRect(shape);
-    // A low iridescent wash under the traveling foil reflection; every hue comes from the app theme.
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..shader = SweepGradient(
-          center: Alignment(0.2 * math.sin(t * math.pi * 2), -0.5),
-          transform: GradientRotation(t * math.pi * 2),
-          colors: [for (final color in palette) color.withValues(alpha: 0.14 * energy)],
-        ).createShader(rect),
-    );
-    final band = Rect.fromLTWH(
-      size.width * (travel * 3 - 1.8),
-      -size.height * 0.35,
-      size.width * 1.4,
-      size.height * 1.7,
-    );
+    // A faint resting foil so a record never looks plain between sweeps.
     canvas.drawRRect(
       shape,
       Paint()
@@ -116,48 +108,70 @@ class _RecordHologram extends CustomPainter {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            colors.primary.withValues(alpha: 0),
-            colors.info.withValues(alpha: 0.24 * energy),
-            colors.success.withValues(alpha: 0.34 * energy),
-            colors.primary.withValues(alpha: 0.42 * energy),
-            colors.info.withValues(alpha: 0.24 * energy),
-            colors.primary.withValues(alpha: 0),
+            colors.info.withValues(alpha: 0.07),
+            colors.primary.withValues(alpha: 0.05),
+            colors.success.withValues(alpha: 0.07),
           ],
-          stops: const [0, 0.22, 0.4, 0.58, 0.76, 1],
-        ).createShader(band),
+        ).createShader(rect),
     );
-    // Fine slanted striations give the moving colors a foil surface, rather than a flat tinted overlay.
-    final lines = Paint()..strokeWidth = 0.7;
-    var index = 0;
-    for (double y = -size.height * 0.2; y < size.height * 1.2; y += 6) {
-      lines.color = palette[index++ % palette.length].withValues(alpha: 0.08 * energy);
-      final offset = math.sin(t * math.pi * 2 + y * 0.02) * 2;
-      canvas.drawLine(Offset(0, y + offset), Offset(size.width, y + offset - size.height * 0.12), lines);
+    if (sweep > 0 && sweep < 1) {
+      // A prismatic band, tilted by running the gradient along the diagonal of a wide rectangle.
+      final bandWidth = size.width * 0.55;
+      final x = -bandWidth + (size.width + bandWidth * 1.6) * eased;
+      final band = Rect.fromLTWH(x, -size.height * 0.3, bandWidth, size.height * 1.6);
+      canvas.drawRect(
+        band,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              colors.info.withValues(alpha: 0),
+              colors.info.withValues(alpha: 0.22 * glow),
+              colors.success.withValues(alpha: 0.26 * glow),
+              colors.primary.withValues(alpha: 0.3 * glow),
+              colors.primary.withValues(alpha: 0),
+            ],
+            stops: const [0, 0.28, 0.5, 0.72, 1],
+          ).createShader(band),
+      );
+      // A narrow specular core riding in the middle of the band.
+      final shine = colors.brightness == Brightness.dark ? colors.onSurface : colors.surface;
+      final core = Rect.fromCenter(center: band.center, width: bandWidth * 0.16, height: band.height);
+      canvas.drawRect(
+        core,
+        Paint()
+          ..shader = LinearGradient(
+            colors: [shine.withValues(alpha: 0), shine.withValues(alpha: 0.3 * glow), shine.withValues(alpha: 0)],
+          ).createShader(core),
+      );
+      // One small four-point glint where the band crosses the tile.
+      final centre = Offset(band.center.dx, size.height * 0.3);
+      final arm = math.min(7.0, size.height * 0.22) * glow;
+      final glint = Paint()
+        ..color = shine.withValues(alpha: 0.7 * glow)
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round;
+      canvas
+        ..drawLine(centre.translate(-arm, 0), centre.translate(arm, 0), glint)
+        ..drawLine(centre.translate(0, -arm), centre.translate(0, arm), glint);
     }
-    final shine = colors.brightness == Brightness.dark ? colors.onSurface : colors.surface;
-    final reflection = Rect.fromLTWH(size.width * (travel * 1.6 - 0.3), 0, size.width * 0.28, size.height);
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..shader = LinearGradient(
-          colors: [
-            shine.withValues(alpha: 0),
-            shine.withValues(alpha: 0.2 * energy),
-            shine.withValues(alpha: 0),
-          ],
-        ).createShader(reflection),
-    );
     canvas.restore();
     if (outline) {
       canvas.drawRRect(
-        shape.deflate(1),
+        shape.deflate(0.75),
         Paint()
           ..shader = SweepGradient(
-            colors: [for (final color in palette) color.withValues(alpha: 0.85 * energy)],
+            colors: [
+              colors.primary.withValues(alpha: 0.28 + 0.2 * pulse),
+              colors.info.withValues(alpha: 0.5),
+              colors.success.withValues(alpha: 0.28 + 0.2 * pulse),
+              colors.primary.withValues(alpha: 0.28 + 0.2 * pulse),
+            ],
             transform: GradientRotation(t * math.pi * 2),
           ).createShader(rect)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
+          ..strokeWidth = 1.25,
       );
     }
   }
