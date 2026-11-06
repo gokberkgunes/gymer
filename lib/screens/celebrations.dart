@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../logic/achievements.dart';
@@ -10,6 +12,70 @@ import '../widgets/num_field.dart';
 import '../widgets/record_effect.dart';
 import '../logic/numbers.dart';
 
+/// A completed personal-best set in the chosen style, always playing.
+class RecordSetPreview extends StatelessWidget {
+  const RecordSetPreview({super.key});
+
+  @override
+  Widget build(BuildContext context) => Card(
+    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+    child: RecordEffect(
+      active: true,
+      enabled: StoreScope.of(context).settings.recordEffects,
+      edition: editionNamed(StoreScope.of(context).settings.recordEffectStyle),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: IgnorePointer(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 44,
+                child: Icon(Icons.emoji_events_outlined, size: 20, color: Theme.of(context).colorScheme.primary),
+              ),
+              Expanded(
+                flex: 10,
+                child: NumField(
+                  value: 105,
+                  kind: NumKind.weight,
+                  completed: true,
+                  align: TextAlign.center,
+                  onChanged: (_) {},
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 7,
+                child: NumField(
+                  value: 8,
+                  kind: NumKind.reps,
+                  completed: true,
+                  align: TextAlign.center,
+                  onChanged: (_) {},
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 7,
+                child: NumField(
+                  value: 2,
+                  kind: NumKind.rir,
+                  completed: true,
+                  align: TextAlign.center,
+                  onChanged: (_) {},
+                ),
+              ),
+              SizedBox(
+                width: 44,
+                child: Icon(Icons.check_rounded, size: 24, color: Theme.of(context).colorScheme.primary),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 /// Preview the set confetti and every workout celebration style.
 class CelebrationsPreview extends StatefulWidget {
   const CelebrationsPreview({super.key});
@@ -21,7 +87,6 @@ class CelebrationsPreview extends StatefulWidget {
 class _CelebrationsPreviewState extends State<CelebrationsPreview> {
   int _set = 0, _workout = 0;
   int? _style;
-  bool _record = false;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -31,74 +96,8 @@ class _CelebrationsPreviewState extends State<CelebrationsPreview> {
         ListView(
           padding: subPageInsets,
           children: [
-            SectionLabel(
-              'Personal best · preview',
-              trailing: IconButton(
-                tooltip: _record ? 'Stop personal-best preview' : 'Preview personal-best effect',
-                onPressed: () => setState(() => _record = !_record),
-                icon: Icon(_record ? Icons.pause_rounded : Icons.play_arrow_rounded),
-              ),
-            ),
-            Card(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              child: RecordEffect(
-                active: _record,
-                edition: editionNamed(StoreScope.of(context).settings.recordEffectStyle),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                  child: IgnorePointer(
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 44,
-                          child: Icon(
-                            Icons.emoji_events_outlined,
-                            size: 20,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                        Expanded(
-                          flex: 10,
-                          child: NumField(
-                            value: 105,
-                            kind: NumKind.weight,
-                            completed: true,
-                            align: TextAlign.center,
-                            onChanged: (_) {},
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          flex: 7,
-                          child: NumField(
-                            value: 8,
-                            kind: NumKind.reps,
-                            completed: true,
-                            align: TextAlign.center,
-                            onChanged: (_) {},
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          flex: 7,
-                          child: NumField(
-                            value: 2,
-                            kind: NumKind.rir,
-                            completed: true,
-                            align: TextAlign.center,
-                            onChanged: (_) {},
-                          ),
-                        ),
-                        SizedBox(
-                          width: 44,
-                          child: Icon(Icons.check_rounded, size: 24, color: Theme.of(context).colorScheme.primary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            const SectionLabel('Personal best · preview'),
+            const RecordSetPreview(),
             const SectionLabel('Set and workout'),
             FilledButton(onPressed: () => setState(() => _set++), child: const Text('Preview set celebration')),
             const SizedBox(height: 8),
@@ -140,6 +139,23 @@ class CelebrationSettings extends StatefulWidget {
 
 class CelebrationSettingsState extends State<CelebrationSettings> {
   int _preview = 0;
+  Timer? _loop;
+
+  @override
+  void initState() {
+    super.initState();
+    // The previews replay on their own, so there is nothing to press.
+    _preview = 1;
+    _loop = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted) setState(() => _preview++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _loop?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -202,45 +218,13 @@ class CelebrationSettingsState extends State<CelebrationSettings> {
                 ),
               ),
               if (s.achievementCelebration != 'off') ...[
-                SectionLabel(
-                  'Preview',
-                  trailing: IconButton(
-                    tooltip: 'Preview milestone',
-                    onPressed: () => setState(() => _preview++),
-                    icon: const Icon(Icons.play_arrow_rounded),
-                  ),
-                ),
-                // A neutral, muted sample, distinct from the interactive settings above it.
-                ColorFiltered(
-                  colorFilter: const ColorFilter.matrix([
-                    0.40,
-                    0.50,
-                    0.10,
-                    0,
-                    0,
-                    0.35,
-                    0.48,
-                    0.10,
-                    0,
-                    0,
-                    0.30,
-                    0.42,
-                    0.10,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0.82,
-                    0,
-                  ]),
-                  child: IgnorePointer(
-                    child: AchievementUnlockCard(
-                      key: ValueKey((_preview, s.achievementCelebration)),
-                      achievements: [AchievementProgress(achievements[1], 10, earnedAt: DateTime.now())],
-                      unit: s.unit,
-                      animate: _preview > 0 && s.achievementCelebration == 'glow',
-                    ),
+                const SectionLabel('Milestone · preview'),
+                IgnorePointer(
+                  child: AchievementUnlockCard(
+                    key: ValueKey((_preview, s.achievementCelebration)),
+                    achievements: [AchievementProgress(achievements[1], 10, earnedAt: DateTime.now())],
+                    unit: s.unit,
+                    animate: s.achievementCelebration == 'glow',
                   ),
                 ),
               ],
@@ -289,9 +273,10 @@ class CelebrationSettingsState extends State<CelebrationSettings> {
                   ],
                 ),
               ),
+              if (s.recordEffects) ...[const SectionLabel('Personal best · preview'), const RecordSetPreview()],
             ],
           ),
-          if (_preview > 0 && s.achievementCelebration == 'confetti' && !reducedMotion)
+          if (s.achievementCelebration == 'confetti' && !reducedMotion)
             Positioned.fill(
               child: WorkoutCelebration(key: ValueKey(_preview), headline: 'Achievement unlocked'),
             ),
