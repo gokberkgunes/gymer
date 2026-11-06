@@ -60,6 +60,11 @@ class PlatformAlerts extends Alerts {
 
   Future<void> requestExact() async => _android?.requestExactAlarmsPermission();
 
+  /// Null on platforms where Android notification settings are unavailable.
+  Future<bool?> notificationsEnabled() async => _android?.areNotificationsEnabled();
+
+  Future<void> openNotificationSettings() async => _android?.openAppNotificationSettings();
+
   @override
   void keepAwake(bool on) {
     if (!_mobile) return;

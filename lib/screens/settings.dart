@@ -205,18 +205,25 @@ class _TimerSettings extends StatelessWidget {
         ]),
         const SectionLabel('Outside the app'),
         _group([
-          _stackedChoice(
-            context,
-            'Rest notification',
-            s.restNotice,
-            const {'live': 'Sticky', 'alarm': 'Alarm', 'both': 'Combined', 'off': 'Off'},
-            (v) => store.updateSettings((x) => x.restNotice = v),
-            note: switch (s.restNotice) {
-              'live' => 'Silent live timer in the status bar; counts into overtime.',
-              'alarm' => 'A "Rest over" alert, even with the phone locked.',
-              'both' => 'Sticky timer, replaced by the alert when rest ends.',
-              _ => 'Nothing outside the app.',
-            },
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _stackedChoice(
+                context,
+                'Rest notification',
+                s.restNotice,
+                const {'live': 'Sticky', 'alarm': 'Alarm', 'both': 'Combined', 'off': 'Off'},
+                (v) => store.updateSettings((x) => x.restNotice = v),
+                note: switch (s.restNotice) {
+                  'live' => 'Silent live timer in the status bar; counts into overtime.',
+                  'alarm' => 'A "Rest over" alert, even with the phone locked.',
+                  'both' => 'Sticky timer, replaced by the alert when rest ends.',
+                  _ => 'Nothing outside the app.',
+                },
+              ),
+              if (s.restNotice != 'off' && store.alerts is PlatformAlerts)
+                _NotificationPermission(alerts: store.alerts as PlatformAlerts),
+            ],
           ),
           if (s.restNotice == 'live' || s.restNotice == 'both') ...[
             Padding(
@@ -1303,6 +1310,52 @@ class _SetPreview extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _NotificationPermission extends StatefulWidget {
+  final PlatformAlerts alerts;
+  const _NotificationPermission({required this.alerts});
+
+  @override
+  State<_NotificationPermission> createState() => _NotificationPermissionState();
+}
+
+class _NotificationPermissionState extends State<_NotificationPermission> with WidgetsBindingObserver {
+  bool? _enabled;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final enabled = await widget.alerts.notificationsEnabled();
+    if (mounted) setState(() => _enabled = enabled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_enabled != false) return const SizedBox.shrink();
+    return _row(
+      context,
+      'Notifications are off',
+      TextButton(onPressed: widget.alerts.openNotificationSettings, child: const Text('Settings')),
+      subtitle: 'Rest notifications cannot appear until they are enabled.',
     );
   }
 }
