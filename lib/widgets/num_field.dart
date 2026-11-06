@@ -28,6 +28,7 @@ class NumField extends StatefulWidget {
   /// Orange warning reason for the current value (already computed).
   final String? warning;
   final String? tooltip;
+  final IconData? cornerIcon;
   final FocusNode? focusNode;
   final bool dense;
   final TextAlign align;
@@ -53,6 +54,7 @@ class NumField extends StatefulWidget {
     this.fill,
     this.warning,
     this.tooltip,
+    this.cornerIcon,
     this.focusNode,
     this.onSubmitted,
     this.onBackspaceEmpty,
@@ -237,6 +239,12 @@ class _NumFieldState extends State<NumField> {
       alignment: Alignment.center,
       children: [
         field,
+        if (widget.cornerIcon != null && !warn && !_badInput && !widget.invalid && !_focus.hasFocus)
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IgnorePointer(child: Icon(widget.cornerIcon, size: 12, color: cs.primary.withValues(alpha: 0.75))),
+          ),
         // The unit shows beside a value or a numeric placeholder, not a label like "Reps".
         if (widget.suffix != null && (!empty || evaluateExpression(widget.placeholder) != null))
           Positioned(

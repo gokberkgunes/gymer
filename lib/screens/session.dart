@@ -1188,6 +1188,7 @@ class _SetRow extends StatelessWidget {
         store.settings.nearSetTimer;
 
     final record = store.recordKind(e, s);
+    final increase = store.plannedLoadIncrease(e, index);
     final previous = warmup ? null : store.lastTimeSets(e.name, store.active?.templateId);
     final prev = previous != null && index < previous.length && previous[index].done ? previous[index] : null;
     final repsVisible = store.active == null || store.historicalRepsVisible(store.active!);
@@ -1280,7 +1281,12 @@ class _SetRow extends StatelessWidget {
             align: TextAlign.center,
             invalid: s.invalid.contains('weight'),
             warning: weightWarn,
-            tooltip: loadGuidance(e.loadMode),
+            cornerIcon: increase == null ? null : Icons.north_east_rounded,
+            tooltip: [
+              if (increase != null)
+                '${formatNumber(increase.load, weightKind)} ${store.active?.unit ?? store.settings.unit} planned · last time ${formatNumber(increase.previous, weightKind)} (+${formatNumber(increase.increase, weightKind)})',
+              loadGuidance(e.loadMode),
+            ].join('\n'),
             focusNode: f.weight,
             onChanged: (v) {
               s

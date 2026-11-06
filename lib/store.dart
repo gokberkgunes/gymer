@@ -145,6 +145,7 @@ class CycleSummary {
 
 /// Best completed working set of an exercise in history, in the current unit.
 typedef LiftBest = ({double weight, double e1rm});
+typedef PlannedLoadIncrease = ({double load, double previous, double increase});
 
 /// One automatic backup: when it was taken and what it holds (-1 when the file cannot be read).
 typedef BackupInfo = ({DateTime at, File file, int sessions, int workouts});
@@ -858,6 +859,7 @@ class AppStore extends ChangeNotifier {
   Object? _historyCacheKey;
   final _previousCache = <String, List<SetEntry>?>{};
   final _bestCache = <String, LiftBest?>{};
+  final _comparisonCache = <(String, String, String, String?, DateTime), List<SetEntry>?>{};
 
   void _syncHistoryCaches() {
     final key = (identityHashCode(history), history.length, settings.unit, _historyVersion);
@@ -865,6 +867,7 @@ class AppStore extends ChangeNotifier {
     _historyCacheKey = key;
     _previousCache.clear();
     _bestCache.clear();
+    _comparisonCache.clear();
   }
 
   /// What was done last time, set by set: same workout first, else any workout.
@@ -874,6 +877,60 @@ class AppStore extends ChangeNotifier {
       '${exercise.toLowerCase()}|$templateId',
       () => _latestSetValues(exercise, templateId) ?? _latestSetValues(exercise, null, anyWorkout: true),
     );
+  }
+
+  /// A load comparison, never a strength claim. Roles align by working-set position, not warm-up count.
+  PlannedLoadIncrease? plannedLoadIncrease(SessionExercise exercise, int index) {
+    if (active == null ||
+        index < 0 ||
+        index >= exercise.sets.length ||
+        active?.phase == 'Deload' ||
+        !const {'external', 'bodyweight'}.contains(exercise.loadMode)) {
+      return null;
+    }
+    final set = exercise.sets[index];
+    final load = set.weight ?? set.hintWeight;
+    if (set.done || set.warmup || load == null || !load.isFinite || load <= 0) return null;
+    _syncHistoryCaches();
+    final previous = _comparisonCache.putIfAbsent(
+      (exercise.name.toLowerCase(), exercise.method, exercise.loadMode, active?.templateId, active!.startedAt),
+      () {
+        List<SetEntry>? fallback;
+        final ordered = [...history]..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+        for (final session in ordered) {
+          if (session.phase == 'Deload' || !session.startedAt.isBefore(active!.startedAt)) continue;
+          final past = session.exercises
+              .where(
+                (e) =>
+                    e.name.toLowerCase() == exercise.name.toLowerCase() &&
+                    e.method == exercise.method &&
+                    e.loadMode == exercise.loadMode &&
+                    e.work.any((s) => s.done),
+              )
+              .firstOrNull;
+          if (past == null) continue;
+          final sets = [for (final s in past.work) _inUnit(s, session.unit)];
+          if (session.templateId == active?.templateId) return sets;
+          fallback ??= sets;
+        }
+        return fallback;
+      },
+    );
+    final position = exercise.sets.take(index).where((s) => !s.warmup).length;
+    if (previous == null || position >= previous.length) return null;
+    final last = previous[position];
+    if (!last.done ||
+        last.weight == null ||
+        !last.weight!.isFinite ||
+        last.weight! < 0 ||
+        (exercise.loadMode == 'external' && last.weight == 0) ||
+        last.context != set.context ||
+        canonicalSetType(last.type) != canonicalSetType(set.type) ||
+        last.groupStart != set.groupStart) {
+      return null;
+    }
+    final increase = load - last.weight!;
+    return increase > 0.005 ? (load: load, previous: last.weight!, increase: increase) : null;
   }
 
   /// Heaviest weight and best Wathan e1RM over completed working sets with an
