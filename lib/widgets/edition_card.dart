@@ -38,7 +38,9 @@ class TiltCard extends StatefulWidget {
 
 class _TiltCardState extends State<TiltCard> with SingleTickerProviderStateMixin {
   late final AnimationController _back = AnimationController(vsync: this, duration: const Duration(milliseconds: 320))
-    ..addListener(() => setState(() => _tilt = Offset.lerp(_from, Offset.zero, Curves.easeOutBack.transform(_back.value))!));
+    ..addListener(
+      () => setState(() => _tilt = Offset.lerp(_from, Offset.zero, Curves.easeOutBack.transform(_back.value))!),
+    );
   Offset _tilt = Offset.zero;
   Offset _from = Offset.zero;
 
@@ -88,13 +90,19 @@ class EditionFoilPainter extends CustomPainter {
   final Offset tilt;
   final ColorScheme colors;
   final BorderRadius radius;
-  const EditionFoilPainter(this.edition, this.tilt, this.colors, this.radius);
+  final Animation<double>? idle;
+
+  /// With [idle] (a looping 0..1), the light glides back and forth on its own while nothing is touching the card.
+  const EditionFoilPainter(this.edition, this.tilt, this.colors, this.radius, {this.idle}) : super(repaint: idle);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final rect = Offset.zero & size;
     final shape = radius.toRRect(rect);
+    final tilt = this.tilt == Offset.zero && idle != null
+        ? Offset(math.sin(idle!.value * math.pi * 2) * 0.9, 0)
+        : this.tilt;
     final pos = (0.5 + tilt.dx * 0.5 + tilt.dy * 0.2).clamp(0.0, 1.0);
     final palette = switch (edition) {
       AchievementEdition.foil => [colors.primary, colors.onSurfaceVariant, colors.primary],
@@ -156,5 +164,39 @@ class EditionFoilPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(EditionFoilPainter old) =>
-      edition != old.edition || tilt != old.tilt || colors != old.colors || radius != old.radius;
+      idle != old.idle || edition != old.edition || tilt != old.tilt || colors != old.colors || radius != old.radius;
+}
+
+/// Supplies a looping 0..1 phase to [builder] (null with reduced motion, so cards rest still).
+class LoopingPhase extends StatefulWidget {
+  final Duration period;
+  final Widget Function(BuildContext context, Animation<double>? phase) builder;
+  const LoopingPhase({super.key, this.period = const Duration(seconds: 6), required this.builder});
+
+  @override
+  State<LoopingPhase> createState() => _LoopingPhaseState();
+}
+
+class _LoopingPhaseState extends State<LoopingPhase> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, duration: widget.period);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      widget.builder(context, MediaQuery.disableAnimationsOf(context) ? null : _controller);
 }

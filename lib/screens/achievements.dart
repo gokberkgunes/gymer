@@ -51,84 +51,88 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
           ),
         ),
       ),
-      body: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('YOUR COLLECTION', style: t.labelSmall),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        '$earned',
-                        style: t.displaySmall?.copyWith(fontWeight: FontWeight.w700, fontFeatures: tabular),
-                      ),
-                      const SizedBox(width: 8),
-                      Text('/ ${progress.length} earned', style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  LinearProgressIndicator(
-                    value: earned / progress.length,
-                    minHeight: 4,
-                    borderRadius: context.style.brSmall,
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<String>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(value: 'all', label: Text('All')),
-                        ButtonSegment(value: 'earned', label: Text('Earned')),
-                        ButtonSegment(value: 'next', label: Text('Next')),
+      body: LoopingPhase(
+        period: const Duration(seconds: 7),
+        builder: (context, phase) => CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('YOUR COLLECTION', style: t.labelSmall),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          '$earned',
+                          style: t.displaySmall?.copyWith(fontWeight: FontWeight.w700, fontFeatures: tabular),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('/ ${progress.length} earned', style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                       ],
-                      selected: {_filter},
-                      onSelectionChanged: (v) => setState(() => _filter = v.first),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (visible.isEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  _filter == 'next' ? 'Every milestone earned. Nicely done.' : 'Your first milestone is ahead.',
-                  textAlign: TextAlign.center,
-                  style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(
+                      value: earned / progress.length,
+                      minHeight: 4,
+                      borderRadius: context.style.brSmall,
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'all', label: Text('All')),
+                          ButtonSegment(value: 'earned', label: Text('Earned')),
+                          ButtonSegment(value: 'next', label: Text('Next')),
+                        ],
+                        selected: {_filter},
+                        onSelectionChanged: (v) => setState(() => _filter = v.first),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            )
-          else
-            SliverPadding(
-              padding: subPageInsets,
-              sliver: SliverLayoutBuilder(
-                builder: (context, constraints) {
-                  final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-                  final columns = (constraints.crossAxisExtent / (156 * scale.clamp(1, 1.5))).floor().clamp(1, 4);
-                  return SliverGrid.builder(
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: columns,
-                      mainAxisExtent: 224 + (context.style.sp(32) - 32).clamp(0, 16) + (scale - 1).clamp(0, 2) * 100,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                    ),
-                    itemCount: visible.length,
-                    itemBuilder: (context, i) => _AchievementTile(visible[i], unit: store.settings.unit),
-                  );
-                },
-              ),
             ),
-        ],
+            if (visible.isEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Text(
+                    _filter == 'next' ? 'Every milestone earned. Nicely done.' : 'Your first milestone is ahead.',
+                    textAlign: TextAlign.center,
+                    style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: subPageInsets,
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+                    final columns = (constraints.crossAxisExtent / (156 * scale.clamp(1, 1.5))).floor().clamp(1, 4);
+                    return SliverGrid.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        mainAxisExtent: 224 + (context.style.sp(32) - 32).clamp(0, 16) + (scale - 1).clamp(0, 2) * 100,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                      ),
+                      itemCount: visible.length,
+                      itemBuilder: (context, i) =>
+                          _AchievementTile(visible[i], unit: store.settings.unit, phase: phase),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -137,7 +141,8 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
 class _AchievementTile extends StatelessWidget {
   final AchievementProgress progress;
   final String unit;
-  const _AchievementTile(this.progress, {required this.unit});
+  final Animation<double>? phase;
+  const _AchievementTile(this.progress, {required this.unit, this.phase});
 
   @override
   Widget build(BuildContext context) {
@@ -195,7 +200,7 @@ class _AchievementTile extends StatelessWidget {
       color: base,
       borderRadius: context.style.br,
       child: CustomPaint(
-        painter: edition == null ? null : EditionFoilPainter(edition, tilt, cs, context.style.br),
+        painter: edition == null ? null : EditionFoilPainter(edition, tilt, cs, context.style.br, idle: phase),
         child: InkWell(
           borderRadius: context.style.br,
           onTap: () => _details(context, progress, unit),
