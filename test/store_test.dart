@@ -163,9 +163,9 @@ void main() {
     expect(b.activeCycle?.weekRir, {2: 1});
 
     final c = await seeded();
-    c.importJson(file.readAsStringSync());
+    await c.importJson(file.readAsStringSync());
     expect(c.active?.exercises.first.sets.first.weight, 42.5);
-    expect(() => c.importJson('{"x":1}'), throwsFormatException);
+    await expectLater(c.importJson('{"x":1}'), throwsFormatException);
   });
 
   test('completing sets: fallbacks, validation, rest between sets only, overdue timer', () async {
@@ -275,7 +275,7 @@ void main() {
     final json = store.toJson()
       ..['templates'] = []
       ..['history'] = ['not a session'];
-    expect(() => store.importJson(jsonEncode(json)), throwsFormatException);
+    await expectLater(store.importJson(jsonEncode(json)), throwsFormatException);
     expect([for (final t in store.templates) t.name], names);
     expect(store.history, isEmpty);
   });

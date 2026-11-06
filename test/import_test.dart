@@ -44,7 +44,7 @@ void main() {
     final data = convertLegacy(readBackupZip(fletBackup()));
     final store = AppStore();
     await store.load();
-    store.importLegacy(data);
+    await store.importLegacy(data);
 
     final legs = store.templates.single;
     expect(legs.exercises.first.types, ['Warm-up', 'Normal', 'Top Set']);

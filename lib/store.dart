@@ -1836,8 +1836,8 @@ class AppStore extends ChangeNotifier {
 
   // ---------------------------------------------------------------- Import / export
 
-  /// Replaces all data with a Flet backup's contents.
-  List<String> importLegacy(LegacyData d) {
+  /// Replaces all data with a Flet backup's contents, after saving a safety copy.
+  Future<List<String>> importLegacy(LegacyData d) async {
     final known = {for (final e in d.exercises) e.name.toLowerCase()};
     final missing = <String>{
       for (final t in d.templates)
@@ -1845,12 +1845,16 @@ class AppStore extends ChangeNotifier {
       for (final s in d.history)
         for (final e in s.exercises) e.name,
     }.where((n) => !known.contains(n.toLowerCase()));
-    exercises = [...d.exercises, for (final n in missing) Exercise(name: n, loadMode: defaultLoadModeFor(n))]
+    final newExercises = [...d.exercises, for (final n in missing) Exercise(name: n, loadMode: defaultLoadModeFor(n))]
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final newSettings = Settings.fromJson(settings.toJson());
+    d.applySettings(newSettings);
+    await _backupBeforeReplace();
+    exercises = newExercises;
     templates = d.templates.isEmpty ? seedTemplates() : d.templates;
     history = d.history;
     cycles = d.cycles;
-    d.applySettings(settings);
+    settings = newSettings;
     active = null;
     rest = null;
     _syncAlerts();
@@ -1861,7 +1865,7 @@ class AppStore extends ChangeNotifier {
     ];
   }
 
-  void importJson(String text) {
+  Future<void> importJson(String text) async {
     final Object? j;
     try {
       j = jsonDecode(text);
@@ -1871,12 +1875,21 @@ class AppStore extends ChangeNotifier {
     if (j is! Map<String, dynamic> || j['settings'] == null || j['templates'] == null) {
       throw const FormatException('This file is not a Gymer backup.');
     }
+    final incoming = AppStore();
     try {
-      _fromJson(j);
+      incoming._fromJson(j);
     } catch (e) {
-      // Nothing was replaced: _fromJson parses everything first.
+      // Parse separately so a damaged backup cannot change the current data.
       throw FormatException('This backup is damaged and was not restored ($e).');
     }
+    await _backupBeforeReplace();
+    settings = incoming.settings;
+    templates = incoming.templates;
+    exercises = incoming.exercises;
+    history = incoming.history;
+    cycles = incoming.cycles;
+    active = incoming.active;
+    rest = incoming.rest;
     _syncAlerts();
     changed();
   }
@@ -1903,6 +1916,19 @@ class AppStore extends ChangeNotifier {
     debugPrint('gymer: automatic backup failed: $e');
   });
 
+  /// A replacement must stop if its safety copy fails. Keep the save queue usable after that failure.
+  Future<void> _backupBeforeReplace() async {
+    final backup = _saving.then((_) => _snapshot());
+    _saving = backup.catchError((Object e) {
+      debugPrint('gymer: safety backup failed: $e');
+    });
+    try {
+      await backup;
+    } catch (e) {
+      throw FileSystemException('Could not save a safety backup. Your current data was not replaced. ($e)');
+    }
+  }
+
   Future<void> _snapshot() async {
     final dir = _backupDir;
     if (dir == null) return;
@@ -1910,8 +1936,13 @@ class AppStore extends ChangeNotifier {
     final text = jsonEncode(toJson());
     final existing = await _backupFiles();
     if (existing.isNotEmpty && await existing.first.$2.readAsString() == text) return;
-    final now = DateTime.now();
-    final target = File('${dir.path}/${snapshotName(now)}');
+    var now = DateTime.now();
+    var target = File('${dir.path}/${snapshotName(now)}');
+    // Names have second precision. Never overwrite an earlier recovery point made in the same second.
+    while (await target.exists()) {
+      now = now.add(const Duration(seconds: 1));
+      target = File('${dir.path}/${snapshotName(now)}');
+    }
     final tmp = File('${target.path}.tmp');
     await tmp.writeAsString(text, flush: true);
     await tmp.rename(target.path);
@@ -1945,8 +1976,7 @@ class AppStore extends ChangeNotifier {
   /// Replaces all data with [file]'s copy, after backing up the current data so this can be undone.
   Future<void> restoreSnapshot(File file) async {
     final text = await file.readAsString();
-    await snapshot();
-    importJson(text);
+    await importJson(text);
   }
 }
 

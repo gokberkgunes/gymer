@@ -130,6 +130,7 @@ class _PickerState extends State<_Picker> {
       if (favourites.isNotEmpty) ...[('Favourites', true), for (final name in favourites) (name, false)],
       if (favourites.isNotEmpty && (recent.isNotEmpty || remaining.isNotEmpty)) ('', true),
       if (recent.isNotEmpty) ...[('Recent', true), for (final name in recent) (name, false)],
+      if (recent.isNotEmpty && remaining.isNotEmpty) ('', true),
       if (grouped && promoted.isNotEmpty && remaining.isNotEmpty) ('All exercises', true),
       for (final name in remaining) (name, false),
     ];

@@ -21,6 +21,7 @@ Future<void> importFletBackup(BuildContext context) async {
     context,
     'Import from old Gymer',
     'Replaces all workouts, history, mesocycles and settings here with the backup\'s contents.'
+        ' Your current data is backed up first.'
         '${store.active != null ? ' The workout in progress is discarded.' : ''}',
     action: 'Choose ZIP',
   );
@@ -30,7 +31,8 @@ Future<void> importFletBackup(BuildContext context) async {
   try {
     final data = convertLegacy(readBackupZip(await file.readAsBytes()));
     if (!context.mounted) return;
-    final lines = store.importLegacy(data);
+    final lines = await store.importLegacy(data);
+    if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (c) => AlertDialog(
@@ -40,6 +42,8 @@ Future<void> importFletBackup(BuildContext context) async {
       ),
     );
   } on FormatException catch (e) {
+    if (context.mounted) _say(context, e.message);
+  } on FileSystemException catch (e) {
     if (context.mounted) _say(context, e.message);
   } catch (e) {
     if (context.mounted) _say(context, 'Could not read this backup: $e');
@@ -60,6 +64,7 @@ Future<void> restoreBackup(BuildContext context) async {
     context,
     'Restore backup',
     'Replaces all data here with the backup\'s contents.'
+        ' Your current data is backed up first.'
         '${store.active != null ? ' The workout in progress is discarded.' : ''}',
     action: 'Choose file',
     destructive: true,
@@ -68,9 +73,11 @@ Future<void> restoreBackup(BuildContext context) async {
   final file = await FilePicker.pickFile();
   if (file == null || !context.mounted) return;
   try {
-    store.importJson(utf8.decode(await file.readAsBytes()));
+    await store.importJson(utf8.decode(await file.readAsBytes()));
     if (context.mounted) _say(context, 'Backup restored.');
   } on FormatException catch (e) {
+    if (context.mounted) _say(context, e.message);
+  } on FileSystemException catch (e) {
     if (context.mounted) _say(context, e.message);
   } catch (e) {
     if (context.mounted) _say(context, 'Could not read this file: $e');
@@ -150,6 +157,8 @@ class _AutoBackupsScreenState extends State<AutoBackupsScreen> {
       if (mounted) _say(context, 'Backup restored.');
     } on FormatException catch (e) {
       if (mounted) _say(context, e.message);
+    } on FileSystemException catch (e) {
+      if (mounted) _say(context, e.message);
     } catch (e) {
       if (mounted) _say(context, 'Could not restore: $e');
     }
@@ -173,7 +182,7 @@ class _AutoBackupsScreenState extends State<AutoBackupsScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                 child: Text(
-                  'Saved after each workout and once a day. Kept: the last 3 days, 4 weeks and 6 months.',
+                  'Saved after workouts, daily, and before restores or imports. Kept: the last 3 days, 4 weeks and 6 months.',
                   style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
