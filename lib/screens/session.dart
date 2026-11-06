@@ -456,6 +456,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final st = context.style;
     final e = exercise;
     final info = store.exercise(e.name);
+    final note = info?.note.trim() ?? '';
     final visibleSets = session.visibleSetsFor(e);
     final collapsed =
         e.collapsed ??
@@ -477,6 +478,12 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       ('rest', Icons.timer_outlined, 'Rest timers', () => _restEditor(context, store, e)),
       ('history', Icons.show_chart_rounded, 'History & progress', () => openExerciseProgress(context, e.name)),
       ('details', Icons.info_outline_rounded, 'Exercise details', () => openExerciseEditor(context, e.name)),
+      (
+        'exerciseNote',
+        Icons.sticky_note_2_outlined,
+        note.isEmpty ? 'Add exercise note' : 'Edit exercise note',
+        () => editExerciseNote(context, e.name),
+      ),
       (
         'notes',
         e.notesVisible ? Icons.speaker_notes_off_outlined : Icons.notes_rounded,
@@ -532,9 +539,57 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                 runSpacing: 4,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Text(e.name, style: t.titleMedium?.copyWith(fontSize: 18)),
-                  if (e.advice.isNotEmpty)
-                    InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
+                  LayoutBuilder(
+                    builder: (context, constraints) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Tooltip(
+                            message: e.name,
+                            child: Text(
+                              e.name,
+                              maxLines: note.isEmpty ? null : 2,
+                              overflow: note.isEmpty ? null : TextOverflow.ellipsis,
+                              style: t.titleMedium?.copyWith(fontSize: 18),
+                            ),
+                          ),
+                        ),
+                        if (e.advice.isNotEmpty)
+                          InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
+                        if (note.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: (constraints.maxWidth * 0.38).clamp(0.0, 112.0).toDouble(),
+                            ),
+                            child: Tooltip(
+                              message: note,
+                              child: Material(
+                                color: cs.surfaceContainerHigh,
+                                borderRadius: st.brSmall,
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () => editExerciseNote(context, e.name),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    // With many pins, keep the reminder accessible without crowding the name.
+                                    child: constraints.maxWidth < 180
+                                        ? Icon(Icons.sticky_note_2_outlined, size: 16, color: cs.onSurfaceVariant)
+                                        : Text(
+                                            note.replaceAll(RegExp(r'\s+'), ' '),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                   if ((e.calibrate || e.calibrationEntered) && firstAnchor >= 0)
                     _CalibrationCard(exercise: e, index: firstAnchor),
                   if (e.method != 'Straight')
@@ -589,7 +644,6 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       ),
     );
 
-    final note = info?.note.trim() ?? '';
     // A Material (like the Card it replaces) so ink ripples inside the card stay visible. Its colour
     // fades to grey while the name is pressed instead of jumping, which flickered on quick taps.
     final card = TweenAnimationBuilder<Color?>(
@@ -613,29 +667,6 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             heading,
-            if (note.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 8),
-                child: Tooltip(
-                  message: note,
-                  triggerMode: TooltipTriggerMode.tap,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.success.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                    child: Text(
-                      note.length <= 20 ? note : '${note.substring(0, 20).trimRight()}…',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.success,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             if (!collapsed) ...[
               // No paragraphs of advice inside the workout: it is behind the (i) beside the exercise name.
               _ColumnHeader(exercise: e, unit: session.unit),

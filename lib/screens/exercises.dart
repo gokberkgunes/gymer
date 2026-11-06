@@ -118,6 +118,40 @@ Future<void> openExerciseEditor(BuildContext context, String name) {
   ).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => ExerciseEditor(original: e)));
 }
 
+/// A persistent setup reminder, separate from set notes and logging context.
+Future<void> editExerciseNote(BuildContext context, String name) async {
+  final store = StoreScope.read(context);
+  final exercise = store.exercise(name);
+  if (exercise == null) return;
+  var note = exercise.note;
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Exercise note'),
+      content: TextFormField(
+        initialValue: note,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 3,
+        textCapitalization: TextCapitalization.sentences,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(hintText: 'Seat 4 · neutral grip'),
+        onChanged: (value) => note = value,
+        onFieldSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, note.trim()), child: const Text('Save')),
+      ],
+    ),
+  );
+  if (result == null || !context.mounted) return;
+  final current = store.exercise(name);
+  if (current == null || current.note == result) return;
+  final error = store.saveExercise(current.copyWith(note: result));
+  if (error != null) notify(context, error);
+}
+
 class ExerciseEditor extends StatefulWidget {
   final Exercise original;
   const ExerciseEditor({super.key, required this.original});
@@ -254,7 +288,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
           const SizedBox(height: 10),
           TextField(
             controller: _note,
-            decoration: const InputDecoration(labelText: 'Note', hintText: 'e.g. rope handle, EZ bar'),
+            decoration: const InputDecoration(labelText: 'Exercise note', hintText: 'Seat 4 · neutral grip'),
           ),
           const SizedBox(height: 10),
           dropdown('Load tracking', _e.loadMode, loadModes, (v) => setState(() => _e = _e.copyWith(loadMode: v))),

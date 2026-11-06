@@ -6,6 +6,7 @@ const exerciseActions = <(String, String, IconData)>[
   ('rest', 'Rest timers', Icons.timer_outlined),
   ('history', 'History & progress', Icons.show_chart_rounded),
   ('details', 'Exercise details', Icons.info_outline_rounded),
+  ('exerciseNote', 'Exercise note', Icons.sticky_note_2_outlined),
   ('notes', 'Set notes', Icons.notes_rounded),
   ('moveUp', 'Move up', Icons.arrow_upward_rounded),
   ('moveDown', 'Move down', Icons.arrow_downward_rounded),
