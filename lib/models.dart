@@ -1041,6 +1041,7 @@ class Settings {
   String achievementCelebration; // glow | confetti | off
   bool setCelebrations;
   bool recordEffects;
+  String recordEffectStyle; // foil | holographic | polychrome
   bool workoutCelebrations;
   bool haptics;
   bool restHaptics;
@@ -1100,6 +1101,7 @@ class Settings {
     this.achievementCelebration = 'glow',
     this.setCelebrations = true,
     this.recordEffects = true,
+    this.recordEffectStyle = 'holographic',
     this.workoutCelebrations = true,
     this.haptics = true,
     this.restHaptics = true,
@@ -1193,6 +1195,7 @@ class Settings {
     'achievementCelebration': achievementCelebration,
     'setCelebrations': setCelebrations,
     'recordEffects': recordEffects,
+    'recordEffectStyle': recordEffectStyle,
     'workoutCelebrations': workoutCelebrations,
     'haptics': haptics,
     'restHaptics': restHaptics,
@@ -1254,6 +1257,7 @@ class Settings {
       achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),
       setCelebrations: b('setCelebrations', d.setCelebrations),
       recordEffects: b('recordEffects', d.recordEffects),
+      recordEffectStyle: s('recordEffectStyle', d.recordEffectStyle, {'foil', 'holographic', 'polychrome'}),
       workoutCelebrations: b('workoutCelebrations', d.workoutCelebrations),
       haptics: b('haptics', d.haptics),
       restHaptics: b('restHaptics', d.restHaptics),

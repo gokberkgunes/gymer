@@ -14,6 +14,7 @@ import '../widgets/circuit_editor.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
+import '../widgets/edition_card.dart';
 import '../widgets/record_effect.dart';
 import '../widgets/rest_timer.dart';
 import '../widgets/tick.dart';
@@ -1522,6 +1523,7 @@ class _SetRow extends StatelessWidget {
       child: RecordEffect(
         active: record != null,
         enabled: store.settings.recordEffects,
+        edition: editionNamed(store.settings.recordEffectStyle),
         outline: !st.joinSets,
         borderRadius: st.setTile(position, count),
         child: Padding(

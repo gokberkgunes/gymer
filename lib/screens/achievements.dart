@@ -3,10 +3,8 @@ import 'package:flutter/material.dart';
 import '../logic/achievements.dart';
 import '../theme.dart';
 import '../widgets/achievement.dart';
-import '../widgets/celebration.dart';
 import '../widgets/common.dart';
 import '../widgets/edition_card.dart';
-import 'celebrations.dart';
 
 class AchievementsScreen extends StatefulWidget {
   const AchievementsScreen({super.key});
@@ -45,20 +43,13 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                 title: const Text('Every session adds up'),
                 content: const Text(
                   'Your saved workout history counts, including imported workouts. Warm-ups are excluded. '
-                  'Tap a milestone to see its goal. Older achievements are collected quietly; new ones can celebrate when you finish a workout.',
+                  'Tap a milestone to see its goal. Older achievements are collected quietly; how new ones celebrate is set in Settings → Celebrations.',
                 ),
                 actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Got it'))],
               ),
             ),
           ),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Celebration settings',
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _CelebrationSettings())),
-          ),
-        ],
       ),
       body: CustomScrollView(
         slivers: [
@@ -236,7 +227,8 @@ void _details(BuildContext context, AchievementProgress progress, String unit) =
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(progress.achievement.goal(unit), style: Theme.of(c).textTheme.titleMedium),
-        if (progress.earned) Text('${editionOf(progress.achievement).label} edition', style: Theme.of(c).textTheme.labelMedium),
+        if (progress.earned)
+          Text('${editionOf(progress.achievement).label} edition', style: Theme.of(c).textTheme.labelMedium),
         const SizedBox(height: 12),
         Text(progress.achievement.explanation),
         const SizedBox(height: 16),
@@ -250,160 +242,3 @@ void _details(BuildContext context, AchievementProgress progress, String unit) =
     actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
   ),
 );
-
-class _CelebrationSettings extends StatefulWidget {
-  const _CelebrationSettings();
-
-  @override
-  State<_CelebrationSettings> createState() => _CelebrationSettingsState();
-}
-
-class _CelebrationSettingsState extends State<_CelebrationSettings> {
-  int _preview = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final s = store.settings;
-    final cs = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-    final reducedMotion = MediaQuery.disableAnimationsOf(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Celebrations')),
-      body: Stack(
-        children: [
-          ListView(
-            padding: subPageInsets,
-            children: [
-              const SectionLabel('Achievements'),
-              Card(
-                child: Padding(
-                  padding: EdgeInsets.all(context.style.sp(16)),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      LabelWithInfo(
-                        Text('Milestone moment', style: t.bodyLarge),
-                        InfoDot(
-                          tooltip: 'When achievements celebrate',
-                          onTap: () => showDialog<void>(
-                            context: context,
-                            builder: (c) => AlertDialog(
-                              title: const Text('Milestone moment'),
-                              content: const Text(
-                                'New milestones appear after you finish a workout, once per achievement. '
-                                'Off keeps your collection and progress without the finish-screen highlight. '
-                                'Imported history never replays celebrations.',
-                              ),
-                              actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Got it'))],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: 'glow', label: Text('Glow')),
-                          ButtonSegment(value: 'confetti', label: Text('Confetti')),
-                          ButtonSegment(value: 'off', label: Text('Off')),
-                        ],
-                        selected: {s.achievementCelebration},
-                        onSelectionChanged: (v) => store.updateSettings((x) => x.achievementCelebration = v.first),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(switch (s.achievementCelebration) {
-                        'glow' => 'A soft sweep of light over your milestone.',
-                        'confetti' => 'A milestone highlight with a confetti shower.',
-                        _ => 'Collect quietly.',
-                      }, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                    ],
-                  ),
-                ),
-              ),
-              if (s.achievementCelebration != 'off') ...[
-                SectionLabel(
-                  'Preview',
-                  trailing: IconButton(
-                    tooltip: 'Preview milestone',
-                    onPressed: () => setState(() => _preview++),
-                    icon: const Icon(Icons.play_arrow_rounded),
-                  ),
-                ),
-                // A neutral, muted sample, distinct from the interactive settings above it.
-                ColorFiltered(
-                  colorFilter: const ColorFilter.matrix([
-                    0.40,
-                    0.50,
-                    0.10,
-                    0,
-                    0,
-                    0.35,
-                    0.48,
-                    0.10,
-                    0,
-                    0,
-                    0.30,
-                    0.42,
-                    0.10,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0.82,
-                    0,
-                  ]),
-                  child: IgnorePointer(
-                    child: AchievementUnlockCard(
-                      key: ValueKey((_preview, s.achievementCelebration)),
-                      achievements: [AchievementProgress(achievements[1], 10, earnedAt: DateTime.now())],
-                      unit: s.unit,
-                      animate: _preview > 0 && s.achievementCelebration == 'glow',
-                    ),
-                  ),
-                ),
-              ],
-              const SectionLabel('During training'),
-              Card(
-                child: Column(
-                  children: [
-                    SwitchListTile(
-                      title: const Text('Personal-best effects'),
-                      subtitle: const Text('Holographic shimmer'),
-                      value: s.recordEffects,
-                      onChanged: (v) => store.updateSettings((x) => x.recordEffects = v),
-                    ),
-                    const Divider(indent: 16, endIndent: 16),
-                    SwitchListTile(
-                      title: const Text('Set confetti'),
-                      value: s.setCelebrations,
-                      onChanged: (v) => store.updateSettings((x) => x.setCelebrations = v),
-                    ),
-                    const Divider(indent: 16, endIndent: 16),
-                    SwitchListTile(
-                      title: const Text('Workout celebration'),
-                      value: s.workoutCelebrations,
-                      onChanged: (v) => store.updateSettings((x) => x.workoutCelebrations = v),
-                    ),
-                    const Divider(indent: 16, endIndent: 16),
-                    ListTile(
-                      title: const Text('Explore celebration styles'),
-                      trailing: const Icon(Icons.play_arrow_rounded, size: 20),
-                      onTap: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const CelebrationsPreview())),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (_preview > 0 && s.achievementCelebration == 'confetti' && !reducedMotion)
-            Positioned.fill(
-              child: WorkoutCelebration(key: ValueKey(_preview), headline: 'Achievement unlocked'),
-            ),
-        ],
-      ),
-    );
-  }
-}

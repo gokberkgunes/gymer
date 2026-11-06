@@ -3,13 +3,17 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'edition_card.dart';
 
-/// A looping holographic finish for a completed personal-best set. Values and layout stay still.
+/// A looping foil finish for a completed personal-best set, in the chosen [edition]: foil is a cool silver-blue
+/// sheen, holographic a shifting blue-green-accent rainbow and polychrome a full-spectrum one. Values and layout
+/// stay still.
 class RecordEffect extends StatefulWidget {
-  static const duration = Duration(milliseconds: 4200);
+  static const duration = Duration(milliseconds: 3200);
   final bool active;
   final bool enabled;
   final bool outline;
+  final AchievementEdition edition;
   final BorderRadius? borderRadius;
   final Widget child;
   const RecordEffect({
@@ -18,6 +22,7 @@ class RecordEffect extends StatefulWidget {
     required this.child,
     this.enabled = true,
     this.outline = true,
+    this.edition = AchievementEdition.holographic,
     this.borderRadius,
   });
 
@@ -63,12 +68,14 @@ class _RecordEffectState extends State<RecordEffect> with SingleTickerProviderSt
       animation: _controller,
       child: widget.child,
       builder: (context, child) {
-        final t = reducedMotion ? 0.9 : _controller.value; // 0.9 is the resting finish, without the sweep
+        final t = reducedMotion ? 0.4 : _controller.value;
         // Paint beneath the values so the stronger foil never washes out their contrast.
         // Keep the tree stable when enabled or undone so fields retain their focus and editing state.
         return RepaintBoundary(
           child: CustomPaint(
-            painter: widget.active && widget.enabled ? _RecordHologram(t, cs, radius, widget.outline) : null,
+            painter: widget.active && widget.enabled
+                ? _RecordHologram(t, cs, radius, widget.outline, widget.edition)
+                : null,
             child: child,
           ),
         );
@@ -77,106 +84,139 @@ class _RecordEffectState extends State<RecordEffect> with SingleTickerProviderSt
   }
 }
 
-/// A calm foil finish: one soft prismatic band glides across the tile, then it rests for a moment while a
-/// thin colour-shifting edge keeps a faint life. Everything is drawn beneath the values, from theme colours.
 class _RecordHologram extends CustomPainter {
   final double t;
   final ColorScheme colors;
   final BorderRadius radius;
   final bool outline;
-  const _RecordHologram(this.t, this.colors, this.radius, this.outline);
-
-  /// The sweep takes the first part of each cycle; the rest is a pause.
-  static const _sweepShare = 0.38;
+  final AchievementEdition edition;
+  const _RecordHologram(this.t, this.colors, this.radius, this.outline, this.edition);
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final shape = radius.toRRect(rect);
-    final sweep = (t / _sweepShare).clamp(0.0, 1.0);
-    final eased = Curves.easeInOutCubic.transform(sweep);
-    final glow = math.sin(sweep * math.pi); // 0 at rest, 1 mid-sweep
-    final pulse = 0.5 + 0.5 * math.sin(t * math.pi * 2);
-
+    final energy = 0.9 + 0.1 * math.cos(t * math.pi * 2);
+    final travel = t;
+    final palette = switch (edition) {
+      AchievementEdition.foil => [colors.info, colors.onSurfaceVariant, colors.primary, colors.info],
+      AchievementEdition.holographic => [colors.primary, colors.info, colors.success, colors.primary],
+      AchievementEdition.polychrome => [
+        colors.error,
+        colors.warning,
+        colors.success,
+        colors.info,
+        colors.primary,
+        colors.error,
+      ],
+    };
+    // How strongly each layer shows: foil is the quietest, polychrome the boldest.
+    final strength = switch (edition) {
+      AchievementEdition.foil => 0.6,
+      AchievementEdition.holographic => 1.0,
+      AchievementEdition.polychrome => 1.25,
+    };
     canvas.save();
     canvas.clipRRect(shape);
-    // A faint resting foil so a record never looks plain between sweeps.
+    // A low iridescent wash under the travelling reflection. It is a still diagonal blend whose colours
+    // drift slowly sideways (no spinning); every hue comes from the app theme.
+    final drift = math.sin(t * math.pi * 2) * 0.4;
     canvas.drawRRect(
       shape,
       Paint()
         ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colors.info.withValues(alpha: 0.07),
-            colors.primary.withValues(alpha: 0.05),
-            colors.success.withValues(alpha: 0.07),
-          ],
+          begin: Alignment(-1 + drift, -1),
+          end: Alignment(1 + drift, 1),
+          colors: [for (final color in palette) color.withValues(alpha: 0.12 * strength * energy)],
         ).createShader(rect),
     );
-    if (sweep > 0 && sweep < 1) {
-      // A prismatic band, tilted by running the gradient along the diagonal of a wide rectangle.
-      final bandWidth = size.width * 0.55;
-      final x = -bandWidth + (size.width + bandWidth * 1.6) * eased;
-      final band = Rect.fromLTWH(x, -size.height * 0.3, bandWidth, size.height * 1.6);
-      canvas.drawRect(
-        band,
+    // The left-to-right travelling bands lean 20 degrees clockwise, rotated about the tile's centre.
+    void leaning(void Function() draw) {
+      canvas
+        ..save()
+        ..translate(size.width / 2, size.height / 2)
+        ..rotate(20 * math.pi / 180)
+        ..translate(-size.width / 2, -size.height / 2);
+      draw();
+      canvas.restore();
+    }
+
+    final cover = rect.inflate(size.longestSide); // the tile's clip limits what shows
+    final band = Rect.fromLTWH(
+      size.width * (travel * 3 - 1.8),
+      -size.height * 0.35,
+      size.width * 1.4,
+      size.height * 1.7,
+    );
+    leaning(
+      () => canvas.drawRect(
+        cover,
         Paint()
           ..shader = LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [
-              colors.info.withValues(alpha: 0),
-              colors.info.withValues(alpha: 0.22 * glow),
-              colors.success.withValues(alpha: 0.26 * glow),
-              colors.primary.withValues(alpha: 0.3 * glow),
+              colors.primary.withValues(alpha: 0),
+              colors.info.withValues(alpha: 0.24 * strength * energy),
+              (edition == AchievementEdition.foil ? colors.info : colors.success).withValues(
+                alpha: 0.34 * strength * energy,
+              ),
+              (edition == AchievementEdition.polychrome ? colors.warning : colors.primary).withValues(
+                alpha: 0.42 * strength * energy,
+              ),
+              (edition == AchievementEdition.polychrome ? colors.error : colors.info).withValues(
+                alpha: 0.24 * strength * energy,
+              ),
               colors.primary.withValues(alpha: 0),
             ],
-            stops: const [0, 0.28, 0.5, 0.72, 1],
+            stops: const [0, 0.22, 0.4, 0.58, 0.76, 1],
           ).createShader(band),
-      );
-      // A narrow specular core riding in the middle of the band.
-      final shine = colors.brightness == Brightness.dark ? colors.onSurface : colors.surface;
-      final core = Rect.fromCenter(center: band.center, width: bandWidth * 0.16, height: band.height);
-      canvas.drawRect(
-        core,
+      ),
+    );
+    // Fine slanted striations give the moving colors a foil surface, rather than a flat tinted overlay.
+    final lines = Paint()..strokeWidth = 0.7;
+    var index = 0;
+    for (double y = -size.height * 0.2; y < size.height * 1.2; y += 6) {
+      lines.color = palette[index++ % palette.length].withValues(alpha: 0.08 * strength * energy);
+      final offset = math.sin(t * math.pi * 2 + y * 0.02) * 2;
+      canvas.drawLine(Offset(0, y + offset), Offset(size.width, y + offset - size.height * 0.12), lines);
+    }
+    final shine = colors.brightness == Brightness.dark ? colors.onSurface : colors.surface;
+    final reflection = Rect.fromLTWH(
+      size.width * (travel * 1.6 - 0.3),
+      -size.height * 0.6,
+      size.width * 0.28,
+      size.height * 2.2,
+    );
+    leaning(
+      () => canvas.drawRect(
+        cover,
         Paint()
           ..shader = LinearGradient(
-            colors: [shine.withValues(alpha: 0), shine.withValues(alpha: 0.3 * glow), shine.withValues(alpha: 0)],
-          ).createShader(core),
-      );
-      // One small four-point glint where the band crosses the tile.
-      final centre = Offset(band.center.dx, size.height * 0.3);
-      final arm = math.min(7.0, size.height * 0.22) * glow;
-      final glint = Paint()
-        ..color = shine.withValues(alpha: 0.7 * glow)
-        ..strokeWidth = 1.2
-        ..strokeCap = StrokeCap.round;
-      canvas
-        ..drawLine(centre.translate(-arm, 0), centre.translate(arm, 0), glint)
-        ..drawLine(centre.translate(0, -arm), centre.translate(0, arm), glint);
-    }
+            colors: [
+              shine.withValues(alpha: 0),
+              shine.withValues(alpha: 0.2 * energy),
+              shine.withValues(alpha: 0),
+            ],
+          ).createShader(reflection),
+      ),
+    );
     canvas.restore();
     if (outline) {
       canvas.drawRRect(
-        shape.deflate(0.75),
+        shape.deflate(1),
         Paint()
           ..shader = SweepGradient(
-            colors: [
-              colors.primary.withValues(alpha: 0.28 + 0.2 * pulse),
-              colors.info.withValues(alpha: 0.5),
-              colors.success.withValues(alpha: 0.28 + 0.2 * pulse),
-              colors.primary.withValues(alpha: 0.28 + 0.2 * pulse),
-            ],
+            colors: [for (final color in palette) color.withValues(alpha: 0.85 * energy)],
             transform: GradientRotation(t * math.pi * 2),
           ).createShader(rect)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.25,
+          ..strokeWidth = 1.5,
       );
     }
   }
 
   @override
   bool shouldRepaint(_RecordHologram old) =>
-      t != old.t || colors != old.colors || radius != old.radius || outline != old.outline;
+      t != old.t || colors != old.colors || radius != old.radius || outline != old.outline || edition != old.edition;
 }

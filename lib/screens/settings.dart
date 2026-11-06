@@ -13,6 +13,7 @@ import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
 import '../widgets/plate_profile_picker.dart';
 import '../widgets/warmup_background.dart';
+import 'celebrations.dart';
 import 'data_io.dart';
 import 'bodyweight.dart';
 import 'exercises.dart';
@@ -52,8 +53,14 @@ class SettingsScreen extends StatelessWidget {
           link(
             Icons.emoji_events_outlined,
             'Achievements',
-            'Milestones, progress and celebrations',
+            'Milestones and progress',
             const AchievementsScreen(),
+          ),
+          link(
+            Icons.celebration_outlined,
+            'Celebrations',
+            'Confetti, personal-best effects and milestones',
+            const CelebrationSettings(),
           ),
           link(Icons.tune_rounded, 'Advanced', 'Set rules and keyboard', const _AdvancedSettings()),
           link(Icons.storage_outlined, 'Databases', 'Exercises, set types and rep max', const _DatabaseSettings()),

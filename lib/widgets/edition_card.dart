@@ -16,6 +16,10 @@ enum AchievementEdition {
   const AchievementEdition(this.label);
 }
 
+/// The edition saved in settings ('foil', 'holographic' or 'polychrome'); holographic when unknown.
+AchievementEdition editionNamed(String name) =>
+    AchievementEdition.values.where((e) => e.name == name).firstOrNull ?? AchievementEdition.holographic;
+
 AchievementEdition editionOf(Achievement a) {
   final ladder = achievements.where((x) => x.kind == a.kind).toList();
   final index = math.max(0, ladder.indexWhere((x) => x.id == a.id));

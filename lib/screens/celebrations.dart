@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../logic/achievements.dart';
+import '../theme.dart';
+import '../widgets/achievement.dart';
+import '../widgets/edition_card.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
 import '../widgets/num_field.dart';
@@ -39,6 +43,7 @@ class _CelebrationsPreviewState extends State<CelebrationsPreview> {
               color: Theme.of(context).colorScheme.surfaceContainerHigh,
               child: RecordEffect(
                 active: _record,
+                edition: editionNamed(StoreScope.of(context).settings.recordEffectStyle),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                   child: IgnorePointer(
@@ -124,4 +129,174 @@ class _CelebrationsPreviewState extends State<CelebrationsPreview> {
       ],
     ),
   );
+}
+
+class CelebrationSettings extends StatefulWidget {
+  const CelebrationSettings({super.key});
+
+  @override
+  State<CelebrationSettings> createState() => CelebrationSettingsState();
+}
+
+class CelebrationSettingsState extends State<CelebrationSettings> {
+  int _preview = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final s = store.settings;
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final reducedMotion = MediaQuery.disableAnimationsOf(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Celebrations')),
+      body: Stack(
+        children: [
+          ListView(
+            padding: subPageInsets,
+            children: [
+              const SectionLabel('Milestones'),
+              Card(
+                child: Padding(
+                  padding: EdgeInsets.all(context.style.sp(16)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      LabelWithInfo(
+                        Text('Milestone moment', style: t.bodyLarge),
+                        InfoDot(
+                          tooltip: 'When achievements celebrate',
+                          onTap: () => showDialog<void>(
+                            context: context,
+                            builder: (c) => AlertDialog(
+                              title: const Text('Milestone moment'),
+                              content: const Text(
+                                'New milestones appear after you finish a workout, once per achievement. '
+                                'Off keeps your collection and progress without the finish-screen highlight. '
+                                'Imported history never replays celebrations.',
+                              ),
+                              actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Got it'))],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'glow', label: Text('Glow')),
+                          ButtonSegment(value: 'confetti', label: Text('Confetti')),
+                          ButtonSegment(value: 'off', label: Text('Off')),
+                        ],
+                        selected: {s.achievementCelebration},
+                        onSelectionChanged: (v) => store.updateSettings((x) => x.achievementCelebration = v.first),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(switch (s.achievementCelebration) {
+                        'glow' => 'A soft sweep of light over your milestone.',
+                        'confetti' => 'A milestone highlight with a confetti shower.',
+                        _ => 'Collect quietly.',
+                      }, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+              ),
+              if (s.achievementCelebration != 'off') ...[
+                SectionLabel(
+                  'Preview',
+                  trailing: IconButton(
+                    tooltip: 'Preview milestone',
+                    onPressed: () => setState(() => _preview++),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                  ),
+                ),
+                // A neutral, muted sample, distinct from the interactive settings above it.
+                ColorFiltered(
+                  colorFilter: const ColorFilter.matrix([
+                    0.40,
+                    0.50,
+                    0.10,
+                    0,
+                    0,
+                    0.35,
+                    0.48,
+                    0.10,
+                    0,
+                    0,
+                    0.30,
+                    0.42,
+                    0.10,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0.82,
+                    0,
+                  ]),
+                  child: IgnorePointer(
+                    child: AchievementUnlockCard(
+                      key: ValueKey((_preview, s.achievementCelebration)),
+                      achievements: [AchievementProgress(achievements[1], 10, earnedAt: DateTime.now())],
+                      unit: s.unit,
+                      animate: _preview > 0 && s.achievementCelebration == 'glow',
+                    ),
+                  ),
+                ),
+              ],
+              const SectionLabel('During training'),
+              Card(
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      title: const Text('Personal-best effects'),
+                      subtitle: const Text('Foil shimmer on record sets'),
+                      value: s.recordEffects,
+                      onChanged: (v) => store.updateSettings((x) => x.recordEffects = v),
+                    ),
+                    if (s.recordEffects)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: SegmentedButton<String>(
+                          showSelectedIcon: false,
+                          segments: [
+                            for (final e in AchievementEdition.values)
+                              ButtonSegment(value: e.name, label: Text(e.label)),
+                          ],
+                          selected: {s.recordEffectStyle},
+                          onSelectionChanged: (v) => store.updateSettings((x) => x.recordEffectStyle = v.first),
+                        ),
+                      ),
+                    const Divider(indent: 16, endIndent: 16),
+                    SwitchListTile(
+                      title: const Text('Set confetti'),
+                      value: s.setCelebrations,
+                      onChanged: (v) => store.updateSettings((x) => x.setCelebrations = v),
+                    ),
+                    const Divider(indent: 16, endIndent: 16),
+                    SwitchListTile(
+                      title: const Text('Workout celebration'),
+                      value: s.workoutCelebrations,
+                      onChanged: (v) => store.updateSettings((x) => x.workoutCelebrations = v),
+                    ),
+                    const Divider(indent: 16, endIndent: 16),
+                    ListTile(
+                      title: const Text('Explore celebration styles'),
+                      trailing: const Icon(Icons.play_arrow_rounded, size: 20),
+                      onTap: () =>
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const CelebrationsPreview())),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (_preview > 0 && s.achievementCelebration == 'confetti' && !reducedMotion)
+            Positioned.fill(
+              child: WorkoutCelebration(key: ValueKey(_preview), headline: 'Achievement unlocked'),
+            ),
+        ],
+      ),
+    );
+  }
 }
