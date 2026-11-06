@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../logic/numbers.dart';
 import '../logic/volume.dart';
@@ -27,6 +30,9 @@ class FinishScreen extends StatelessWidget {
     final motion = !MediaQuery.disableAnimationsOf(context);
     final milestone = !historical && s.achievements.isNotEmpty && settings.achievementCelebration != 'off';
     final pbExercises = {for (final b in s.bests) b.exercise};
+    // The score is tallied once, right after a workout; reopened summaries are shown at rest.
+    final tally = !historical && motion && settings.workoutCelebrations;
+    String volume(double v) => '${groupThousands(v)} ${s.unit}';
 
     return Scaffold(
       appBar: historical
@@ -70,16 +76,46 @@ class FinishScreen extends StatelessWidget {
                 const SizedBox(height: 20),
                 Row(
                   children: [
-                    Expanded(child: _Stat(_duration(s.duration), 'Time')),
+                    Expanded(
+                      child: _Stat(
+                        s.duration.inMinutes.toDouble(),
+                        (v) => _duration(Duration(minutes: v.round())),
+                        'Time',
+                        order: 0,
+                        animate: tally,
+                        haptics: settings.haptics,
+                      ),
+                    ),
                     const SizedBox(width: 8),
-                    Expanded(child: _Stat('${s.sets}', s.sets == 1 ? 'Set' : 'Sets')),
+                    Expanded(
+                      child: _Stat(
+                        s.sets.toDouble(),
+                        (v) => '${v.round()}',
+                        s.sets == 1 ? 'Set' : 'Sets',
+                        order: 1,
+                        animate: tally,
+                        haptics: settings.haptics,
+                      ),
+                    ),
                     if (s.volume > 0) ...[
                       const SizedBox(width: 8),
-                      Expanded(child: _Stat('${groupThousands(s.volume)} ${s.unit}', 'Volume')),
+                      Expanded(
+                        child: _Stat(
+                          s.volume,
+                          volume,
+                          'Volume',
+                          order: 2,
+                          animate: tally,
+                          haptics: settings.haptics,
+                        ),
+                      ),
                     ],
                   ],
                 ),
-                if (s.bests.isNotEmpty) ...[const SizedBox(height: 16), PersonalBestCard(s.bests)],
+                if (s.bests.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _Slam(animate: tally, haptics: settings.haptics, child: PersonalBestCard(s.bests)),
+                ],
                 if (milestone) ...[
                   const SizedBox(height: 16),
                   AchievementUnlockCard(
@@ -134,17 +170,61 @@ class FinishScreen extends StatelessWidget {
   }
 }
 
-/// One headline number with a small uppercase label beneath.
-class _Stat extends StatelessWidget {
-  final String value;
+/// One headline number with a small uppercase label beneath. After a workout the number counts up in
+/// turn with its neighbours and pops when it lands, like a score being tallied. The final text is laid out
+/// invisibly underneath, so nothing moves while the digits change.
+class _Stat extends StatefulWidget {
+  final double value;
+  final String Function(double) format;
   final String label;
-  const _Stat(this.value, this.label);
+  final int order;
+  final bool animate;
+  final bool haptics;
+  const _Stat(this.value, this.format, this.label, {this.order = 0, this.animate = false, this.haptics = true});
+
+  @override
+  State<_Stat> createState() => _StatState();
+}
+
+class _StatState extends State<_Stat> with SingleTickerProviderStateMixin {
+  static const _step = 300, _count = 800, _pop = 450;
+  late final int _total = _step * widget.order + _count + _pop;
+  late final _controller = AnimationController(vsync: this, duration: Duration(milliseconds: _total));
+  late final _counting = CurvedAnimation(
+    parent: _controller,
+    curve: Interval(_step * widget.order / _total, (_step * widget.order + _count) / _total, curve: Curves.easeOutCubic),
+  );
+  late final double _popStart = (_step * widget.order + _count) / _total;
+  bool _landed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) {
+      _controller.addListener(() {
+        if (!_landed && _controller.value >= _popStart) {
+          _landed = true;
+          if (widget.haptics) HapticFeedback.selectionClick();
+        }
+      });
+      _controller.forward();
+    } else {
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final st = context.style;
+    final style = t.titleLarge?.copyWith(fontWeight: FontWeight.w700, fontFeatures: tabular);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(color: cs.surfaceContainerHigh, borderRadius: st.br),
@@ -154,18 +234,94 @@ class _Stat extends StatelessWidget {
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700, fontFeatures: tabular),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                final settled = _controller.value >= 1;
+                final p = ((_controller.value - _popStart) / (1 - _popStart)).clamp(0.0, 1.0);
+                final scale = 1 + 0.18 * math.sin(p * math.pi);
+                final color = Color.lerp(cs.primary, cs.onSurface, Curves.easeOut.transform(p));
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    Opacity(opacity: 0, child: Text(widget.format(widget.value), maxLines: 1, style: style)),
+                    Transform.scale(
+                      scale: scale,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        widget.format(widget.value * _counting.value),
+                        maxLines: 1,
+                        style: style?.copyWith(color: settled ? null : color),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 2),
-          Text(label.toUpperCase(), style: t.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+          Text(widget.label.toUpperCase(), style: t.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
         ],
       ),
     );
   }
+}
+
+/// The multiplier moment: personal bests slam in after the tally with a small overshoot and a shake.
+/// The card keeps its place in the layout the whole time; only opacity and scale change.
+class _Slam extends StatefulWidget {
+  final bool animate;
+  final bool haptics;
+  final Widget child;
+  const _Slam({required this.animate, required this.haptics, required this.child});
+
+  @override
+  State<_Slam> createState() => _SlamState();
+}
+
+class _SlamState extends State<_Slam> with SingleTickerProviderStateMixin {
+  static const _delay = 1600, _run = 700;
+  late final _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: _delay + _run));
+  bool _landed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) {
+      _controller.addListener(() {
+        if (!_landed && _controller.value >= _delay / (_delay + _run)) {
+          _landed = true;
+          if (widget.haptics) HapticFeedback.heavyImpact();
+        }
+      });
+      _controller.forward();
+    } else {
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    child: widget.child,
+    builder: (context, child) {
+      final p = ((_controller.value * (_delay + _run) - _delay) / _run).clamp(0.0, 1.0);
+      if (p >= 1) return child!;
+      return Opacity(
+        opacity: Curves.easeOut.transform((p * 5).clamp(0.0, 1.0)),
+        child: Transform.rotate(
+          angle: math.sin(p * math.pi * 7) * 0.015 * (1 - p),
+          child: Transform.scale(scale: 1.22 - 0.22 * Curves.easeOutBack.transform(p), child: child),
+        ),
+      );
+    },
+  );
 }
 
 /// Personal bests: a monochrome trophy in the accent colour heads the card, and each record is a row with

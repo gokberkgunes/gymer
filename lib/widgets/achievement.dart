@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../logic/achievements.dart';
 import '../theme.dart';
+import 'edition_card.dart';
 
 IconData achievementIcon(AchievementKind kind) => switch (kind) {
   AchievementKind.workouts => Icons.emoji_events_outlined,
@@ -49,37 +50,44 @@ class AchievementUnlockCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final first = achievements.first.achievement;
-    return AchievementGlint(
-      animate: animate,
-      child: Material(
-        color: Color.alphaBlend(cs.primary.withValues(alpha: 0.06), cs.surface),
-        borderRadius: context.style.br,
-        child: InkWell(
+    final base = Color.alphaBlend(cs.primary.withValues(alpha: 0.06), cs.surface);
+    final edition = editionOf(first);
+    return TiltCard(
+      builder: (context, tilt) => AchievementGlint(
+        animate: animate,
+        child: Material(
+          color: base,
           borderRadius: context.style.br,
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.all(context.style.sp(16)),
-            child: Row(
-              children: [
-                AchievementEmblem(first.kind),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Achievement unlocked', style: t.labelMedium?.copyWith(color: cs.primary)),
-                      const SizedBox(height: 4),
-                      Text(first.title, style: t.titleMedium),
-                      Text(first.goal(unit), style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                    ],
-                  ),
+          child: CustomPaint(
+            painter: EditionFoilPainter(edition, tilt, cs, context.style.br),
+            child: InkWell(
+              borderRadius: context.style.br,
+              onTap: onTap,
+              child: Padding(
+                padding: EdgeInsets.all(context.style.sp(16)),
+                child: Row(
+                  children: [
+                    AchievementEmblem(first.kind),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Achievement unlocked', style: t.labelMedium?.copyWith(color: cs.primary)),
+                          const SizedBox(height: 4),
+                          Text(first.title, style: t.titleMedium),
+                          Text(first.goal(unit), style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                    if (achievements.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text('+${achievements.length - 1}', style: t.titleMedium?.copyWith(color: cs.primary)),
+                      ),
+                  ],
                 ),
-                if (achievements.length > 1)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Text('+${achievements.length - 1}', style: t.titleMedium?.copyWith(color: cs.primary)),
-                  ),
-              ],
+              ),
             ),
           ),
         ),

@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets/achievement.dart';
 import '../widgets/celebration.dart';
 import '../widgets/common.dart';
+import '../widgets/edition_card.dart';
 import 'celebrations.dart';
 
 class AchievementsScreen extends StatefulWidget {
@@ -152,61 +153,70 @@ class _AchievementTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final a = progress.achievement;
-    return Semantics(
-      button: true,
-      label: '${a.title}, ${a.goal(unit)}, ${progress.earned ? 'earned' : progress.progress(unit)}',
-      child: Material(
-        color: progress.earned ? Color.alphaBlend(cs.primary.withValues(alpha: 0.035), cs.surface) : cs.surface,
-        borderRadius: context.style.br,
+    final edition = progress.earned ? editionOf(a) : null;
+    final base = progress.earned ? Color.alphaBlend(cs.primary.withValues(alpha: 0.035), cs.surface) : cs.surface;
+    Widget content(Offset tilt) => Padding(
+      padding: EdgeInsets.all(context.style.sp(16)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              AchievementEmblem(a.kind, earned: progress.earned),
+              Icon(
+                progress.earned ? Icons.check_rounded : Icons.lock_outline_rounded,
+                size: 16,
+                color: progress.earned ? cs.primary : cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(a.title, style: t.titleSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Text(
+            a.goal(unit),
+            style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const Spacer(),
+          if (progress.earned) ...[
+            Text(edition!.label.toUpperCase(), style: t.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+            Text(fmtShortDate(progress.earnedAt!.toLocal()), style: t.labelMedium?.copyWith(color: cs.primary)),
+          ] else ...[
+            Text(
+              progress.progress(unit),
+              style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: progress.fraction,
+              minHeight: 3,
+              borderRadius: context.style.brSmall,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+          ],
+        ],
+      ),
+    );
+    Widget card(Offset tilt) => Material(
+      color: base,
+      borderRadius: context.style.br,
+      child: CustomPaint(
+        painter: edition == null ? null : EditionFoilPainter(edition, tilt, cs, context.style.br),
         child: InkWell(
           borderRadius: context.style.br,
           onTap: () => _details(context, progress, unit),
-          child: Padding(
-            padding: EdgeInsets.all(context.style.sp(16)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    AchievementEmblem(a.kind, earned: progress.earned),
-                    Icon(
-                      progress.earned ? Icons.check_rounded : Icons.lock_outline_rounded,
-                      size: 16,
-                      color: progress.earned ? cs.primary : cs.onSurfaceVariant.withValues(alpha: 0.5),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(a.title, style: t.titleSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Text(
-                  a.goal(unit),
-                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const Spacer(),
-                if (progress.earned)
-                  Text(fmtShortDate(progress.earnedAt!.toLocal()), style: t.labelMedium?.copyWith(color: cs.primary))
-                else ...[
-                  Text(
-                    progress.progress(unit),
-                    style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
-                  ),
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: progress.fraction,
-                    minHeight: 3,
-                    borderRadius: context.style.brSmall,
-                    color: cs.onSurfaceVariant.withValues(alpha: 0.5),
-                  ),
-                ],
-              ],
-            ),
-          ),
+          child: content(tilt),
         ),
       ),
+    );
+    return Semantics(
+      button: true,
+      label:
+          '${a.title}, ${a.goal(unit)}, ${progress.earned ? 'earned, ${edition!.label} edition' : progress.progress(unit)}',
+      child: edition == null ? card(Offset.zero) : TiltCard(builder: (context, tilt) => card(tilt)),
     );
   }
 }
@@ -226,6 +236,7 @@ void _details(BuildContext context, AchievementProgress progress, String unit) =
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(progress.achievement.goal(unit), style: Theme.of(c).textTheme.titleMedium),
+        if (progress.earned) Text('${editionOf(progress.achievement).label} edition', style: Theme.of(c).textTheme.labelMedium),
         const SizedBox(height: 12),
         Text(progress.achievement.explanation),
         const SizedBox(height: 16),
