@@ -1032,6 +1032,7 @@ class Settings {
   bool trackBodyweight;
   String achievementCelebration; // glow | confetti | off
   bool setCelebrations;
+  bool recordEffects;
   bool workoutCelebrations;
   bool haptics;
   bool restHaptics;
@@ -1089,6 +1090,7 @@ class Settings {
     this.trackBodyweight = false,
     this.achievementCelebration = 'glow',
     this.setCelebrations = true,
+    this.recordEffects = true,
     this.workoutCelebrations = true,
     this.haptics = true,
     this.restHaptics = true,
@@ -1179,6 +1181,7 @@ class Settings {
     'trackBodyweight': trackBodyweight,
     'achievementCelebration': achievementCelebration,
     'setCelebrations': setCelebrations,
+    'recordEffects': recordEffects,
     'workoutCelebrations': workoutCelebrations,
     'haptics': haptics,
     'restHaptics': restHaptics,
@@ -1238,6 +1241,7 @@ class Settings {
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
       achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),
       setCelebrations: b('setCelebrations', d.setCelebrations),
+      recordEffects: b('recordEffects', d.recordEffects),
       workoutCelebrations: b('workoutCelebrations', d.workoutCelebrations),
       haptics: b('haptics', d.haptics),
       restHaptics: b('restHaptics', d.restHaptics),

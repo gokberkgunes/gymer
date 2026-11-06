@@ -18,6 +18,7 @@ key.properties
 /coverage/
 # Local visual-review screenshots (kept in the project root for feedback)
 /preview-*.png
+/preview-*.gif
 **/doc/api/
 app.*.symbols
 app.*.map.json

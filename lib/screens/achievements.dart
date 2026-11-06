@@ -358,6 +358,13 @@ class _CelebrationSettingsState extends State<_CelebrationSettings> {
                 child: Column(
                   children: [
                     SwitchListTile(
+                      title: const Text('Personal-best effects'),
+                      subtitle: const Text('Holographic shimmer'),
+                      value: s.recordEffects,
+                      onChanged: (v) => store.updateSettings((x) => x.recordEffects = v),
+                    ),
+                    const Divider(indent: 16, endIndent: 16),
+                    SwitchListTile(
                       title: const Text('Set confetti'),
                       value: s.setCelebrations,
                       onChanged: (v) => store.updateSettings((x) => x.setCelebrations = v),

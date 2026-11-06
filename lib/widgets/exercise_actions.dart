@@ -43,7 +43,7 @@ class ExerciseActionHeader extends StatelessWidget {
       final iconSize = (actionWidth - 4).clamp(12.0, 20.0).toDouble();
 
       return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(child: title),
           IconButtonTheme(

@@ -14,6 +14,7 @@ import '../widgets/circuit_editor.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
+import '../widgets/record_effect.dart';
 import '../widgets/rest_timer.dart';
 import '../widgets/tick.dart';
 import 'exercises.dart';
@@ -531,8 +532,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final muscles = info?.primary ?? const <String>[];
 
     final firstAnchor = e.sets.indexWhere((x) => calibrationAnchor(e.method, x.type));
+    final showCalibration = (e.calibrate || e.calibrationEntered) && firstAnchor >= 0;
     final heading = ExerciseActionHeader(
-      minimumTitleWidth: canWarmup || note.isNotEmpty ? 160 : (circuit == null ? 96 : 144),
+      minimumTitleWidth: showCalibration || canWarmup || note.isNotEmpty ? 160 : (circuit == null ? 96 : 144),
       title: InkWell(
         // No highlight box of its own: the whole card is tinted instead (see _pressed).
         splashFactory: NoSplash.splashFactory,
@@ -554,106 +556,89 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  LayoutBuilder(
-                    builder: (context, constraints) => Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (circuit != null) ...[
-                          CircuitPill(
-                            circuits: session.circuits,
-                            circuit: circuit,
-                            exercise: e.name,
-                            onTap: () => _circuitEditor(context, store, e),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Flexible(
-                          child: Tooltip(
-                            message: e.name,
-                            child: Text(
-                              e.name,
-                              maxLines: note.isEmpty ? null : 2,
-                              overflow: note.isEmpty ? null : TextOverflow.ellipsis,
-                              style: t.titleMedium?.copyWith(fontSize: 18),
-                            ),
-                          ),
-                        ),
-                        if (e.advice.isNotEmpty)
-                          InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
-                        if (canWarmup) ...[
-                          const SizedBox(width: 8),
-                          _WarmupPill(
-                            active: warmup,
-                            ramp: ramp,
-                            compact: constraints.maxWidth < 220,
-                            onTap: () => _warmupEditor(context, store, e),
-                          ),
-                        ],
-                        if (note.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: (constraints.maxWidth * 0.38).clamp(0.0, 112.0).toDouble(),
-                            ),
-                            child: Tooltip(
-                              message: note,
-                              child: Material(
-                                color: cs.surfaceContainerHigh,
-                                borderRadius: st.brSmall,
-                                clipBehavior: Clip.antiAlias,
-                                child: InkWell(
-                                  onTap: () => editExerciseNote(context, e.name),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    // With many pins, keep the reminder accessible without crowding the name.
-                                    child: constraints.maxWidth < 180
-                                        ? Icon(Icons.sticky_note_2_outlined, size: 16, color: cs.onSurfaceVariant)
-                                        : Text(
-                                            note.replaceAll(RegExp(r'\s+'), ' '),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
-                                          ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if ((e.calibrate || e.calibrationEntered) && firstAnchor >= 0)
-                    _CalibrationCard(exercise: e, index: firstAnchor),
-                  if (e.method != 'Straight')
-                    Tooltip(
-                      message: 'Training method; edit the workout to change it',
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: cs.primary.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
+              LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (circuit != null) ...[
+                      CircuitPill(
+                        circuits: session.circuits,
+                        circuit: circuit,
+                        exercise: e.name,
+                        onTap: () => _circuitEditor(context, store, e),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Tooltip(
+                        message: e.name,
                         child: Text(
-                          e.method,
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.primary),
+                          e.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.titleMedium?.copyWith(fontSize: 18),
                         ),
                       ),
                     ),
-                  if (collapsed)
-                    Text(
-                      '${visibleSets.where((x) => x.done).length}/${visibleSets.length}',
-                      style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
-                    ),
-                ],
+                    if (e.advice.isNotEmpty)
+                      InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
+                    if (showCalibration) ...[
+                      const SizedBox(width: 8),
+                      _CalibrationCard(exercise: e, index: firstAnchor, compact: constraints.maxWidth < 220),
+                    ] else if (canWarmup) ...[
+                      const SizedBox(width: 8),
+                      _WarmupPill(
+                        active: warmup,
+                        ramp: ramp,
+                        compact: constraints.maxWidth < 220,
+                        onTap: () => _warmupEditor(context, store, e),
+                      ),
+                    ],
+                    if (note.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: (constraints.maxWidth * 0.38).clamp(0.0, 112.0).toDouble(),
+                        ),
+                        child: Tooltip(
+                          message: note,
+                          child: Material(
+                            color: cs.surfaceContainerHigh,
+                            borderRadius: st.brSmall,
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () => editExerciseNote(context, e.name),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                // With many pins, keep the reminder accessible without crowding the name.
+                                child: constraints.maxWidth < 180
+                                    ? Icon(Icons.sticky_note_2_outlined, size: 16, color: cs.onSurfaceVariant)
+                                    : Text(
+                                        note.replaceAll(RegExp(r'\s+'), ' '),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              if (muscles.isNotEmpty)
-                Text(muscles.join(' · '), style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+              if (muscles.isNotEmpty || e.method != 'Straight' || collapsed)
+                Text(
+                  [
+                    ...muscles,
+                    if (e.method != 'Straight') e.method,
+                    if (collapsed) '${visibleSets.where((x) => x.done).length}/${visibleSets.length}',
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                ),
             ],
           ),
         ),
@@ -974,7 +959,7 @@ class _WarmupPill extends StatelessWidget {
           ? 'Start warm-up'
           : 'Resume warm-up',
       child: Material(
-        color: active ? cs.info.withValues(alpha: 0.14) : cs.surfaceContainerHigh,
+        color: (complete && !active ? cs.onSurfaceVariant : cs.primary).withValues(alpha: 0.14),
         borderRadius: context.style.brSmall,
         child: InkWell(
           onTap: onTap,
@@ -992,7 +977,7 @@ class _WarmupPill extends StatelessWidget {
                       ? Icons.check_rounded
                       : Icons.local_fire_department_outlined,
                   size: 16,
-                  color: active ? cs.info : cs.onSurfaceVariant,
+                  color: complete && !active ? cs.onSurfaceVariant : cs.primary,
                 ),
                 if (!compact) ...[
                   const SizedBox(width: 4),
@@ -1001,9 +986,10 @@ class _WarmupPill extends StatelessWidget {
                       label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelMedium?.copyWith(color: active ? cs.info : cs.onSurfaceVariant),
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: complete && !active ? cs.onSurfaceVariant : cs.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1338,14 +1324,29 @@ class _SetRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 9, color: cs.primary, fontWeight: FontWeight.w600),
                 ),
-              Text(number, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (record != null)
+                    Positioned(
+                      right: 2,
+                      child: Tooltip(
+                        message: record == 'weight' ? 'Heaviest weight so far' : 'Best estimated 1RM so far',
+                        child: Icon(Icons.emoji_events_outlined, size: 14, color: cs.primary),
+                      ),
+                    ),
+                ],
+              ),
               if (restLabel != null)
                 restLabel
-              else if (record != null)
-                Tooltip(
-                  message: record == 'weight' ? 'Heaviest weight so far' : 'Best estimated 1RM so far',
-                  child: Icon(Icons.emoji_events_outlined, size: 14, color: cs.primary),
-                )
               else if (lastTime != null)
                 Text(
                   lastTime,
@@ -1483,20 +1484,28 @@ class _SetRow extends StatelessWidget {
     // so a set never changes height.
     // Each set is its own tile (as in the Appearance preview) so the set gap reads clearly.
     final content = Container(
-      padding: EdgeInsets.symmetric(horizontal: 2, vertical: st.sp(2)),
       decoration: BoxDecoration(color: tileColor, borderRadius: st.setTile(position, count)),
-      child: Opacity(
-        opacity: s.done && st.dimCompleted ? 0.55 : 1,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            row,
-            if (e.notesVisible)
-              Padding(
-                padding: const EdgeInsets.only(left: 52, top: 4),
-                child: _NoteField(set: s),
-              ),
-          ],
+      child: RecordEffect(
+        active: record != null,
+        enabled: store.settings.recordEffects,
+        outline: !st.joinSets,
+        borderRadius: st.setTile(position, count),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 2, vertical: st.sp(2)),
+          child: Opacity(
+            opacity: s.done && st.dimCompleted ? 0.55 : 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row,
+                if (e.notesVisible)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 52, top: 4),
+                    child: _NoteField(set: s),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1701,7 +1710,8 @@ Future<void> showSetDetails(
 class _CalibrationCard extends StatelessWidget {
   final SessionExercise exercise;
   final int index;
-  const _CalibrationCard({required this.exercise, required this.index});
+  final bool compact;
+  const _CalibrationCard({required this.exercise, required this.index, required this.compact});
 
   @override
   Widget build(BuildContext context) {
@@ -1722,21 +1732,24 @@ class _CalibrationCard extends StatelessWidget {
       message: entered ? 'Calibrated · $hint' : 'Calibrate · $hint',
       child: Material(
         color: color.withValues(alpha: 0.14),
-        shape: const StadiumBorder(),
+        borderRadius: context.style.brSmall,
         child: InkWell(
-          customBorder: const StadiumBorder(),
+          borderRadius: context.style.brSmall,
           onTap: entered ? null : () => _calibrate(context, store, cal),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
+          child: SizedBox(
+            width: compact ? 28 : 96,
+            height: 28,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(entered ? Icons.check_rounded : Icons.tune_rounded, size: 14, color: color),
-                const SizedBox(width: 4),
-                Text(
-                  entered ? 'Calibrated' : 'Calibrate',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
-                ),
+                Icon(entered ? Icons.check_rounded : Icons.tune_rounded, size: 16, color: color),
+                if (!compact) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    entered ? 'Calibrated' : 'Calibrate',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+                  ),
+                ],
               ],
             ),
           ),
