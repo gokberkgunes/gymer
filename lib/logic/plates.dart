@@ -3,6 +3,18 @@ library;
 
 import 'dart:math' as math;
 
+typedef PlateGroup = ({double weight, int count});
+
+/// Presentation only: keep the physical plan unchanged while optionally merging matching sizes.
+List<PlateGroup> plateGroups(Iterable<double> plates, {bool groupRepeated = false}) {
+  if (!groupRepeated) return [for (final plate in plates) (weight: plate, count: 1)];
+  final counts = <double, int>{};
+  for (final plate in plates) {
+    counts[plate] = (counts[plate] ?? 0) + 1;
+  }
+  return [for (final entry in counts.entries) (weight: entry.key, count: entry.value)];
+}
+
 const defaultPlatesKg = [20.0, 10.0, 5.0, 2.5, 1.25];
 const defaultPlatesLb = [45.0, 25.0, 10.0, 5.0, 2.5];
 

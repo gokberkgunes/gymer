@@ -10,8 +10,8 @@ import '../widgets/common.dart';
 import '../widgets/plate_profile_picker.dart';
 import 'settings.dart';
 
-/// The plate calculator as a bottom sheet: one side of the bar drawn to scale with accent-tinted plates, and
-/// the plates per side as text. When the plates cannot make [target], the nearest loads either side are
+/// The plate calculator as a bottom sheet: one side of the bar drawn to scale with labelled plates.
+/// When the plates cannot make [target], the nearest loads either side are
 /// offered; with [onUse] (opened from a set) the chosen load can be put into that set.
 Future<void> showPlates(BuildContext context, double target, {String? exercise, ValueChanged<double>? onUse}) {
   return showModalBottomSheet<void>(
@@ -56,18 +56,17 @@ class _PlatesSheetState extends State<_PlatesSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Expanded(
-                  child: Text(
-                    w(load?.total ?? widget.target),
-                    style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w700, fontFeatures: tabular),
-                  ),
-                ),
-                Text(
-                  plan.bar > 0 ? 'Bar ${w(plan.bar)}' : 'No bar',
-                  style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                const Flexible(child: IntrinsicWidth(child: PlateProfilePicker())),
+                IconButton(
+                  tooltip: 'Bar & plates',
+                  onPressed: () {
+                    final nav = Navigator.of(context);
+                    nav.pop();
+                    nav.push(plateSettingsRoute());
+                  },
+                  icon: const Icon(Icons.tune_rounded, size: 20),
                 ),
               ],
             ),
@@ -93,49 +92,34 @@ class _PlatesSheetState extends State<_PlatesSheet> {
               ],
             ],
             const SizedBox(height: 16),
-            if (load != null) ...[
-              SizedBox(
-                height: 120,
-                child: CustomPaint(
-                  painter: BarPainter(
-                    plates: load.perSide,
-                    heaviest: heaviest,
-                    unit: unit,
-                    bar: cs.onSurfaceVariant.withValues(alpha: 0.55),
+            if (load != null)
+              Semantics(
+                image: true,
+                label:
+                    '${w(load.total)} total. Plates on each side: '
+                    '${plateGroups(load.perSide, groupRepeated: true).map((group) => '${group.count} × ${formatNumber(group.weight, NumKind.load)} $unit').join(', ')}',
+                child: SizedBox(
+                  height: 120,
+                  child: CustomPaint(
+                    painter: BarPainter(
+                      plates: load.perSide,
+                      heaviest: heaviest,
+                      unit: unit,
+                      bar: cs.onSurfaceVariant.withValues(alpha: 0.55),
+                      badgeFill: cs.surfaceContainerHigh,
+                      badgeInk: cs.onSurface,
+                      badgeBorder: cs.outlineVariant,
+                      groupRepeated: store.settings.groupRepeatedPlates,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                load.perSide.isEmpty
-                    ? (plan.bar > 0 ? 'Just the bar' : 'No plates')
-                    : 'Per side: ${load.perSide.map((p) => formatNumber(p, NumKind.load)).join(' + ')}',
-                style: t.titleMedium?.copyWith(fontFeatures: tabular),
-              ),
-              if (load.perSide.isNotEmpty)
-                Text(
-                  '${w(load.perSide.fold(0.0, (a, b) => a + b))} on each side',
-                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
-                ),
-            ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Expanded(
-                  child: Align(alignment: Alignment.centerLeft, child: PlateProfilePicker()),
-                ),
-                IconButton(
-                  tooltip: 'Bar & plates',
-                  onPressed: () {
-                    // The sheet's own context is gone after pop, so keep its navigator.
-                    final nav = Navigator.of(context);
-                    nav.pop();
-                    nav.push(plateSettingsRoute());
-                  },
-                  icon: const Icon(Icons.tune_rounded, size: 20),
-                ),
-                if (widget.onUse != null && plan.exact == null && load != null)
-                  FilledButton(
+            if (widget.onUse != null && plan.exact == null && load != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
                     style: FilledButton.styleFrom(minimumSize: compactButton),
                     onPressed: () {
                       widget.onUse!(load.total);
@@ -143,8 +127,8 @@ class _PlatesSheetState extends State<_PlatesSheet> {
                     },
                     child: Text('Use ${w(load.total)}'),
                   ),
-              ],
-            ),
+                ),
+              ),
           ],
         ),
       ),
@@ -187,7 +171,11 @@ class PlateBar extends StatelessWidget {
               heaviest: store.settings.plates.fold(0.0, math.max),
               unit: unit,
               bar: cs.onSurfaceVariant.withValues(alpha: 0.55),
+              badgeFill: cs.surfaceContainerHigh,
+              badgeInk: cs.onSurface,
+              badgeBorder: cs.outlineVariant,
               compact: true,
+              groupRepeated: store.settings.groupRepeatedPlates,
             ),
           ),
         ),
@@ -207,13 +195,21 @@ class BarPainter extends CustomPainter {
   final double heaviest;
   final String unit;
   final Color bar;
+  final Color badgeFill;
+  final Color badgeInk;
+  final Color badgeBorder;
   final bool compact;
+  final bool groupRepeated;
   BarPainter({
     required this.plates,
     required this.heaviest,
     required this.unit,
     required this.bar,
+    required this.badgeFill,
+    required this.badgeInk,
+    required this.badgeBorder,
     this.compact = false,
+    this.groupRepeated = false,
   });
 
   @override
@@ -221,15 +217,21 @@ class BarPainter extends CustomPainter {
     final mid = size.height / 2;
     final barPaint = Paint()..color = bar;
     final collarX = compact ? 10.0 : 36.0;
+    final groups = plateGroups(plates, groupRepeated: groupRepeated);
+    final hasCounts = groups.any((group) => group.count > 1);
+    final badgeHeight = compact ? 18.0 : 20.0;
+    final plateHeight = math.max(0.0, size.height - (hasCounts ? badgeHeight : 0));
+    double badgeWidth(PlateGroup group) => math.max(18.0, '${group.count}'.length * 8.0 + 6);
+    double countSpace(PlateGroup group) => group.count > 1 ? badgeWidth(group) / 2 + 2 : 0;
     double ratio(double p) => heaviest <= 0 ? 1 : (p / heaviest).clamp(0.0, 1.0);
     // The inline bar is short, so its light plates are relatively taller there to fit "1.25" or "2.5".
     double height(double p) =>
-        size.height * (compact ? 0.42 + 0.58 * math.sqrt(ratio(p)) : 0.32 + 0.68 * math.sqrt(ratio(p)));
+        plateHeight * (compact ? 0.42 + 0.58 * math.sqrt(ratio(p)) : 0.32 + 0.68 * math.sqrt(ratio(p)));
     // The inline bar uses thinner plates (the owner's request), but never under 9 px: that is the narrowest a
     // rotated label fits, and every plate must keep its number (thinner light plates once lost theirs).
     double thickness(double p) => compact ? 9 + 5 * ratio(p) : 9 + 13 * ratio(p);
     final gap = compact ? 2.0 : 3.0;
-    final natural = plates.fold(0.0, (a, p) => a + thickness(p) + gap);
+    final natural = groups.fold(0.0, (a, group) => a + thickness(group.weight) + gap + countSpace(group));
     final room = size.width - collarX - (compact ? 24 : 40);
     final scale = natural > room ? room / natural : 1.0;
     final platesEnd = collarX + 10 + natural * scale;
@@ -259,7 +261,8 @@ class BarPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     var x = collarX + 10;
-    for (final p in plates) {
+    for (final group in groups) {
+      final p = group.weight;
       final (color, ink) = _plateColors[plateColorClass(p, unit)]!;
       final fill = Paint()..color = color;
       final w = thickness(p) * scale;
@@ -276,27 +279,60 @@ class BarPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      // Only label plates the number fits inside (the inline bar is too short for the small ones).
-      if (w >= 9 && text.width <= h - 4) {
+      // Keep the weight inside the plate; the upright badge carries the quantity separately.
+      if (w >= 9 && h > 4) {
         canvas
           ..save()
           ..translate(x + w / 2, mid)
           ..rotate(-math.pi / 2);
+        if (text.width > h - 4) canvas.scale((h - 4) / text.width);
         // Centre the digits themselves, not the line box: its ascent and descent are uneven and digits have
         // no descenders, so the visual middle is half a digit height (~0.71 em in Roboto) above the baseline.
         final baseline = text.computeDistanceToActualBaseline(TextBaseline.alphabetic);
         text.paint(canvas, Offset(-text.width / 2, -(baseline - 0.71 * fontSize / 2)));
         canvas.restore();
       }
-      x += w + gap * scale;
+      if (group.count > 1) {
+        final badge = RRect.fromRectAndRadius(
+          Rect.fromLTWH(
+            x + w - badgeWidth(group) / 2,
+            math.max(0.0, mid - h / 2 - badgeHeight / 2),
+            badgeWidth(group),
+            badgeHeight,
+          ),
+          Radius.circular(compact ? 3 : 4),
+        );
+        canvas
+          ..drawRRect(badge, Paint()..color = badgeFill)
+          ..drawRRect(
+            badge,
+            Paint()
+              ..color = badgeBorder
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1,
+          );
+        final quantity = TextPainter(
+          text: TextSpan(
+            text: '${group.count}',
+            style: TextStyle(color: badgeInk, fontSize: 12, fontWeight: FontWeight.w700, fontFeatures: tabular),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        quantity.paint(canvas, badge.outerRect.center - Offset(quantity.width / 2, quantity.height / 2));
+      }
+      x += w + (gap + countSpace(group)) * scale;
     }
   }
 
   @override
   bool shouldRepaint(BarPainter old) =>
       old.compact != compact ||
+      old.groupRepeated != groupRepeated ||
       !listEquals(old.plates, plates) ||
       old.unit != unit ||
       old.bar != bar ||
+      old.badgeFill != badgeFill ||
+      old.badgeInk != badgeInk ||
+      old.badgeBorder != badgeBorder ||
       old.heaviest != heaviest;
 }

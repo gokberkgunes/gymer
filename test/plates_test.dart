@@ -6,6 +6,21 @@ import 'package:gymer/models.dart';
 import 'package:gymer/store.dart';
 
 void main() {
+  test('grouped display counts repeated sizes without changing the physical plate list', () {
+    final plates = <double>[20, 20, 20, 5, 2.5, 2.5];
+    expect(plateGroups(plates).map((group) => group.count), everyElement(1));
+    expect(plateGroups(plates, groupRepeated: true), [
+      (weight: 20.0, count: 3),
+      (weight: 5.0, count: 1),
+      (weight: 2.5, count: 2),
+    ]);
+    expect(plateGroups([], groupRepeated: true), isEmpty);
+    expect(plates, [20, 20, 20, 5, 2.5, 2.5]);
+    expect(Settings.fromJson({}).groupRepeatedPlates, isFalse);
+    final settings = Settings(groupRepeatedPlates: true);
+    expect(Settings.fromJson(settings.toJson()).groupRepeatedPlates, isTrue);
+  });
+
   test('unlimited plates retain minimum-plate plans and nearest loads', () {
     expect(planPlates(100, 20, defaultPlatesKg).exact!.perSide, [20, 20]);
     expect(planPlates(225, 45, defaultPlatesLb).exact!.perSide, [45, 45]);

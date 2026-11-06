@@ -972,6 +972,7 @@ class Settings {
 
   List<PlateProfile> plateProfiles;
   String selectedPlateProfile;
+  bool groupRepeatedPlates;
   int accent;
   String themeMode;
   String background;
@@ -1018,6 +1019,7 @@ class Settings {
     List<double>? platesLb,
     List<PlateProfile>? plateProfiles,
     this.selectedPlateProfile = 'gym',
+    this.groupRepeatedPlates = false,
     this.accent = 0,
     this.themeMode = 'system',
     this.background = 'auto',
@@ -1104,6 +1106,7 @@ class Settings {
     'platesLb': platesLb,
     'plateProfiles': plateProfiles.map((profile) => profile.toJson()).toList(),
     'selectedPlateProfile': plateProfile.id,
+    'groupRepeatedPlates': groupRepeatedPlates,
     'accent': accent,
     'themeMode': themeMode,
     'background': background,
@@ -1164,6 +1167,7 @@ class Settings {
           ?.map((profile) => PlateProfile.fromJson(profile as Map<String, dynamic>))
           .toList(),
       selectedPlateProfile: _str(j['selectedPlateProfile']).isEmpty ? 'gym' : j['selectedPlateProfile'] as String,
+      groupRepeatedPlates: b('groupRepeatedPlates', d.groupRepeatedPlates),
       accent: _int(j['accent']) ?? d.accent,
       themeMode: s('themeMode', d.themeMode, {'system', 'light', 'dark'}),
       background: _str(j['background']).isEmpty ? d.background : j['background'] as String,

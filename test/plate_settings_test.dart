@@ -49,7 +49,7 @@ void main() {
     await tester.tap(find.text('Create'));
     await tester.pumpAndSettle();
     expect(store.settings.plateProfile.name, 'Home');
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('20 ×1'));
     await tester.pumpAndSettle();
@@ -59,6 +59,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.settings.platePairs![20], 2);
     expect(find.text('20 ×2'), findsOneWidget);
+    await tester.tap(find.byType(Switch).last);
+    await tester.pumpAndSettle();
+    expect(store.settings.groupRepeatedPlates, isTrue);
     store.updateSettings((settings) => settings.platesKg = [20]);
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -72,7 +75,6 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(store.settings.plateProfile.name, 'Gym');
-    expect(find.text('140 kg'), findsOneWidget);
     expect(find.text('Use 100 kg'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

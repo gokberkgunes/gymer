@@ -878,6 +878,28 @@ class _PlateSettings extends StatelessWidget {
               ),
             ),
           ),
+          _row(
+            context,
+            'Group repeated plates',
+            Switch(
+              value: s.groupRepeatedPlates,
+              onChanged: (value) => store.updateSettings((settings) => settings.groupRepeatedPlates = value),
+            ),
+            subtitle: 'One plate per size, with a count badge',
+            info: InfoDot(
+              tooltip: 'Grouped plate display',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Grouped plate display'),
+                  content: const Text(
+                    'Repeated plates share one drawing. A small badge at the top-right shows how many go on each side. The weight stays on the plate. Applies to every profile.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
         ]),
         SectionLabel('Plates you have · ${s.unit}'),
         Wrap(
