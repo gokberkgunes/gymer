@@ -17,6 +17,7 @@ import '../widgets/num_field.dart';
 import '../widgets/record_effect.dart';
 import '../widgets/rest_timer.dart';
 import '../widgets/tick.dart';
+import '../widgets/warmup_background.dart';
 import 'exercises.dart';
 import 'finish.dart';
 import 'plates.dart';
@@ -669,9 +670,6 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
 
     // A Material (like the Card it replaces) so ink ripples inside the card stay visible. Its colour
     // fades to grey while the name is pressed instead of jumping, which flickered on quick taps.
-    final hatchColor = cs.brightness == Brightness.light
-        ? cs.surfaceContainerHigh
-        : cs.onSurface.withValues(alpha: 0.03);
     final card = TweenAnimationBuilder<Color?>(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOut,
@@ -685,7 +683,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           side: BorderSide(color: cs.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
-        child: CustomPaint(painter: warmup ? _WarmupHatching(hatchColor) : null, child: child),
+        child: WarmupBackground(active: warmup, style: store.settings.warmupAppearance, child: child!),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(12, st.sp(12), 12, st.sp(8)),
@@ -1530,26 +1528,6 @@ class _SetRow extends StatelessWidget {
     final picked = await pickSetType(context, e.method, [for (final s in e.sets) (s.type, s.groupStart)], index);
     if (picked != null) store.changeSetType(e, e.sets[index], picked);
   }
-}
-
-/// Broad, quiet diagonal bands across the warm-up exercise card, behind its solid set tiles.
-class _WarmupHatching extends CustomPainter {
-  final Color color;
-  const _WarmupHatching(this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final ink = Paint()
-      ..color = color
-      ..strokeWidth = 8
-      ..isAntiAlias = true;
-    for (double x = -size.height; x < size.width; x += 22) {
-      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), ink);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_WarmupHatching oldDelegate) => color != oldDelegate.color;
 }
 
 /// Set-role choices valid for this row of the method.

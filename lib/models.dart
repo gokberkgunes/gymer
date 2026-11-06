@@ -1078,6 +1078,7 @@ class Settings {
   int rounding;
   String density;
   int setSpacing;
+  String warmupAppearance; // fire | stripes | plain
   double fontScale;
   double uiScale;
 
@@ -1131,6 +1132,7 @@ class Settings {
     this.rounding = 18,
     this.density = 'normal',
     this.setSpacing = 3,
+    this.warmupAppearance = 'fire',
     this.fontScale = 1.0,
     this.uiScale = 1.0,
   }) : pinnedExerciseActions = pinnedExerciseActions ?? [],
@@ -1167,6 +1169,7 @@ class Settings {
     rounding = d.rounding;
     density = d.density;
     setSpacing = d.setSpacing;
+    warmupAppearance = d.warmupAppearance;
     fontScale = d.fontScale;
     uiScale = d.uiScale;
     dimCompleted = d.dimCompleted;
@@ -1224,6 +1227,7 @@ class Settings {
     'rounding': rounding,
     'density': density,
     'setSpacing': setSpacing,
+    'warmupAppearance': warmupAppearance,
     'fontScale': fontScale,
     'uiScale': uiScale,
   };
@@ -1291,6 +1295,7 @@ class Settings {
       rounding: _int(j['rounding']) ?? d.rounding,
       density: s('density', d.density, {'compact', 'normal', 'roomy'}),
       setSpacing: _int(j['setSpacing']) ?? d.setSpacing,
+      warmupAppearance: s('warmupAppearance', d.warmupAppearance, {'fire', 'stripes', 'plain'}),
       fontScale: _dbl(j['fontScale']) ?? d.fontScale,
       uiScale: _dbl(j['uiScale']) ?? d.uiScale,
     );

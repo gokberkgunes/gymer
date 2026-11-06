@@ -12,6 +12,7 @@ import '../widgets/common.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
 import '../widgets/plate_profile_picker.dart';
+import '../widgets/warmup_background.dart';
 import 'data_io.dart';
 import 'bodyweight.dart';
 import 'exercises.dart';
@@ -1341,8 +1342,20 @@ class AppearanceScreen extends StatelessWidget {
               Switch(value: s.dimCompleted, onChanged: (v) => set((x) => x.dimCompleted = v)),
             ),
           ]),
+          const SectionLabel('Warm-up appearance'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: _segmented(
+                s.warmupAppearance,
+                const {'fire': 'Fire', 'stripes': 'Stripes', 'plain': 'Plain'},
+                (v) => set((x) => x.warmupAppearance = v),
+                expand: true,
+              ),
+            ),
+          ),
           const SectionLabel('Preview'),
-          const _SetPreview(),
+          _SetPreview(warmupStyle: s.warmupAppearance),
           const SizedBox(height: 24),
           OutlinedButton(
             onPressed: () => set((x) => x.resetAppearance()),
@@ -1579,13 +1592,15 @@ class _BackgroundChip extends StatelessWidget {
 
 class _SetPreview extends StatelessWidget {
   final Widget? header;
-  const _SetPreview({this.header});
+  final String? warmupStyle;
+  const _SetPreview({this.header, this.warmupStyle});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final st = context.style;
+    final warmup = warmupStyle != null;
 
     // Mirrors the workout screen's set rows: same tile colours, input boxes and rounded-square check.
     final fieldFill = Theme.of(context).brightness == Brightness.dark
@@ -1606,7 +1621,11 @@ class _SetPreview extends StatelessWidget {
       margin: EdgeInsets.symmetric(vertical: st.setGap / 2),
       padding: EdgeInsets.symmetric(horizontal: 2, vertical: st.sp(2) + 2),
       decoration: BoxDecoration(
-        color: done ? cs.primary.withValues(alpha: 0.12) : cs.surfaceContainerHigh,
+        color: done
+            ? warmup
+                  ? Color.alphaBlend(cs.primary.withValues(alpha: 0.12), cs.surface)
+                  : cs.primary.withValues(alpha: 0.12)
+            : cs.surfaceContainerHigh,
         borderRadius: st.setTile(n - 1, 3),
       ),
       child: Opacity(
@@ -1616,7 +1635,7 @@ class _SetPreview extends StatelessWidget {
             SizedBox(
               width: 48,
               child: Text(
-                '$n',
+                warmup ? 'W$n' : '$n',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
@@ -1625,7 +1644,7 @@ class _SetPreview extends StatelessWidget {
             const SizedBox(width: 6),
             box(r, done),
             const SizedBox(width: 6),
-            box(rir, done),
+            if (warmup) const Expanded(child: SizedBox.shrink()) else box(rir, done),
             SizedBox(
               width: 48,
               child: Center(
@@ -1647,17 +1666,31 @@ class _SetPreview extends StatelessWidget {
     );
 
     return Card(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(12, st.sp(14), 12, st.sp(14)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            header ?? Text('Bench Press', style: t.titleMedium),
-            SizedBox(height: st.sp(8)),
-            setRow(1, '80', '8', '2', true),
-            setRow(2, '80', '7', '1', true),
-            setRow(3, '80', '8', '2', false),
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: WarmupBackground(
+        active: warmup,
+        style: warmupStyle ?? 'plain',
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(12, st.sp(14), 12, st.sp(14)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header ??
+                  Row(
+                    children: [
+                      Text('Bench Press', style: t.titleMedium),
+                      if (warmup) ...[
+                        const SizedBox(width: 8),
+                        Icon(Icons.local_fire_department_outlined, size: 16, color: cs.primary),
+                      ],
+                    ],
+                  ),
+              SizedBox(height: st.sp(8)),
+              setRow(1, warmup ? '40' : '80', '8', '2', true),
+              setRow(2, warmup ? '60' : '80', warmup ? '5' : '7', '1', !warmup),
+              setRow(3, '80', warmup ? '3' : '8', '2', false),
+            ],
+          ),
         ),
       ),
     );
