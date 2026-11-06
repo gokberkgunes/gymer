@@ -71,7 +71,9 @@ void main() {
     expect(planPlates(100, 20, defaultPlatesKg).exact!.perSide, [20, 20]);
     expect(planPlates(100, 20, [25, 20, 15, 10]).exact!.perSide, [25, 15]);
     expect(
-      [for (final w in [25.0, 20, 15, 10, 5, 2.5, 1.25]) plateColorClass(w, 'kg')],
+      [
+        for (final w in <double>[25, 20, 15, 10, 5, 2.5, 1.25]) plateColorClass(w, 'kg'),
+      ],
       ['red', 'blue', 'yellow', 'green', 'white', 'red', 'chrome'],
     );
     expect(plateColorClass(45, 'lb'), 'blue');

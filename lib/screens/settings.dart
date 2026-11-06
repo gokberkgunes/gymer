@@ -12,6 +12,7 @@ import '../widgets/celebration.dart';
 import '../widgets/common.dart';
 import '../widgets/exercise_actions.dart';
 import '../widgets/num_field.dart';
+import '../widgets/plate_profile_picker.dart';
 import 'data_io.dart';
 import 'exercises.dart';
 import 'rep_max.dart';
@@ -40,7 +41,12 @@ class SettingsScreen extends StatelessWidget {
           link(Icons.bolt_outlined, 'Workout', 'Units, defaults and tracking', const _WorkoutSettings()),
           link(Icons.timer_outlined, 'Rest timers', 'Live timer, alerts and labels', const _TimerSettings()),
           link(Icons.trending_up_rounded, 'Progression', 'Weight increments', const _ProgressionSettings()),
-          link(Icons.fitness_center_rounded, 'Plates', 'Bar weight and the plates you have', const _PlateSettings()),
+          link(
+            Icons.fitness_center_rounded,
+            'Plates',
+            'Profiles, bar weight and available plates',
+            const _PlateSettings(),
+          ),
           link(Icons.tune_rounded, 'Advanced', 'Celebrations, set rules and keyboard', const _AdvancedSettings()),
           link(Icons.storage_outlined, 'Databases', 'Exercises, set types and rep max', const _DatabaseSettings()),
           link(Icons.save_outlined, 'Data', 'Backups, import and export', const _DataSettings()),
@@ -669,7 +675,105 @@ Future<void> _addPlate(BuildContext context, AppStore store, bool lb) async {
 
 Route<void> plateSettingsRoute() => MaterialPageRoute(builder: (_) => const _PlateSettings());
 
-/// Plate calculator setup: the default bar and which plate sizes the gym has (pairs are assumed unlimited).
+Future<void> _editPlateProfile(BuildContext context, {bool rename = false}) async {
+  final store = StoreScope.read(context);
+  final current = store.settings.plateProfile;
+  var text = rename ? current.name : '';
+  final name = await showDialog<String>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setState) => AlertDialog(
+        title: Text(rename ? 'Rename profile' : 'New plate profile'),
+        content: TextFormField(
+          initialValue: text,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          maxLength: 32,
+          decoration: const InputDecoration(hintText: 'Home, gym, …', counterText: ''),
+          onChanged: (value) => setState(() => text = value),
+          onFieldSubmitted: (value) {
+            if (value.trim().isNotEmpty) Navigator.pop(c, value.trim());
+          },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          TextButton(
+            onPressed: text.trim().isEmpty ? null : () => Navigator.pop(c, text.trim()),
+            child: Text(rename ? 'Save' : 'Create'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (context.mounted) {
+    FocusScope.of(context).unfocus();
+    if (name != null) {
+      store.updateSettings((settings) {
+        if (rename) {
+          current.name = name;
+        } else {
+          final profile = PlateProfile.fromJson({
+            ...current.toJson(),
+            'id': 'P${DateTime.now().microsecondsSinceEpoch}',
+            'name': name,
+          });
+          settings.plateProfiles.add(profile);
+          settings.selectedPlateProfile = profile.id;
+        }
+      });
+    }
+  }
+}
+
+Future<void> _editPlatePairs(BuildContext context, double plate) async {
+  final store = StoreScope.read(context);
+  final settings = store.settings;
+  final profile = settings.plateProfile;
+  final unit = settings.unit;
+  var text = '${profile.pairsFor(plate, unit)}';
+  final count = await showDialog<int>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setState) {
+        final value = int.tryParse(text);
+        final valid = value != null && value >= 1 && value <= 9999;
+        return AlertDialog(
+          title: Text('${formatNumber(plate, NumKind.load)} $unit pairs'),
+          content: TextFormField(
+            initialValue: text,
+            autofocus: true,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+            decoration: const InputDecoration(hintText: 'Number of pairs'),
+            onChanged: (value) => setState(() => text = value),
+            onFieldSubmitted: (_) {
+              if (valid) Navigator.pop(c, value);
+            },
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, 0), child: const Text('Remove')),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            TextButton(onPressed: valid ? () => Navigator.pop(c, value) : null, child: const Text('Save')),
+          ],
+        );
+      },
+    ),
+  );
+  if (count != null) {
+    store.updateSettings((_) {
+      final plates = unit == 'lb' ? profile.platesLb : profile.platesKg;
+      final pairs = unit == 'lb' ? profile.pairsLb : profile.pairsKg;
+      if (count == 0) {
+        plates.remove(plate);
+      } else {
+        pairs[plate] = count;
+      }
+    });
+  }
+}
+
+/// Each location keeps its own bar, plate sizes and optional pair limits.
 class _PlateSettings extends StatelessWidget {
   const _PlateSettings();
 
@@ -688,10 +792,52 @@ class _PlateSettings extends StatelessWidget {
         _group([
           _row(
             context,
+            'Profile',
+            SizedBox(
+              width: 180,
+              child: Row(
+                children: [
+                  const Expanded(child: PlateProfilePicker()),
+                  PopupMenuButton<String>(
+                    tooltip: 'Manage plate profiles',
+                    icon: const Icon(Icons.more_vert_rounded),
+                    onSelected: (action) async {
+                      if (action == 'add' || action == 'rename') {
+                        await _editPlateProfile(context, rename: action == 'rename');
+                      } else {
+                        final profile = s.plateProfile;
+                        if (s.plateProfiles.length < 2) return;
+                        final remove = await confirm(
+                          context,
+                          'Delete ${profile.name}?',
+                          'Its bar and plate setup will be removed.',
+                          action: 'Delete',
+                          destructive: true,
+                        );
+                        if (!remove) return;
+                        store.updateSettings((settings) {
+                          settings.plateProfiles.remove(profile);
+                          settings.selectedPlateProfile = settings.plateProfiles.first.id;
+                        });
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'add', child: Text('New profile')),
+                      const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                      PopupMenuItem(value: 'delete', enabled: s.plateProfiles.length > 1, child: const Text('Delete')),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _row(
+            context,
             'Bar',
             SizedBox(
               width: 100,
               child: NumField(
+                key: ValueKey('${s.plateProfile.id}-${s.unit}-bar'),
                 value: s.bar,
                 kind: NumKind.load,
                 suffix: s.unit,
@@ -710,8 +856,30 @@ class _PlateSettings extends StatelessWidget {
             ),
             subtitle: 'Exercises can set their own, e.g. an EZ bar',
           ),
+          _row(
+            context,
+            'Limit plate pairs',
+            Switch(
+              value: s.plateProfile.limitedPairs,
+              onChanged: (value) => store.updateSettings((settings) => settings.plateProfile.limitedPairs = value),
+            ),
+            subtitle: 'Off: unlimited pairs',
+            info: InfoDot(
+              tooltip: 'Plate pairs',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Plate pairs'),
+                  content: const Text(
+                    'One pair is one plate on each side. Tap a selected size to edit its pair count or remove it.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
         ]),
-        const SectionLabel('Plates you have'),
+        SectionLabel('Plates you have · ${s.unit}'),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -722,14 +890,23 @@ class _PlateSettings extends StatelessWidget {
               ...s.plates,
             }.toList()..sort((a, b) => b.compareTo(a)))
               FilterChip(
-                label: Text(formatNumber(p, NumKind.load), style: const TextStyle(fontFeatures: tabular)),
+                label: Text(
+                  '${formatNumber(p, NumKind.load)}${s.plateProfile.limitedPairs && s.plates.contains(p) ? ' ×${s.plateProfile.pairsFor(p, s.unit)}' : ''}',
+                  style: const TextStyle(fontFeatures: tabular),
+                ),
                 showCheckmark: false,
                 selected: s.plates.contains(p),
-                onSelected: (on) => store.updateSettings((x) {
-                  final list = lb ? x.platesLb : x.platesKg;
-                  on ? list.add(p) : list.remove(p);
-                  list.sort((a, b) => b.compareTo(a));
-                }),
+                onSelected: (on) {
+                  if (!on && s.plateProfile.limitedPairs) {
+                    _editPlatePairs(context, p);
+                    return;
+                  }
+                  store.updateSettings((x) {
+                    final list = lb ? x.platesLb : x.platesKg;
+                    on ? list.add(p) : list.remove(p);
+                    list.sort((a, b) => b.compareTo(a));
+                  });
+                },
               ),
             ActionChip(
               avatar: const Icon(Icons.add_rounded, size: 18),
@@ -745,10 +922,12 @@ class _PlateSettings extends StatelessWidget {
               x
                 ..barLb = defaultBarLb
                 ..platesLb = List.of(defaultPlatesLb);
+              x.plateProfile.pairsLb.clear();
             } else {
               x
                 ..barKg = defaultBarKg
                 ..platesKg = List.of(defaultPlatesKg);
+              x.plateProfile.pairsKg.clear();
             }
           }),
           child: const Text('Reset bar and plates'),

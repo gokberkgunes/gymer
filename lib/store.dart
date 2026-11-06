@@ -410,7 +410,7 @@ class AppStore extends ChangeNotifier {
     final e = name == null ? null : exercise(name);
     final own = unit == 'lb' ? e?.barLb : e?.barKg;
     final bar = own ?? (e?.equipment == 'Plate loaded' ? 0.0 : settings.bar);
-    return planPlates(target, bar, settings.plates);
+    return planPlates(target, bar, settings.plates, pairs: settings.platePairs);
   }
 
   void addSetType(String name) {

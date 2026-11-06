@@ -7,6 +7,7 @@ import '../logic/numbers.dart';
 import '../logic/plates.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/plate_profile_picker.dart';
 import 'settings.dart';
 
 /// The plate calculator as a bottom sheet: one side of the bar drawn to scale with accent-tinted plates, and
@@ -44,7 +45,7 @@ class _PlatesSheetState extends State<_PlatesSheet> {
     String w(double v) => '${formatNumber(v, NumKind.load)} $unit';
 
     final options = [?plan.below, ?plan.above];
-    final load = plan.exact ?? (_up || plan.below == null ? plan.above : plan.below);
+    final load = plan.exact ?? (_up ? plan.above ?? plan.below : plan.below ?? plan.above);
     final heaviest = store.settings.plates.fold(0.0, math.max);
 
     return SafeArea(
@@ -120,16 +121,19 @@ class _PlatesSheetState extends State<_PlatesSheet> {
             const SizedBox(height: 16),
             Row(
               children: [
-                TextButton(
+                const Expanded(
+                  child: Align(alignment: Alignment.centerLeft, child: PlateProfilePicker()),
+                ),
+                IconButton(
+                  tooltip: 'Bar & plates',
                   onPressed: () {
                     // The sheet's own context is gone after pop, so keep its navigator.
                     final nav = Navigator.of(context);
                     nav.pop();
                     nav.push(plateSettingsRoute());
                   },
-                  child: const Text('Bar & plates'),
+                  icon: const Icon(Icons.tune_rounded, size: 20),
                 ),
-                const Spacer(),
                 if (widget.onUse != null && plan.exact == null && load != null)
                   FilledButton(
                     style: FilledButton.styleFrom(minimumSize: compactButton),
@@ -219,7 +223,8 @@ class BarPainter extends CustomPainter {
     final collarX = compact ? 10.0 : 36.0;
     double ratio(double p) => heaviest <= 0 ? 1 : (p / heaviest).clamp(0.0, 1.0);
     // The inline bar is short, so its light plates are relatively taller there to fit "1.25" or "2.5".
-    double height(double p) => size.height * (compact ? 0.42 + 0.58 * math.sqrt(ratio(p)) : 0.32 + 0.68 * math.sqrt(ratio(p)));
+    double height(double p) =>
+        size.height * (compact ? 0.42 + 0.58 * math.sqrt(ratio(p)) : 0.32 + 0.68 * math.sqrt(ratio(p)));
     // The inline bar uses thinner plates (the owner's request), but never under 9 px: that is the narrowest a
     // rotated label fits, and every plate must keep its number (thinner light plates once lost theirs).
     double thickness(double p) => compact ? 9 + 5 * ratio(p) : 9 + 13 * ratio(p);
@@ -239,7 +244,11 @@ class BarPainter extends CustomPainter {
         ..addRRect(RRect.fromRectAndCorners(Rect.fromLTRB(0, mid - 3, collarX + 1, mid + 3), topLeft: r, bottomLeft: r))
         ..addRect(Rect.fromLTRB(collarX, mid - 11, collarX + 7, mid + 11))
         ..addRRect(
-          RRect.fromRectAndCorners(Rect.fromLTRB(collarX + 6, mid - 5, sleeveEnd, mid + 5), topRight: r, bottomRight: r),
+          RRect.fromRectAndCorners(
+            Rect.fromLTRB(collarX + 6, mid - 5, sleeveEnd, mid + 5),
+            topRight: r,
+            bottomRight: r,
+          ),
         ),
       barPaint,
     );
@@ -255,10 +264,7 @@ class BarPainter extends CustomPainter {
       final fill = Paint()..color = color;
       final w = thickness(p) * scale;
       final h = height(p);
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(x, mid - h / 2, w, h),
-        Radius.circular(math.min(4, w / 3)),
-      );
+      final rect = RRect.fromRectAndRadius(Rect.fromLTWH(x, mid - h / 2, w, h), Radius.circular(math.min(4, w / 3)));
       canvas
         ..drawRRect(rect, fill)
         ..drawRRect(rect, stroke);
@@ -289,6 +295,8 @@ class BarPainter extends CustomPainter {
   @override
   bool shouldRepaint(BarPainter old) =>
       old.compact != compact ||
-      !listEquals(old.plates, plates) || old.unit != unit || old.bar != bar || old.heaviest != heaviest;
+      !listEquals(old.plates, plates) ||
+      old.unit != unit ||
+      old.bar != bar ||
+      old.heaviest != heaviest;
 }
-

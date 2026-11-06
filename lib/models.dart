@@ -869,6 +869,67 @@ const defaultSetTypes = [
   'Burnout',
 ];
 
+/// A location's physical plate inventory. Counts are pairs, not individual plates.
+class PlateProfile {
+  final String id;
+  String name;
+  double barKg;
+  double barLb;
+  List<double> platesKg;
+  List<double> platesLb;
+  bool limitedPairs;
+  Map<double, int> pairsKg;
+  Map<double, int> pairsLb;
+
+  PlateProfile({
+    required this.id,
+    required this.name,
+    this.barKg = defaultBarKg,
+    this.barLb = defaultBarLb,
+    List<double>? platesKg,
+    List<double>? platesLb,
+    this.limitedPairs = false,
+    Map<double, int>? pairsKg,
+    Map<double, int>? pairsLb,
+  }) : platesKg = List.of(platesKg ?? defaultPlatesKg),
+       platesLb = List.of(platesLb ?? defaultPlatesLb),
+       pairsKg = Map.of(pairsKg ?? {}),
+       pairsLb = Map.of(pairsLb ?? {});
+
+  int pairsFor(double plate, String unit) => (unit == 'lb' ? pairsLb : pairsKg)[plate] ?? 1;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'barKg': barKg,
+    'barLb': barLb,
+    'platesKg': platesKg,
+    'platesLb': platesLb,
+    'limitedPairs': limitedPairs,
+    'pairsKg': {for (final e in pairsKg.entries) '${e.key}': e.value},
+    'pairsLb': {for (final e in pairsLb.entries) '${e.key}': e.value},
+  };
+
+  factory PlateProfile.fromJson(Map<String, dynamic> j) {
+    Map<double, int> counts(Object? value) => {
+      for (final e in (value as Map? ?? {}).entries)
+        if (double.tryParse('${e.key}') case final weight?)
+          if (weight.isFinite && weight > 0 && (_int(e.value) ?? 0) >= 0) weight: _int(e.value)!,
+    };
+    return PlateProfile(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      barKg: _dbl(j['barKg']) ?? defaultBarKg,
+      barLb: _dbl(j['barLb']) ?? defaultBarLb,
+      platesKg: (j['platesKg'] as List?)?.map((v) => (v as num).toDouble()).toList(),
+      platesLb: (j['platesLb'] as List?)?.map((v) => (v as num).toDouble()).toList(),
+      limitedPairs: j['limitedPairs'] as bool? ?? false,
+      pairsKg: counts(j['pairsKg']),
+      pairsLb: counts(j['pairsLb']),
+    );
+  }
+}
+
 class Settings {
   String unit;
   int defaultRest;
@@ -909,11 +970,8 @@ class Settings {
   List<String> setTypes;
   Map<String, (double, double)> increments;
 
-  /// Plate calculator: default bar weight and the plate sizes available, per unit.
-  double barKg;
-  double barLb;
-  List<double> platesKg;
-  List<double> platesLb;
+  List<PlateProfile> plateProfiles;
+  String selectedPlateProfile;
   int accent;
   String themeMode;
   String background;
@@ -954,10 +1012,12 @@ class Settings {
     this.repMaxTargetReps = 8,
     List<String>? setTypes,
     Map<String, (double, double)>? increments,
-    this.barKg = defaultBarKg,
-    this.barLb = defaultBarLb,
+    double barKg = defaultBarKg,
+    double barLb = defaultBarLb,
     List<double>? platesKg,
     List<double>? platesLb,
+    List<PlateProfile>? plateProfiles,
+    this.selectedPlateProfile = 'gym',
     this.accent = 0,
     this.themeMode = 'system',
     this.background = 'auto',
@@ -969,11 +1029,25 @@ class Settings {
   }) : pinnedExerciseActions = pinnedExerciseActions ?? [],
        setTypes = setTypes ?? List.of(defaultSetTypes),
        increments = increments ?? Map.of(defaultIncrements),
-       platesKg = platesKg ?? List.of(defaultPlatesKg),
-       platesLb = platesLb ?? List.of(defaultPlatesLb);
+       plateProfiles = plateProfiles != null && plateProfiles.isNotEmpty
+           ? plateProfiles
+           : [PlateProfile(id: 'gym', name: 'Gym', barKg: barKg, barLb: barLb, platesKg: platesKg, platesLb: platesLb)];
+
+  PlateProfile get plateProfile =>
+      plateProfiles.where((profile) => profile.id == selectedPlateProfile).firstOrNull ?? plateProfiles.first;
+  double get barKg => plateProfile.barKg;
+  set barKg(double value) => plateProfile.barKg = value;
+  double get barLb => plateProfile.barLb;
+  set barLb(double value) => plateProfile.barLb = value;
+  List<double> get platesKg => plateProfile.platesKg;
+  set platesKg(List<double> value) => plateProfile.platesKg = value;
+  List<double> get platesLb => plateProfile.platesLb;
+  set platesLb(List<double> value) => plateProfile.platesLb = value;
 
   double get bar => unit == 'lb' ? barLb : barKg;
   List<double> get plates => unit == 'lb' ? platesLb : platesKg;
+  Map<double, int>? get platePairs =>
+      plateProfile.limitedPairs ? {for (final plate in plates) plate: plateProfile.pairsFor(plate, unit)} : null;
 
   bool get floatingTimer => timerMode == 'both' || timerMode == 'floating';
   bool get nearSetTimer => timerMode == 'both' || timerMode == 'nearset';
@@ -1028,6 +1102,8 @@ class Settings {
     'barLb': barLb,
     'platesKg': platesKg,
     'platesLb': platesLb,
+    'plateProfiles': plateProfiles.map((profile) => profile.toJson()).toList(),
+    'selectedPlateProfile': plateProfile.id,
     'accent': accent,
     'themeMode': themeMode,
     'background': background,
@@ -1084,6 +1160,10 @@ class Settings {
       barLb: _dbl(j['barLb']) ?? d.barLb,
       platesKg: _plates(j['platesKg'], formerPlatesKg),
       platesLb: _plates(j['platesLb'], formerPlatesLb),
+      plateProfiles: (j['plateProfiles'] as List?)
+          ?.map((profile) => PlateProfile.fromJson(profile as Map<String, dynamic>))
+          .toList(),
+      selectedPlateProfile: _str(j['selectedPlateProfile']).isEmpty ? 'gym' : j['selectedPlateProfile'] as String,
       accent: _int(j['accent']) ?? d.accent,
       themeMode: s('themeMode', d.themeMode, {'system', 'light', 'dark'}),
       background: _str(j['background']).isEmpty ? d.background : j['background'] as String,
