@@ -97,6 +97,7 @@ class ExerciseResult {
 class FinishSummary {
   final String name;
   final String unit;
+  final DateTime date;
   final Duration duration;
 
   /// Completed working sets (warm-ups excluded) and their total load × reps.
@@ -108,6 +109,7 @@ class FinishSummary {
   const FinishSummary({
     required this.name,
     required this.unit,
+    required this.date,
     required this.duration,
     required this.sets,
     required this.volume,
@@ -603,8 +605,8 @@ class AppStore extends ChangeNotifier {
 
   // ---------------------------------------------------------------- Session building
 
-  SetEntry _inUnit(SetEntry s, String from) => SetEntry(
-    weight: s.weight == null ? null : convertWeight(s.weight!, from, settings.unit),
+  SetEntry _inUnit(SetEntry s, String from, [String? to]) => SetEntry(
+    weight: s.weight == null ? null : convertWeight(s.weight!, from, to ?? settings.unit),
     reps: s.reps,
     rir: s.rir,
     done: s.done,
@@ -688,9 +690,27 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  /// Personal bests and per-exercise results of [s], compared with the history before it. A first
-  /// session of an exercise sets no record: there is nothing to beat.
-  (List<PersonalBest>, List<ExerciseResult>) _sessionHighlights(Session s) {
+  /// Rebuild a saved workout's results from the history that preceded it, in its recorded unit.
+  /// Reading a summary never saves, links a calendar day or changes an active workout.
+  FinishSummary summarizeSession(Session session) {
+    final earlier = history.where((s) => s.id != session.id && s.startedAt.isBefore(session.startedAt)).toList()
+      ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    final (bests, results) = _sessionHighlights(session, earlier);
+    return FinishSummary(
+      name: session.name,
+      unit: session.unit,
+      date: session.startedAt,
+      duration: session.duration,
+      sets: session.doneSets,
+      volume: session.volume,
+      report: sessionVolume(session),
+      bests: bests,
+      exercises: results,
+    );
+  }
+
+  /// A first session of an exercise sets no record: there is nothing to beat.
+  (List<PersonalBest>, List<ExerciseResult>) _sessionHighlights(Session s, List<Session> earlier) {
     final unit = s.unit;
     String w(double v) => '${formatNumber(v, NumKind.weight)} $unit';
     String total(double v) => '${groupThousands(v)} $unit';
@@ -705,12 +725,12 @@ class AppStore extends ChangeNotifier {
       final key = e.name.toLowerCase();
       // Earlier sessions' working sets of this exercise with the same kind of load, in today's unit.
       final past = [
-        for (final h in history)
+        for (final h in earlier)
           for (final x in h.exercises)
             if (x.name.toLowerCase() == key && x.loadMode == e.loadMode)
               [
                 for (final set in x.sets)
-                  if (set.done && !set.warmup && (set.reps ?? 0) > 0) _inUnit(set, h.unit),
+                  if (set.done && !set.warmup && (set.reps ?? 0) > 0) _inUnit(set, h.unit, unit),
               ],
       ].where((sets) => sets.isNotEmpty).toList();
       double oneRm(SetEntry x) => estimatedOneRm(x.weight ?? 0, x.reps!, 0) ?? 0;
@@ -721,7 +741,19 @@ class AppStore extends ChangeNotifier {
         final top = work.reduce((a, b) => (b.weight ?? 0) > (a.weight ?? 0) ? b : a);
         final strongest = work.reduce((a, b) => oneRm(b) > oneRm(a) ? b : a);
         best = '${w(top.weight ?? 0)} × ${top.reps}';
-        final last = lastTimeSets(e.name, s.templateId)?.where((x) => x.done && !x.warmup && (x.reps ?? 0) > 0);
+        List<SetEntry>? previous({required bool sameWorkout}) {
+          for (final h in earlier) {
+            if (h.phase == 'Deload' || (sameWorkout && h.templateId != s.templateId)) continue;
+            final exercise = h.exercises
+                .where((x) => x.name.toLowerCase() == key && x.loadMode == e.loadMode)
+                .firstOrNull;
+            final sets = exercise?.work.where((x) => x.done && (x.reps ?? 0) > 0).toList();
+            if (sets != null && sets.isNotEmpty) return [for (final set in sets) _inUnit(set, h.unit, unit)];
+          }
+          return null;
+        }
+
+        final last = previous(sameWorkout: true) ?? previous(sameWorkout: false);
         if (last != null && last.isNotEmpty && oneRm(strongest) > 0) {
           change = oneRm(strongest) - last.map(oneRm).reduce(math.max);
         }
@@ -753,13 +785,15 @@ class AppStore extends ChangeNotifier {
       results.add(ExerciseResult(e.name, work.length, best, change));
     }
     // The whole workout's volume against earlier sessions of the same workout.
-    final earlier = [
-      for (final h in history)
+    final earlierVolumes = [
+      for (final h in earlier)
         if (h.templateId != null && h.templateId == s.templateId && h.phase != 'Deload')
           convertWeight(h.volume, h.unit, unit),
     ];
-    if (earlier.isNotEmpty && s.volume > earlier.reduce(math.max) + 0.5) {
-      bests.add(PersonalBest(s.name, 'workout', total(s.volume), '+${total(s.volume - earlier.reduce(math.max))}'));
+    if (earlierVolumes.isNotEmpty && s.volume > earlierVolumes.reduce(math.max) + 0.5) {
+      bests.add(
+        PersonalBest(s.name, 'workout', total(s.volume), '+${total(s.volume - earlierVolumes.reduce(math.max))}'),
+      );
     }
     return (bests, results);
   }
@@ -1736,21 +1770,11 @@ class AppStore extends ChangeNotifier {
       }
     }
     // Records compare against earlier sessions, so collect them first.
-    final (bests, results) = _sessionHighlights(s);
+    final summary = summarizeSession(s);
     history = [s, ...history];
     final c = cycles.where((c) => c.id == s.cycleId).firstOrNull ?? activeCycle;
     if (c != null) linkSession(c, s);
     snapshot();
-    final summary = FinishSummary(
-      name: s.name,
-      unit: s.unit,
-      duration: s.duration,
-      sets: s.doneSets,
-      volume: s.volume,
-      report: sessionVolume(s),
-      bests: bests,
-      exercises: results,
-    );
     active = null;
     rest = null;
     _syncAlerts();

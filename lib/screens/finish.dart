@@ -11,7 +11,9 @@ import '../widgets/common.dart';
 /// last time, and the muscle breakdown folded away. Plus the workout celebration.
 class FinishScreen extends StatelessWidget {
   final FinishSummary summary;
-  const FinishScreen({super.key, required this.summary});
+  final bool historical;
+  final VoidCallback? onEdit;
+  const FinishScreen({super.key, required this.summary, this.historical = false, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
@@ -21,15 +23,30 @@ class FinishScreen extends StatelessWidget {
     final pbExercises = {for (final b in s.bests) b.exercise};
 
     return Scaffold(
+      appBar: historical
+          ? AppBar(
+              title: const Text('Workout summary'),
+              actions: [
+                if (onEdit != null)
+                  IconButton(tooltip: 'Edit workout', onPressed: onEdit, icon: const Icon(Icons.edit_outlined)),
+              ],
+            )
+          : null,
       body: Stack(
         children: [
           SafeArea(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+              padding: historical ? subPageInsets : const EdgeInsets.fromLTRB(16, 24, 16, 32),
               children: [
-                Text('Workout complete', style: t.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
+                Text(
+                  historical ? s.name : 'Workout complete',
+                  style: t.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 2),
-                Text(s.name, style: t.titleMedium?.copyWith(color: cs.onSurfaceVariant)),
+                Text(
+                  historical ? fmtShortDate(s.date) : s.name,
+                  style: t.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+                ),
                 const SizedBox(height: 20),
                 Row(
                   children: [
@@ -61,12 +78,14 @@ class FinishScreen extends StatelessWidget {
                 ],
                 const SizedBox(height: 12),
                 _Muscles(s.report),
-                const SizedBox(height: 24),
-                FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+                if (!historical) ...[
+                  const SizedBox(height: 24),
+                  FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+                ],
               ],
             ),
           ),
-          const Positioned.fill(child: WorkoutCelebration()),
+          if (!historical) const Positioned.fill(child: WorkoutCelebration()),
         ],
       ),
     );
@@ -181,13 +200,12 @@ class _Bests extends StatelessWidget {
                     children: [
                       Text(
                         b.value,
-                        style: t.bodyLarge?.copyWith(
-                          color: accent,
-                          fontWeight: FontWeight.w700,
-                          fontFeatures: tabular,
-                        ),
+                        style: t.bodyLarge?.copyWith(color: accent, fontWeight: FontWeight.w700, fontFeatures: tabular),
                       ),
-                      Text(b.gain, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular)),
+                      Text(
+                        b.gain,
+                        style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                      ),
                     ],
                   ),
                 ],

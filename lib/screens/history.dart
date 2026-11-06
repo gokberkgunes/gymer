@@ -10,6 +10,7 @@ import '../widgets/common.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
 import 'cycle.dart';
+import 'finish.dart';
 import 'progress.dart';
 import 'session.dart' show pickSetType, showSetDetails;
 
@@ -116,7 +117,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               child: Card(
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: () => openSessionEditor(context, s),
+                  onTap: () => openSessionSummary(context, s),
                   child: Padding(
                     padding: EdgeInsets.all(context.style.sp(16)),
                     child: Row(
@@ -267,6 +268,30 @@ class _WeekDots extends StatelessWidget {
             ],
           ),
       ],
+    );
+  }
+}
+
+void openSessionSummary(BuildContext context, Session session) {
+  Navigator.of(context).push(MaterialPageRoute(builder: (_) => _SavedSummary(sessionId: session.id)));
+}
+
+class _SavedSummary extends StatelessWidget {
+  final String sessionId;
+  const _SavedSummary({required this.sessionId});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final session = store.history.where((s) => s.id == sessionId).firstOrNull;
+    if (session == null) return Scaffold(appBar: AppBar(title: const Text('Workout summary')));
+    return FinishScreen(
+      summary: store.summarizeSession(session),
+      historical: true,
+      onEdit: () async {
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SessionEditor(original: session)));
+        if (context.mounted && !store.history.any((s) => s.id == sessionId)) Navigator.pop(context);
+      },
     );
   }
 }
