@@ -1027,6 +1027,7 @@ class Settings {
   String unit;
   int defaultRest;
   int defaultSets;
+  int warmupSets;
   bool trackRir;
   bool trackBodyweight;
   String achievementCelebration; // glow | confetti | off
@@ -1083,6 +1084,7 @@ class Settings {
     this.unit = 'kg',
     this.defaultRest = 180,
     this.defaultSets = 3,
+    this.warmupSets = 3,
     this.trackRir = true,
     this.trackBodyweight = false,
     this.achievementCelebration = 'glow',
@@ -1172,6 +1174,7 @@ class Settings {
     'unit': unit,
     'defaultRest': defaultRest,
     'defaultSets': defaultSets,
+    'warmupSets': warmupSets,
     'trackRir': trackRir,
     'trackBodyweight': trackBodyweight,
     'achievementCelebration': achievementCelebration,
@@ -1230,6 +1233,7 @@ class Settings {
       unit: s('unit', 'kg', {'kg', 'lb'}),
       defaultRest: _int(j['defaultRest']) ?? d.defaultRest,
       defaultSets: _int(j['defaultSets']) ?? d.defaultSets,
+      warmupSets: j['warmupSets'] == 2 ? 2 : 3,
       trackRir: b('trackRir', d.trackRir),
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
       achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),

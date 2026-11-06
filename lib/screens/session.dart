@@ -307,7 +307,8 @@ class _Header extends StatelessWidget {
     final store = StoreScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final sets = [for (final e in session.visibleExercises) ...session.visibleSetsFor(e)];
+    // This remains the working-set counter. Warm-ups have their own W1 / W2 / W3 rows.
+    final sets = [for (final e in session.exercises) ...e.work];
     final total = sets.length;
     final done = sets.where((set) => set.done).length;
     return Padding(
@@ -335,47 +336,9 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    PopupMenuButton<String>(
-                      tooltip: 'Workout phase',
-                      onSelected: (phase) {
-                        FocusScope.of(context).unfocus();
-                        if (phase.startsWith('warmup:')) {
-                          store.showWorkoutPhase(warmup: true, exerciseName: phase.substring('warmup:'.length));
-                        } else if (phase == 'working') {
-                          store.showWorkoutPhase(warmup: false);
-                        } else {
-                          final error = store.startWarmups(sets: phase == 'two' ? 2 : 3);
-                          if (error != null) notify(context, error);
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        CheckedPopupMenuItem(
-                          value: 'working',
-                          checked: !session.warmingUp,
-                          child: const Text('Working sets'),
-                        ),
-                        for (final warmup in session.warmupExercises)
-                          CheckedPopupMenuItem(
-                            value: 'warmup:${warmup.name}',
-                            checked: session.activeWarmup == warmup,
-                            child: Text('Warm-up · ${warmup.name}'),
-                          ),
-                        if (store.nextWarmupExercise != null) ...[
-                          const PopupMenuDivider(),
-                          const PopupMenuItem(value: 'two', child: Text('Warm-up · 2 sets')),
-                          const PopupMenuItem(value: 'three', child: Text('Warm-up · 3 sets')),
-                        ],
-                      ],
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '$done/$total sets',
-                            style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
-                          ),
-                          Icon(Icons.expand_more_rounded, size: 16, color: cs.onSurfaceVariant),
-                        ],
-                      ),
+                    Text(
+                      '$done/$total sets',
+                      style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
                     ),
                     Text(
                       session.clockStarted && !session.clockRunning
@@ -484,6 +447,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final info = store.exercise(e.name);
     final note = info?.note.trim() ?? '';
     final warmup = session.isWarmupExercise(e);
+    final ramp = session.warmupFor(e.name);
+    final canWarmup =
+        warmup || ramp != null || (e.loadMode == 'external' && e.work.isNotEmpty && !e.work.any((s) => s.done));
     final circuit = warmup ? null : circuitFor(session.circuits, e.name);
     final scheduledSteps = {for (final step in sessionSteps(session)) step.set: step};
     final blocks = exerciseBlocks(session);
@@ -510,7 +476,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       ('history', Icons.show_chart_rounded, 'History & progress', () => openExerciseProgress(context, e.name)),
       ('details', Icons.info_outline_rounded, 'Exercise details', () => openExerciseEditor(context, e.name)),
       if (!warmup) ('circuit', Icons.link_rounded, 'Superset / circuit', () => _circuitEditor(context, store, e)),
-      if (warmup || session.warmupFor(e.name) != null || (e.loadMode == 'external' && !e.work.any((s) => s.done)))
+      if (canWarmup)
         (
           'warmup',
           Icons.local_fire_department_outlined,
@@ -566,7 +532,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
 
     final firstAnchor = e.sets.indexWhere((x) => calibrationAnchor(e.method, x.type));
     final heading = ExerciseActionHeader(
-      minimumTitleWidth: circuit == null ? 96 : (note.isEmpty ? 144 : 160),
+      minimumTitleWidth: canWarmup || note.isNotEmpty ? 160 : (circuit == null ? 96 : 144),
       title: InkWell(
         // No highlight box of its own: the whole card is tinted instead (see _pressed).
         splashFactory: NoSplash.splashFactory,
@@ -619,6 +585,15 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
                         ),
                         if (e.advice.isNotEmpty)
                           InfoDot(tooltip: 'Notes for this exercise', onTap: () => _showAdvice(context, e)),
+                        if (canWarmup) ...[
+                          const SizedBox(width: 8),
+                          _WarmupPill(
+                            active: warmup,
+                            ramp: ramp,
+                            compact: constraints.maxWidth < 220,
+                            onTap: () => _warmupEditor(context, store, e),
+                          ),
+                        ],
                         if (note.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           ConstrainedBox(
@@ -709,6 +684,9 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
 
     // A Material (like the Card it replaces) so ink ripples inside the card stay visible. Its colour
     // fades to grey while the name is pressed instead of jumping, which flickered on quick taps.
+    final hatchColor = cs.brightness == Brightness.light
+        ? cs.surfaceContainerHigh
+        : cs.onSurface.withValues(alpha: 0.03);
     final card = TweenAnimationBuilder<Color?>(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOut,
@@ -722,7 +700,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           side: BorderSide(color: cs.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
-        child: child,
+        child: CustomPaint(painter: warmup ? _WarmupHatching(hatchColor) : null, child: child),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(12, st.sp(12), 12, st.sp(8)),
@@ -952,23 +930,132 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     FocusScope.of(context).unfocus();
     if (session.isWarmupExercise(e)) {
       store.showWorkoutPhase(warmup: false);
-    } else if (session.warmupFor(e.name) != null) {
+    } else if (session.warmupFor(e.name)?.sets.any((set) => set.done) == true) {
       store.showWorkoutPhase(warmup: true, exerciseName: e.name);
     } else {
-      final sets = await showDialog<int>(
-        context: context,
-        builder: (dialog) => SimpleDialog(
-          title: const Text('Warm-up'),
-          children: [
-            for (final count in [2, 3])
-              SimpleDialogOption(onPressed: () => Navigator.pop(dialog, count), child: Text('$count sets')),
-          ],
-        ),
-      );
-      if (sets == null || !context.mounted) return;
-      final error = store.startWarmups(sets: sets, exerciseName: e.name);
+      // Most starts are one tap. A first-ever exercise needs one working load, never separate warm-up loads.
+      double? weight;
+      if (store.warmupWorkingWeight(e) == null) {
+        weight = await showDialog<double>(
+          context: context,
+          builder: (_) => _WarmupLoadDialog(exercise: e.name, unit: session.unit),
+        );
+        if (weight == null || !context.mounted) return;
+      }
+      final error = store.startWarmups(exerciseName: e.name, workingWeight: weight);
       if (error != null) notify(context, error);
     }
+  }
+}
+
+class _WarmupPill extends StatelessWidget {
+  final bool active, compact;
+  final SessionExercise? ramp;
+  final VoidCallback onTap;
+  const _WarmupPill({required this.active, required this.compact, required this.ramp, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final complete = ramp?.complete == true;
+    final label = active
+        ? 'Work sets'
+        : complete
+        ? 'Warm-up'
+        : ramp == null
+        ? 'Warm up'
+        : 'Resume';
+    return Tooltip(
+      message: active
+          ? 'Show working sets'
+          : complete
+          ? 'Review warm-up'
+          : ramp == null
+          ? 'Start warm-up'
+          : 'Resume warm-up',
+      child: Material(
+        color: active ? cs.info.withValues(alpha: 0.14) : cs.surfaceContainerHigh,
+        borderRadius: context.style.brSmall,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: context.style.brSmall,
+          child: SizedBox(
+            width: compact ? 28 : 88,
+            height: 28,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  active
+                      ? Icons.arrow_forward_rounded
+                      : complete
+                      ? Icons.check_rounded
+                      : Icons.local_fire_department_outlined,
+                  size: 16,
+                  color: active ? cs.info : cs.onSurfaceVariant,
+                ),
+                if (!compact) ...[
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelMedium?.copyWith(color: active ? cs.info : cs.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WarmupLoadDialog extends StatefulWidget {
+  final String exercise, unit;
+  const _WarmupLoadDialog({required this.exercise, required this.unit});
+
+  @override
+  State<_WarmupLoadDialog> createState() => _WarmupLoadDialogState();
+}
+
+class _WarmupLoadDialogState extends State<_WarmupLoadDialog> {
+  double? _weight;
+
+  @override
+  Widget build(BuildContext context) {
+    void start() {
+      if ((_weight ?? 0) > 0) Navigator.pop(context, _weight);
+    }
+
+    return AlertDialog(
+      title: const Text('Working weight'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.exercise, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 16),
+          NumField(
+            value: _weight,
+            kind: NumKind.weight,
+            suffix: widget.unit,
+            placeholder: 'Working weight',
+            onChanged: (v) => setState(() => _weight = v),
+            onSubmitted: start,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: (_weight ?? 0) > 0 ? start : null, child: const Text('Warm up')),
+      ],
+    );
   }
 }
 
@@ -1213,7 +1300,12 @@ class _SetRow extends StatelessWidget {
         ? Text(formatDuration(plannedRest), style: restStyle.copyWith(color: cs.onSurfaceVariant))
         : null;
 
-    // Inputs sit one step lighter than the set tile.
+    // The warm-up texture belongs to the exercise card. Set tiles stay solid and ordinary.
+    final tileColor = s.done
+        ? s.warmup
+              ? Color.alphaBlend(cs.primary.withValues(alpha: 0.12), cs.surface)
+              : cs.primary.withValues(alpha: 0.12)
+        : cs.surfaceContainerHigh;
     final fieldFill = Theme.of(context).brightness == Brightness.dark
         ? Color.lerp(cs.surfaceContainerHigh, Colors.white, 0.07)
         : cs.surface;
@@ -1390,10 +1482,6 @@ class _SetRow extends StatelessWidget {
     // Unusual values only turn orange (reason on long press); no text line under the row,
     // so a set never changes height.
     // Each set is its own tile (as in the Appearance preview) so the set gap reads clearly.
-    final baseTile = s.done ? cs.primary.withValues(alpha: 0.12) : cs.surfaceContainerHigh;
-    final tileColor = s.warmup
-        ? Color.alphaBlend(cs.onSurface.withValues(alpha: position.isEven ? 0.015 : 0.045), baseTile)
-        : baseTile;
     final content = Container(
       padding: EdgeInsets.symmetric(horizontal: 2, vertical: st.sp(2)),
       decoration: BoxDecoration(color: tileColor, borderRadius: st.setTile(position, count)),
@@ -1433,6 +1521,26 @@ class _SetRow extends StatelessWidget {
     final picked = await pickSetType(context, e.method, [for (final s in e.sets) (s.type, s.groupStart)], index);
     if (picked != null) store.changeSetType(e, e.sets[index], picked);
   }
+}
+
+/// Broad, quiet diagonal bands across the warm-up exercise card, behind its solid set tiles.
+class _WarmupHatching extends CustomPainter {
+  final Color color;
+  const _WarmupHatching(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ink = Paint()
+      ..color = color
+      ..strokeWidth = 8
+      ..isAntiAlias = true;
+    for (double x = -size.height; x < size.width; x += 22) {
+      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), ink);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WarmupHatching oldDelegate) => color != oldDelegate.color;
 }
 
 /// Set-role choices valid for this row of the method.

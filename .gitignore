@@ -16,6 +16,8 @@ key.properties
 .pub-cache/
 .pub/
 /coverage/
+# Local visual-review screenshots (kept in the project root for feedback)
+/preview-*.png
 **/doc/api/
 app.*.symbols
 app.*.map.json

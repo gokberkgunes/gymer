@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymer/logic/circuits.dart';
 import 'package:gymer/logic/plates.dart';
+import 'package:gymer/logic/warmup.dart';
 import 'package:gymer/models.dart';
 import 'package:gymer/store.dart';
 
@@ -49,6 +50,10 @@ void main() {
   });
 
   test('resumed warm-ups never change working loads, volume or the next workout', () async {
+    expect(warmupRamp(100).map((s) => (s.weight, s.reps)), [(40, 8), (60, 5), (80, 3)]);
+    expect(warmupRamp(100, sets: 2).map((s) => s.weight), [40, 80]);
+    expect(warmupRamp(25, bar: 20, plates: [20, 10, 5, 2.5, 1.25]).map((s) => s.weight), [20]);
+    expect(warmupRamp(10, increment: 5).map((s) => s.weight), [5]);
     final store = AppStore(), resumed = AppStore();
     addTearDown(store.dispose);
     addTearDown(resumed.dispose);
@@ -64,12 +69,21 @@ void main() {
     ];
     final plan = jsonDecode(jsonEncode(store.templates.single.toJson()));
     store.startSession(store.templates.single);
-    expect(store.startWarmups(sets: 2), isNull);
+    store.settings.updateFollowingDefaults = true;
+    expect(store.startWarmups(), isNull);
+    final ramp = store.active!.activeWarmup!;
+    expect(ramp.sets.map((s) => s.weight), [40, 60, 80]);
+    ramp.sets[1]
+      ..weight = null
+      ..reps = null;
     expect(store.toggleSet(store.active!.activeWarmup!, 0).ok, isTrue);
+    expect((ramp.sets[1].hintWeight, ramp.sets[1].hintReps), (60, 5));
     await resumed.importJson(jsonEncode(store.toJson()));
     expect(resumed.active!.activeWarmup!.sets.first.done, isTrue);
     expect(resumed.rest!.warmup, isTrue);
     expect(resumed.toggleSet(resumed.active!.activeWarmup!, 1).ok, isTrue);
+    expect(resumed.active!.activeWarmup!.sets[1].weight, 60);
+    expect(resumed.toggleSet(resumed.active!.activeWarmup!, 2).ok, isTrue);
     expect(resumed.active!.warmingUp, isFalse);
     expect(resumed.active!.doneSets, 0);
     final working = resumed.active!.exercises.single;
@@ -81,6 +95,26 @@ void main() {
     expect(resumed.templates.single.toJson(), plan);
     resumed.startSession(resumed.templates.single);
     expect(resumed.active!.exercises.single.sets.map((s) => s.hintWeight), [100, 100]);
+    resumed.startSession(
+      WorkoutTemplate(
+        id: 'other',
+        name: 'Other workout',
+        exercises: [
+          TemplateExercise(name: 'Bench', sets: [TemplateSet(reps: 8)]),
+        ],
+      ),
+    );
+    expect(resumed.startWarmups(), isNull); // Reuse the working load from the other workout.
+    expect(resumed.active!.activeWarmup!.sets.map((s) => s.weight), [40, 60, 80]);
+    expect(resumed.active!.exercises.single.sets.single.weight, isNull);
+    final manual = SessionExercise(
+      name: 'Manual exercise',
+      sets: [
+        SetEntry(type: 'Warm-up', weight: 20, reps: 8),
+        SetEntry(),
+      ],
+    );
+    expect(resumed.fallbackValue(manual, 1, 'weight'), isNull);
   });
 
   test('supersets enforce round order and retain shared rest correctly through undo and edits', () {

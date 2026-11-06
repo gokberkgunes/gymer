@@ -32,6 +32,9 @@ List<WarmupStep> warmupRamp(
       weight = double.parse(math.max(step, ((target + 1e-8) / step).floor() * step).toStringAsFixed(2));
       if (weight > workingWeight) continue;
     }
+    // A light working load or sparse inventory can round several steps to the same load.
+    // Keep one rehearsal at that load rather than presenting a pretend pyramid.
+    if (result.isNotEmpty && weight <= result.last.weight + 1e-8) continue;
     result.add((weight: weight, reps: reps));
   }
   return result;

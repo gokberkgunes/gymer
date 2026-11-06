@@ -121,6 +121,29 @@ class _WorkoutSettings extends StatelessWidget {
               ),
             ),
           ),
+          _stackedChoice(
+            context,
+            'Warm-up ramp',
+            s.warmupSets,
+            const {2: '2 sets', 3: '3 sets'},
+            (v) => store.updateSettings((x) => x.warmupSets = v),
+            info: InfoDot(
+              tooltip: 'How warm-ups work',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Warm-up ramp'),
+                  content: const Text(
+                    'Tap Warm up beside an exercise name. Loads come from your working weight: '
+                    '40 / 80% for two sets, or 40 / 60 / 80% for three, with fewer reps as the load increases. '
+                    'Available plates and increments can reduce the number of distinct steps. '
+                    'Only that exercise switches to warm-ups; its working sets return when the ramp is done.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Got it'))],
+                ),
+              ),
+            ),
+          ),
         ]),
         const SectionLabel('Workout tracking'),
         _group([

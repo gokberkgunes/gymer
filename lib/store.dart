@@ -1186,21 +1186,54 @@ class AppStore extends ChangeNotifier {
     changed();
   }
 
-  /// The header starts the next unwarmed exercise; each exercise menu can choose explicitly.
+  /// The next eligible exercise, also used by callers without an explicit exercise.
   SessionExercise? get nextWarmupExercise {
     final session = active;
     if (session == null) return null;
     final candidates = session.exercises.where(
       (e) => e.loadMode == 'external' && !e.work.any((s) => s.done) && session.warmupFor(e.name) == null,
     );
-    return candidates.where((e) => e.work.any((s) => (s.weight ?? s.hintWeight ?? 0) > 0)).firstOrNull ??
-        candidates.firstOrNull;
+    return candidates.where((e) => warmupWorkingWeight(e) != null).firstOrNull ?? candidates.firstOrNull;
+  }
+
+  /// Prefer today's plan. If this workout has no load yet, reuse a compatible completed working set
+  /// from the same exercise in another workout. Warm-up loads are never a source.
+  double? warmupWorkingWeight(SessionExercise exercise) {
+    if (exercise.loadMode != 'external' || exercise.work.isEmpty) return null;
+    for (final set in exercise.work) {
+      final weight = set.weight ?? set.hintWeight;
+      if (weight != null && weight.isFinite && weight > 0) return weight;
+    }
+    final context = exercise.work.first.context;
+    for (final session in history) {
+      if (session.phase == 'Deload') continue;
+      for (final past in session.exercises) {
+        if (past.name.toLowerCase() != exercise.name.toLowerCase() ||
+            past.loadMode != exercise.loadMode ||
+            past.method != exercise.method) {
+          continue;
+        }
+        for (final set in past.work) {
+          final weight = set.weight;
+          if (set.done &&
+              (set.reps ?? 0) > 0 &&
+              set.context == context &&
+              weight != null &&
+              weight.isFinite &&
+              weight > 0) {
+            return convertWeight(weight, session.unit, active?.unit ?? settings.unit);
+          }
+        }
+      }
+    }
+    return null;
   }
 
   /// Replace only this exercise's working rows with its ramp, keeping every other card visible.
-  String? startWarmups({int sets = 3, String? exerciseName}) {
+  String? startWarmups({int? sets, String? exerciseName, double? workingWeight}) {
     final session = active;
     if (session == null) return 'Start a workout first.';
+    sets ??= settings.warmupSets;
     if (sets != 2 && sets != 3) return 'Choose two or three warm-up sets.';
     final target = exerciseName == null
         ? nextWarmupExercise
@@ -1209,20 +1242,29 @@ class AppStore extends ChangeNotifier {
     if (target.work.any((set) => set.done)) return 'Start warm-ups before completing this exercise’s working sets.';
     if (target.loadMode != 'external') return 'Warm-up ramps require an external working load.';
     if (session.warmupFor(target.name)?.sets.any((set) => set.done) == true) {
-      return 'Warm-ups are already underway. Use Show warm-up to return to them.';
+      return 'Warm-ups are already underway. Tap Resume to return to them.';
     }
-    final source = target.work.where((set) => (set.weight ?? set.hintWeight ?? 0) > 0).firstOrNull;
-    if (source == null) return 'Enter a working weight for ${target.name} first.';
+    final source =
+        target.work.where((set) => (set.weight ?? set.hintWeight ?? 0) > 0).firstOrNull ?? target.work.firstOrNull;
+    if (source == null) return 'Add a working set first.';
+    final load = workingWeight ?? warmupWorkingWeight(target);
+    if (load == null || !load.isFinite || !numberAllowed(load, NumKind.weight) || load <= 0) {
+      return 'Choose a working weight for ${target.name}.';
+    }
     final usesBar = platesApply(target.name);
     final ramp = warmupRamp(
-      source.weight ?? source.hintWeight!,
+      load,
       sets: sets,
       increment: incrementFor(target.name, session.unit) ?? 0.5,
-      bar: usesBar ? plates(source.weight ?? source.hintWeight!, name: target.name).bar : 0,
+      bar: usesBar ? plates(load, name: target.name).bar : 0,
       plates: usesBar ? settings.plates : null,
       pairs: usesBar ? settings.platePairs : null,
     );
     if (ramp.isEmpty) return 'No warm-up loads are available with this plate setup.';
+    // A first-time load is a plan, not an observation. Keep it ready for the working rows too.
+    for (final set in target.work) {
+      if (set.weight == null && set.hintWeight == null && set.context == source.context) set.hintWeight = load;
+    }
     session.warmupExercises.removeWhere((e) => e.name == target.name);
     session.warmupExercises.add(
       SessionExercise(
@@ -1233,6 +1275,8 @@ class AppStore extends ChangeNotifier {
               type: 'Warm-up',
               weight: step.weight,
               reps: step.reps,
+              hintWeight: step.weight,
+              hintReps: step.reps,
               rest: 60,
               context: source.context,
               prescribed: true,
@@ -1816,6 +1860,7 @@ class AppStore extends ChangeNotifier {
     final position = visible.indexOf(s);
     if (position <= 0) return null;
     final above = visible[position - 1];
+    if (above.warmup != s.warmup) return null;
     return field == 'weight' ? above.weight : above.reps;
   }
 
@@ -1926,6 +1971,8 @@ class AppStore extends ChangeNotifier {
   /// Seed later placeholders without violating the selected training method.
   void _propagateFollowing(SessionExercise e, int index) {
     final source = e.sets[index];
+    // A rehearsal's load and rep target must never flatten a ramp or seed a working set.
+    if (source.warmup) return;
     final fields = switch (e.method) {
       'Straight' || 'Myo-Rep Match' || 'Cluster' => const ['weight', 'reps'],
       'Drop Set' => const <String>[],
@@ -1933,6 +1980,7 @@ class AppStore extends ChangeNotifier {
     };
     if (fields.isEmpty) return;
     for (final later in e.sets.skip(index + 1)) {
+      if (later.warmup) continue;
       if (later.context != source.context) continue;
       if ((fields.contains('weight') && later.weight != null) || (fields.contains('reps') && later.reps != null)) {
         continue;
