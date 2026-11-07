@@ -218,7 +218,7 @@ class AppStore extends ChangeNotifier {
   int _historyVersion = 0;
   Object? _historyCacheKey;
   final _previousCache = <String, List<SetEntry>?>{};
-  final _bestCache = <String, LiftBest?>{};
+  final _bestCache = <(String, SetContext), LiftBest?>{};
   final _comparisonCache = <(String, String, String, String?, DateTime), List<SetEntry>?>{};
 
   static double _tenth(double v) => (v * 10).round() / 10;

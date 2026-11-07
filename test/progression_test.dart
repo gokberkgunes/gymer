@@ -45,16 +45,37 @@ void main() {
     expect((down.action, down.weight), ('decrease', 97.5));
   });
 
-  test('automatic changes are capped at 10% of the load', () {
-    final r = rec(sets([(20, 12, 2), (20, 12, 2)]));
+  test('straight sets always take one increment, even above 10% of a light load; reps alone decide without RIR', () {
+    // A 5 kg step is 25% of 20 kg; double progression still takes it (it once held forever at 12 reps).
+    final light = rec(sets([(20, 12, 2), (20, 12, 2)]));
     expect(
-      [r.action, r.weight, r.setRepTargets],
+      [light.action, light.weight, light.setRepTargets],
       [
-        'hold',
-        20.0,
-        [12, 12],
+        'increase',
+        25.0,
+        [8, 8],
       ],
     );
+    Recommendation repsOnly(List<(double, int)> v) => recommend(
+      previous: [for (final (w, r) in v) SetEntry(weight: w, reps: r, done: true)],
+      method: 'Straight',
+      targetRir: 2,
+      unit: 'kg',
+      increment: 5,
+      rirTracked: false,
+    )!;
+    expect((repsOnly([(100, 12), (100, 12)]).action, repsOnly([(100, 12), (100, 12)]).weight), ('increase', 105.0));
+    expect(repsOnly([(100, 10), (100, 9)]).setRepTargets, [11, 10]);
+    expect(repsOnly([(100, 7), (100, 9)]).weight, 95.0);
+    // With RIR tracked, a blank RIR still holds.
+    final blank = recommend(
+      previous: [SetEntry(weight: 100, reps: 12, done: true)],
+      method: 'Straight',
+      targetRir: 2,
+      unit: 'kg',
+      increment: 5,
+    )!;
+    expect(blank.action, 'hold');
   });
 
   test('drop set progresses unless a recorded observation contradicts the protocol', () {

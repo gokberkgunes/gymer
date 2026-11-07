@@ -23,7 +23,10 @@ void main() {
     c
       ..endRir = 1
       ..weekRir[2] = 2;
-    expect([for (var w = 1; w <= 5; w++) rirForWeek(c, w)], [3, 2, 1, 1, 4]);
+    expect([for (var w = 1; w <= 5; w++) rirForWeek(c, w)], [3, 2, 2, 1, 4]);
+    // Effort ramps evenly instead of reaching failure early and staying there.
+    final long = Mesocycle(id: 'l', start: DateTime(2026, 1, 5), startRir: 3, endRir: 0, length: 7);
+    expect([for (var w = 1; w <= 7; w++) rirForWeek(long, w)], [3, 2, 2, 1, 1, 0, 4]);
   });
 
   test('calendar tracks done, missed and moved days', () {

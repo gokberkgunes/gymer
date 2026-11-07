@@ -31,8 +31,9 @@ class CycleStatus {
   bool get running => phase == 'Build' || phase == 'Deload';
 }
 
-/// RIR for a microcycle: step one RIR per week from start toward end, land
-/// exactly on the end RIR in the final build week, deload RIR afterwards.
+/// RIR for a microcycle: spread evenly from the start RIR in the first build week to the end RIR in the final
+/// build week (rounded), deload RIR afterwards. Even spacing keeps the approach to failure gradual: 3 → 0 over
+/// six weeks is 3, 2, 2, 1, 1, 0 rather than reaching 0 in week four and staying there.
 int rirForWeek(Mesocycle c, int week) {
   final total = math.max(1, c.length);
   final deload = math.min(math.max(0, c.deloadMicro), math.max(0, total - 1));
@@ -43,15 +44,8 @@ int rirForWeek(Mesocycle c, int week) {
   } else if (build <= 1) {
     rir = c.endRir;
   } else {
-    final position = math.min(week, build) - 1;
-    if (position <= 0) {
-      rir = c.startRir;
-    } else if (position >= build - 1) {
-      rir = c.endRir;
-    } else {
-      final direction = c.endRir > c.startRir ? 1 : -1;
-      rir = c.startRir + direction * math.min(position, (c.endRir - c.startRir).abs());
-    }
+    final position = (math.min(week, build) - 1).clamp(0, build - 1);
+    rir = (c.startRir + (c.endRir - c.startRir) * position / (build - 1)).round();
   }
   return c.weekRir[week] ?? rir;
 }

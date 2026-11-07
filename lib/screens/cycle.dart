@@ -197,9 +197,9 @@ void _mesocycleInfo(BuildContext context) => _infoDialog(context, 'How to use a 
   (
     'Progress reps, then load',
     "Straight double progression uses each exercise's rep range (8–12 by default). Build reps at the target RIR, then "
-        'add one available load increment after every planned set reaches the upper limit. Missed sets or unknown '
-        'effort block an increase. Change the range or select manual progression in exercise details; other methods '
-        'have separate rules.',
+        'add one available load increment after every planned set reaches the upper limit. Missed sets block an '
+        'increase, and so does unknown effort while Track RIR is on; with it off, reps alone decide. Change the range '
+        'or select manual progression in exercise details; other methods have separate rules.',
   ),
   (
     'Change the plan when needed',

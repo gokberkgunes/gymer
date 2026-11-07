@@ -194,6 +194,18 @@ extension AppStoreCatalog on AppStore {
     return plan;
   }
 
+  /// The heaviest load at or below [target] that [name] can actually be loaded with: the plate inventory for
+  /// plate exercises (never below the bar), otherwise the exercise's increment. Used for starting loads and
+  /// Rep Max targets so a suggested load is one the user can put on.
+  double loadableAtOrBelow(String name, double target) {
+    if (platesApply(name)) {
+      final plan = plates(target, name: name);
+      return plan.exact?.total ?? plan.below?.total ?? plan.above?.total ?? target;
+    }
+    final step = incrementFor(name, settings.unit) ?? practicalWeightStep(target, settings.unit, null);
+    return snapWeight(math.max(step, (target / step + 1e-9).floor() * step));
+  }
+
   void addSetType(String name) {
     final n = name.trim();
     if (n.isEmpty || settings.setTypes.any((t) => t.toLowerCase() == n.toLowerCase())) return;

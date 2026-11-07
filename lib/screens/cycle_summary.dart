@@ -141,7 +141,7 @@ class CycleSummaryContent extends StatelessWidget {
                 tooltip: 'Strength change',
                 onTap: () => info(
                   'Strength change',
-                  'The best straight working set in the first build workout compared with the last matching build workout. Loads are converted to ${summary.unit}. Warm-ups, deloads, other methods and changed setups are excluded. This is an estimate, not a tested maximum.',
+                  'The best straight working set of the first build ${cycle.periodNoun()} compared with the best of the last one, counting reps in reserve so sets taken closer to failure do not look stronger. Loads are converted to ${summary.unit}. Warm-ups, deloads, other methods and changed setups are excluded. This is an estimate, not a tested maximum.',
                 ),
               ),
             ),

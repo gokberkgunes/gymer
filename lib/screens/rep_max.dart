@@ -47,7 +47,7 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
     final targetReps = _targetReps ?? store.settings.repMaxTargetReps;
     final w = _weight, rm = _rm;
     final oneRm = w != null && w > 0 && rm != null && rm >= 1 ? w / (wathanPercent(rm) / 100) : null;
-    String kg(double v) => '${v.round()} $unit';
+    String whole(double v) => '${v.round()} $unit';
 
     Widget table(List<Widget> rows) => Card(
       clipBehavior: Clip.antiAlias,
@@ -80,12 +80,24 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
       ),
     );
     // Tapping a load opens the plate calculator (with the exercise's own bar when opened from one).
-    Widget load(double? v, TextStyle style) => InkWell(
+    // [exact] loads are already loadable values (RIR targets) and are shown as they are; table values are
+    // rounded to whole units for reading.
+    Widget load(double? v, TextStyle style, {bool exact = false}) => InkWell(
       borderRadius: context.style.brSmall,
-      onTap: v == null || v <= 0 ? null : () => showPlates(context, v.roundToDouble(), exercise: widget.exercise),
+      onTap: v == null || v <= 0
+          ? null
+          : () => showPlates(context, exact ? v : v.roundToDouble(), exercise: widget.exercise),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Text(v == null ? '—' : kg(v), textAlign: TextAlign.right, style: style),
+        child: Text(
+          v == null
+              ? '—'
+              : exact
+              ? '${formatNumber(v, NumKind.weight)} $unit'
+              : whole(v),
+          textAlign: TextAlign.right,
+          style: style,
+        ),
       ),
     );
 
@@ -128,7 +140,7 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
           child: Row(
             children: [
               Expanded(child: Text('Estimated 1RM', style: t.bodyLarge)),
-              Text(oneRm == null ? '—' : kg(oneRm), style: t.titleLarge?.copyWith(fontFeatures: tabular)),
+              Text(oneRm == null ? '—' : whole(oneRm), style: t.titleLarge?.copyWith(fontFeatures: tabular)),
             ],
           ),
         ),
@@ -158,7 +170,12 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
             header(['RIR', '$targetReps reps', 'Target weight']),
             for (final rir in const [3, 2, 1])
               () {
-                final double target = (oneRm * wathanPercent(targetReps + rir) / 100).roundToDouble();
+                // A load the bar or machine can actually make (rounded down), so "Use" never puts in an
+                // unloadable weight; without an exercise, whole units.
+                final raw = oneRm * wathanPercent(targetReps + rir) / 100;
+                final double target = widget.exercise == null
+                    ? raw.roundToDouble()
+                    : store.loadableAtOrBelow(widget.exercise!, raw);
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   child: Row(
@@ -176,7 +193,11 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            load(target, const TextStyle(fontWeight: FontWeight.bold, fontFeatures: tabular)),
+                            load(
+                              target,
+                              const TextStyle(fontWeight: FontWeight.bold, fontFeatures: tabular),
+                              exact: true,
+                            ),
                             if (widget.exercise != null) ...[
                               const SizedBox(width: 8),
                               OutlinedButton(

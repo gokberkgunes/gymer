@@ -63,7 +63,17 @@ double practicalWeight(double value, String unit, double reference, [double? con
   return math.max(0, reference + _roundHalfUp(value - reference, step));
 }
 
-(double, String, String) _boundedLoad(double current, double proposed, String intended, double step, String reason) {
+/// Applies the 10% limit to estimate-driven load changes. Straight double progression passes [capped] false:
+/// one increment after the top of the rep range is the rule itself, even when that increment is more than 10%
+/// of a light load (a 5 kg step on a 30 kg machine would otherwise never be taken).
+(double, String, String) _boundedLoad(
+  double current,
+  double proposed,
+  String intended,
+  double step,
+  String reason, {
+  bool capped = true,
+}) {
   if (intended == 'hold') return (current, 'hold', reason);
   final direction = intended == 'increase' ? 1 : -1;
   final delta = proposed - current;
@@ -74,6 +84,10 @@ double practicalWeight(double value, String unit, double reference, [double? con
       'The rep-based direction conflicts with the effort-based estimate or rounding; '
           'keep the load and review the observation.',
     );
+  }
+  if (!capped) {
+    if (proposed <= 0) return (current, 'hold', 'No positive load fits this automatic change; choose manually.');
+    return (proposed, proposed > current ? 'increase' : 'decrease', reason);
   }
   final available = ((current * maxAutomaticChange + 1e-9) / step).floor();
   if (available < 1) {
@@ -121,13 +135,14 @@ Recommendation? recommend({
   String phase = 'Build',
   String loadMode = 'external',
   List<SetEntry>? planned,
+  bool rirTracked = true,
 }) {
   if (phase == 'Deload' || normalizeLoadMode(loadMode) != 'external') return null;
   method = canonicalMethod(method);
   if (method == 'Straight' && !auto) return null;
   return method == 'Straight'
-      ? _straight(previous, targetRir, unit, increment, repMin, repMax, expectedWorkSets, planned)
-      : _method(previous, method, targetRir, unit, increment, expectedWorkSets, planned);
+      ? _straight(previous, targetRir, unit, increment, repMin, repMax, expectedWorkSets, planned, rirTracked)
+      : _method(previous, method, targetRir, unit, increment, expectedWorkSets, planned, rirTracked);
 }
 
 /// set_context.comparison_error: recorded and planned logging context must be
@@ -159,6 +174,7 @@ Recommendation? _straight(
   int high,
   int? expected,
   List<SetEntry>? currentPlan,
+  bool rirTracked,
 ) {
   final planned = rows.where((r) => isStraightType(r.type)).toList();
   final sets = planned.where((r) => r.done && (r.weight ?? 0) > 0 && (r.reps ?? 0) > 0).toList();
@@ -183,6 +199,22 @@ Recommendation? _straight(
   } else if (sets.any((s) => (s.weight! - current).abs() > 1e-6)) {
     apply = false;
     reason = 'Working loads differ; preserve the individual loads and choose progression manually.';
+  } else if (!rirTracked) {
+    // RIR tracking is off, so there is no effort to read: plain double progression on reps alone.
+    if (sets.every((s) => s.reps! >= high)) {
+      suggested = current + step;
+      intended = 'increase';
+      targets = List.filled(planned.length, low);
+      reason = 'Every planned set reached $high reps; add one increment and restart at $low reps.';
+    } else if (sets.any((s) => s.reps! < low)) {
+      suggested = math.max(0, current - step);
+      intended = 'decrease';
+      targets = List.filled(planned.length, low);
+      reason = 'A working set fell below $low reps; try one increment lower.';
+    } else {
+      targets = [for (final s in sets) math.min(high, s.reps! + 1)];
+      reason = 'Keep the load and build reps within $low–$high; increase after every planned set reaches $high.';
+    }
   } else if (target == null) {
     reason = 'Target RIR is unknown; choose an effort target before automatic progression.';
   } else if (sets.any((s) => s.rir == null || s.rir! < 0)) {
@@ -219,8 +251,9 @@ Recommendation? _straight(
           'increase only after every planned set reaches $high.';
     }
   }
+  // Earlier branches (a missed set, a changed plan) can be reached with mixed loads too; never apply one load then.
   if (sets.any((s) => (s.weight! - current).abs() > 1e-6)) apply = false;
-  final (weight, action, why) = _boundedLoad(current, suggested, intended, step, reason);
+  final (weight, action, why) = _boundedLoad(current, suggested, intended, step, reason, capped: false);
   if (intended == 'increase' && action == 'hold') targets = List.filled(planned.length, high);
   return Recommendation(
     method: 'Straight',
@@ -242,7 +275,14 @@ String _anchorType(String method) => switch (method) {
   _ => 'Normal',
 };
 
-String? _qualityProblem(String method, List<SetEntry> work, int? expected, int? target, List<SetEntry>? currentPlan) {
+String? _qualityProblem(
+  String method,
+  List<SetEntry> work,
+  int? expected,
+  int? target,
+  List<SetEntry>? currentPlan,
+  bool rirTracked,
+) {
   final plan = currentPlan?.where((r) => !r.warmup).toList();
   if (isGroupedMethod(method) &&
       (work.skip(1).any((r) => r.groupStart) || (plan?.skip(1).any((r) => r.groupStart) ?? false))) {
@@ -310,7 +350,8 @@ String? _qualityProblem(String method, List<SetEntry> work, int? expected, int? 
       return 'muscular failure conflicts with the recorded nonzero actual RIR';
     }
     if (target == null) return 'the anchor effort target is unknown';
-    if (anchors.any((a) => a.rir == null || a.rir! < target)) {
+    // With RIR tracking off there is no box to record it, so an unrecorded anchor is taken as on target.
+    if (anchors.any((a) => (a.rir == null && rirTracked) || (a.rir != null && a.rir! < target))) {
       return 'actual anchor RIR is unknown or effort exceeded the target';
     }
   }
@@ -325,6 +366,7 @@ Recommendation? _method(
   double? increment,
   int? expected,
   List<SetEntry>? currentPlan,
+  bool rirTracked,
 ) {
   final work = rows.where((r) => !r.warmup).toList();
   final anchorType = _anchorType(method);
@@ -336,7 +378,7 @@ Recommendation? _method(
   final anchorWeight = a.weight!, anchorReps = a.reps!;
   final step = practicalWeightStep(anchorWeight, unit, increment);
   final current = practicalWeight(anchorWeight, unit, anchorWeight, step);
-  final problem = _qualityProblem(method, work, expected, target, currentPlan);
+  final problem = _qualityProblem(method, work, expected, target, currentPlan, rirTracked);
 
   if (method == 'Cluster') {
     final reps = [
@@ -374,7 +416,8 @@ Recommendation? _method(
     );
   }
 
-  final oneRm = a.rir == null ? null : estimatedOneRm(anchorWeight, anchorReps, a.rir!);
+  final anchorRir = a.rir ?? (rirTracked ? null : target);
+  final oneRm = anchorRir == null ? null : estimatedOneRm(anchorWeight, anchorReps, anchorRir);
   final repsForWindow = method == 'AMRAP' ? work.map((w) => w.reps ?? 0).reduce(math.min) : anchorReps;
   double suggested = current;
   var intended = 'hold';

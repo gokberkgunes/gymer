@@ -341,6 +341,7 @@ extension AppStoreSessionStart on AppStore {
               ? e.sets.where((s) => isStraightType(s.type)).length
               : e.sets.where((s) => !s.warmup).length,
           loadMode: e.loadMode,
+          rirTracked: settings.trackRir,
         );
       }
     }

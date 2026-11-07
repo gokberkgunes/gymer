@@ -140,13 +140,7 @@ extension AppStoreCycles on AppStore {
     );
     double? scaled(String name, double? weight) {
       if (weight == null || weight <= 0) return null;
-      final target = weight * loadPercent / 100;
-      if (platesApply(name)) {
-        final plan = plates(target, name: name);
-        return plan.exact?.total ?? plan.below?.total ?? plan.above?.total;
-      }
-      final step = incrementFor(name, settings.unit) ?? practicalWeightStep(target, settings.unit, null);
-      return snapWeight(math.max(step, (target / step + 1e-9).floor() * step));
+      return loadableAtOrBelow(name, weight * loadPercent / 100);
     }
 
     final result = <String, List<SessionExercise>>{};

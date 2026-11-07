@@ -101,19 +101,20 @@ extension AppStoreRecords on AppStore {
     return increase > 0.005 ? (load: load, previous: last.weight!, increase: increase) : null;
   }
 
-  /// Heaviest weight and best Wathan e1RM over completed working sets with an
-  /// external load; null without such history (a first session sets no record).
-  LiftBest? bestLift(String exercise) {
+  /// Heaviest weight and best e1RM ([setOneRm]) over completed working sets with an external load, logged with
+  /// the same [context] (a per-side or per-implement load is never compared with a total); null without such
+  /// history (a first session sets no record).
+  LiftBest? bestLift(String exercise, [SetContext context = const SetContext()]) {
     _syncHistoryCaches();
-    return _bestCache.putIfAbsent(exercise.toLowerCase(), () {
+    return _bestCache.putIfAbsent((exercise.toLowerCase(), context), () {
       double? weight, e1rm;
       for (final s in history) {
         for (final e in s.exercises) {
           if (e.name.toLowerCase() != exercise.toLowerCase() || e.loadMode != 'external') continue;
           for (final set in e.sets) {
-            if (!set.done || set.warmup) continue;
+            if (!set.done || set.warmup || set.context != context) continue;
             final x = _inUnit(set, s.unit);
-            final one = estimatedOneRm(x.weight ?? 0, x.reps ?? 0, 0);
+            final one = setOneRm(x.weight, x.reps, x.rir);
             if (one == null) continue;
             weight = math.max(weight ?? 0, x.weight!);
             e1rm = math.max(e1rm ?? 0, one);
@@ -127,8 +128,8 @@ extension AppStoreRecords on AppStore {
   /// 'weight' or 'e1rm' when this completed set beats every earlier session.
   String? recordKind(SessionExercise e, SetEntry s) {
     if (!s.done || s.warmup || e.loadMode != 'external') return null;
-    final one = estimatedOneRm(s.weight ?? 0, s.reps ?? 0, 0);
-    final best = one == null ? null : bestLift(e.name);
+    final one = setOneRm(s.weight, s.reps, s.rir);
+    final best = one == null ? null : bestLift(e.name, s.context);
     if (best == null) return null;
     if (s.weight! > best.weight + 1e-9) return 'weight';
     if (one! > best.e1rm + 0.05) return 'e1rm';
@@ -169,31 +170,39 @@ extension AppStoreRecords on AppStore {
       ];
       if (work.isEmpty) continue;
       final key = e.name.toLowerCase();
-      // Earlier sessions' working sets of this exercise with the same kind of load, in today's unit.
+      // Earlier sessions' working sets of this exercise with the same kind of load, in today's unit, each paired
+      // with its exercise so volume eligibility can be checked.
       final past = [
         for (final h in earlier)
           for (final x in h.exercises)
             if (x.name.toLowerCase() == key && x.loadMode == e.loadMode)
-              [
-                for (final set in x.sets)
-                  if (set.done && !set.warmup && (set.reps ?? 0) > 0) _inUnit(set, h.unit, unit),
-              ],
-      ].where((sets) => sets.isNotEmpty).toList();
-      double oneRm(SetEntry x) => estimatedOneRm(x.weight ?? 0, x.reps!, 0) ?? 0;
-      double volume(List<SetEntry> sets) => sets.fold(0.0, (a, x) => a + (x.weight ?? 0) * x.reps!);
+              (
+                x,
+                [
+                  for (final set in x.sets)
+                    if (set.done && !set.warmup && (set.reps ?? 0) > 0) _inUnit(set, h.unit, unit),
+                ],
+              ),
+      ].where((entry) => entry.$2.isNotEmpty).toList();
+      double oneRm(SetEntry x) => setOneRm(x.weight, x.reps, x.rir) ?? 0;
+      double volume(SessionExercise owner, List<SetEntry> sets) =>
+          sets.where((x) => countsAsVolume(owner, x)).fold(0.0, (a, x) => a + setVolume(x));
       String? best;
       double? change;
       if (e.loadMode == 'external') {
         final top = work.reduce((a, b) => (b.weight ?? 0) > (a.weight ?? 0) ? b : a);
         final strongest = work.reduce((a, b) => oneRm(b) > oneRm(a) ? b : a);
         best = '${w(top.weight ?? 0)} × ${top.reps}';
+        // Last time's sets logged the same way as today's strongest set (same setup, load basis and side).
         List<SetEntry>? previous({required bool sameWorkout}) {
           for (final h in earlier) {
             if (h.phase == 'Deload' || (sameWorkout && h.templateId != s.templateId)) continue;
             final exercise = h.exercises
                 .where((x) => x.name.toLowerCase() == key && x.loadMode == e.loadMode)
                 .firstOrNull;
-            final sets = exercise?.work.where((x) => x.done && (x.reps ?? 0) > 0).toList();
+            final sets = exercise?.work
+                .where((x) => x.done && (x.reps ?? 0) > 0 && x.context == strongest.context)
+                .toList();
             if (sets != null && sets.isNotEmpty) return [for (final set in sets) _inUnit(set, h.unit, unit)];
           }
           return null;
@@ -204,27 +213,40 @@ extension AppStoreRecords on AppStore {
           change = oneRm(strongest) - last.map(oneRm).reduce(math.max);
         }
         if (past.isNotEmpty && (top.weight ?? 0) > 0) {
-          final all = past.expand((x) => x);
-          final heaviest = all.map((x) => x.weight ?? 0).reduce(math.max);
-          final bestRm = all.map(oneRm).reduce(math.max);
-          final bestVolume = past.map(volume).reduce(math.max);
-          if (top.weight! > heaviest + 1e-9) {
-            bests.add(PersonalBest(e.name, 'weight', best, '+${w(top.weight! - heaviest)}'));
+          final all = past.expand((entry) => entry.$2);
+          // Records compare like with like: a per-side or per-implement load never beats (or blocks) a total.
+          final sameAsTop = all.where((x) => x.context == top.context);
+          final sameAsStrongest = all.where((x) => x.context == strongest.context);
+          if (sameAsTop.isNotEmpty) {
+            final heaviest = sameAsTop.map((x) => x.weight ?? 0).reduce(math.max);
+            if (top.weight! > heaviest + 1e-9) {
+              bests.add(PersonalBest(e.name, 'weight', best, '+${w(top.weight! - heaviest)}'));
+            }
           }
-          if (oneRm(strongest) > bestRm + 0.05) {
-            final rm = oneRm(strongest);
-            bests.add(PersonalBest(e.name, 'e1rm', w(AppStore._tenth(rm)), '+${w(AppStore._tenth(rm - bestRm))}'));
+          if (sameAsStrongest.isNotEmpty) {
+            final bestRm = sameAsStrongest.map(oneRm).reduce(math.max);
+            if (oneRm(strongest) > bestRm + 0.05) {
+              final rm = oneRm(strongest);
+              bests.add(PersonalBest(e.name, 'e1rm', w(AppStore._tenth(rm)), '+${w(AppStore._tenth(rm - bestRm))}'));
+            }
           }
-          final v = volume(work);
-          if (v > bestVolume + 0.5) {
-            bests.add(PersonalBest(e.name, 'volume', total(v), '+${total(v - bestVolume)}'));
+          final v = volume(e, work);
+          final earlierVolumes = [
+            for (final (owner, sets) in past)
+              if (volume(owner, sets) case final pastVolume when pastVolume > 0) pastVolume,
+          ];
+          if (v > 0 && earlierVolumes.isNotEmpty) {
+            final bestVolume = earlierVolumes.reduce(math.max);
+            if (v > bestVolume + 0.5) {
+              bests.add(PersonalBest(e.name, 'volume', total(v), '+${total(v - bestVolume)}'));
+            }
           }
         }
       } else {
         final most = work.map((x) => x.reps!).reduce(math.max);
         best = most == 1 ? '1 rep' : '$most reps';
         if (e.loadMode == 'bodyweight' && past.isNotEmpty) {
-          final before = past.expand((x) => x).map((x) => x.reps!).reduce(math.max);
+          final before = past.expand((entry) => entry.$2).map((x) => x.reps!).reduce(math.max);
           if (most > before) bests.add(PersonalBest(e.name, 'reps', best, '+${most - before}'));
         }
       }

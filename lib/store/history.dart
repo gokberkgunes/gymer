@@ -153,7 +153,8 @@ extension AppStoreHistory on AppStore {
     if (rir == null) return (w, null, 'Actual RIR is unknown; enter a known repetition maximum manually.');
     final note =
         'Using your latest straight set: ${formatNumber(w, NumKind.weight)} $unit × $reps${rir > 0 ? ' @ $rir RIR' : ''}.';
-    final rm = reps + rir;
+    // Same RIR cap as every other estimate (setOneRm).
+    final rm = reps + rir.clamp(0, maxCountedRir);
     return (w, rm >= 1 ? rm : null, note);
   }
 }

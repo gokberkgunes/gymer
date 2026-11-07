@@ -344,11 +344,12 @@ extension AppStoreSessionEdits on AppStore {
   /// Applies a calculator target to the next unfinished set.
   String applyRepMaxTarget(String exerciseName, double weight, int reps, int rir) {
     final s = active;
-    final e = s?.visibleExercises.where((x) => x.name == exerciseName).firstOrNull;
+    // The working exercise, even while its warm-up ramp is shown: a working target never goes into a warm-up row.
+    final e = s?.exercises.where((x) => x.name == exerciseName).firstOrNull;
     if (s == null || e == null) return 'No active workout.';
     if (e.loadMode != 'external') return 'Choose added load or assistance manually for this exercise.';
-    final target = e.sets.where((x) => !x.done).firstOrNull;
-    if (target == null) return 'All sets for this exercise are already completed.';
+    final target = e.sets.where((x) => !x.done && !x.warmup).firstOrNull;
+    if (target == null) return 'All working sets for this exercise are already completed.';
     target
       ..weight = weight
       ..reps = reps

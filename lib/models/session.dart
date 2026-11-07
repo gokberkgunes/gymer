@@ -57,14 +57,9 @@ class SetEntry {
   }) : accepted = accepted ?? {};
 
   bool get warmup => isWarmup(type);
-  double get volume => done && !warmup ? (weight ?? 0) * (reps ?? 0) : 0;
 
-  /// Wathan estimate on effective reps (reps + RIR); unknown RIR counts as 0.
-  double? get e1rm {
-    final w = weight, r = reps;
-    if (!done || warmup || w == null || r == null || w <= 0 || r <= 0) return null;
-    return estimatedOneRm(w, r, rir ?? 0);
-  }
+  /// The app's estimated 1RM for this completed working set; see [setOneRm].
+  double? get e1rm => !done || warmup ? null : setOneRm(weight, reps, rir);
 
   Map<String, dynamic> toJson() => {
     'w': weight,
@@ -119,6 +114,29 @@ double? estimatedOneRm(double weight, num reps, num rir) {
   final effective = reps + rir < 1 ? 1 : reps + rir;
   return weight / (wathanPercent(effective) / 100);
 }
+
+/// Self-rated reps in reserve are reasonably accurate close to failure and drift badly beyond about four, so at
+/// most this many count toward an estimate.
+const maxCountedRir = 4;
+
+/// The one estimated 1RM used for logged sets everywhere (charts, records, last-time changes, cycle reviews):
+/// Wathan on reps plus reps in reserve, with RIR capped at [maxCountedRir]. Unknown RIR counts as 0.
+double? setOneRm(double? weight, int? reps, int? rir) {
+  if (weight == null || reps == null) return null;
+  return estimatedOneRm(weight, reps, math.min(math.max(rir ?? 0, 0), maxCountedRir));
+}
+
+/// Whether a set's load × reps counts as volume: a completed working set of an external-load exercise, logged
+/// as a total (or with no load basis). Assistance would turn more help into more "volume", bodyweight work has
+/// no known total, and per-side or per-implement loads are never guessed into totals, so those are left out.
+bool countsAsVolume(SessionExercise exercise, SetEntry set) =>
+    set.done &&
+    !set.warmup &&
+    exercise.loadMode == 'external' &&
+    (set.context.loadBasis.isEmpty || set.context.loadBasis == 'total');
+
+/// Load × reps of one set (0 when either is missing); callers decide eligibility with [countsAsVolume].
+double setVolume(SetEntry set) => (set.weight ?? 0) * (set.reps ?? 0);
 
 class SessionExercise {
   String name;
@@ -277,7 +295,12 @@ class Session {
   int get doneSets => exercises.fold(0, (a, e) => a + e.sets.where((s) => s.done && !s.warmup).length);
   int get totalSets => exercises.fold(0, (a, e) => a + e.sets.length);
   int get doneAll => exercises.fold(0, (a, e) => a + e.doneSets);
-  double get volume => exercises.fold(0.0, (a, e) => a + e.sets.fold(0.0, (b, s) => b + s.volume));
+
+  /// External load × reps of completed working sets (see [countsAsVolume]).
+  double get volume => exercises.fold(
+    0.0,
+    (a, e) => a + e.sets.where((s) => countsAsVolume(e, s)).fold(0.0, (b, s) => b + setVolume(s)),
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
