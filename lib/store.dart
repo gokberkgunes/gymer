@@ -68,7 +68,7 @@ class AppStore extends ChangeNotifier {
         _fromJson(jsonDecode(await file.readAsString()) as Map<String, dynamic>);
         _syncAlerts();
         notifyListeners();
-        _dailySnapshot(); // only after a good load: never let fresh data replace a real copy
+        unawaited(_dailySnapshot()); // only after a good load: never let fresh data replace a real copy
         return;
       } catch (e) {
         debugPrint('gymer: unreadable data file, keeping a copy: $e');

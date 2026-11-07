@@ -64,7 +64,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       if (e.sets.any((s) => s.done)) {
         return notify(context, 'Substitute before completing sets for this exercise.');
       }
-      final name = await pickExercise(context);
+      final name = await pickExercise(context, inWorkout: session.exercises.map((x) => x.name));
       if (name == null || !context.mounted) return;
       final error = store.substituteExercise(e, name);
       if (error != null) notify(context, error);

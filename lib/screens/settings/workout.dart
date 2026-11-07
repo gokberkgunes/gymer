@@ -71,7 +71,8 @@ class _WorkoutSettings extends StatelessWidget {
                         ? 'Open'
                         : '${formatNumber(store.bodyweights.last.inUnit(s.unit), NumKind.weight)} ${s.unit}',
                   ),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BodyweightScreen())),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BodyweightScreen())),
                 ),
             ],
           ),
@@ -109,7 +110,7 @@ class _WorkoutSettings extends StatelessWidget {
             ),
             subtitle: 'Quick access beside the exercise menu',
             onTap: () =>
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _ExerciseShortcutSettings())),
+                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const _ExerciseShortcutSettings())),
           ),
         ]),
       ],
@@ -405,7 +406,7 @@ class _DatabaseSettings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
     return _Page(
       title: 'Databases',
       children: [

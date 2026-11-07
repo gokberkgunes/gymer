@@ -2,7 +2,7 @@ part of '../cycle.dart';
 
 void editCycle(BuildContext context, Mesocycle cycle, {bool isNew = false, void Function(Mesocycle)? onCreated}) {
   Navigator.of(context).push(
-    MaterialPageRoute(
+    MaterialPageRoute<void>(
       fullscreenDialog: true,
       builder: (_) => CycleEditor(cycle: cycle, isNew: isNew, onCreated: onCreated),
     ),
@@ -11,7 +11,10 @@ void editCycle(BuildContext context, Mesocycle cycle, {bool isNew = false, void 
 
 void editPastCycle(BuildContext context, Mesocycle cycle) {
   Navigator.of(context).push(
-    MaterialPageRoute(fullscreenDialog: true, builder: (_) => CycleEditor(cycle: cycle, isNew: false, past: true)),
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => CycleEditor(cycle: cycle, isNew: false, past: true),
+    ),
   );
 }
 

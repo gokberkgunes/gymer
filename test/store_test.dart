@@ -275,7 +275,7 @@ void main() {
     final store = await seeded();
     final names = [for (final t in store.templates) t.name];
     final json = store.toJson()
-      ..['templates'] = []
+      ..['templates'] = <Object>[]
       ..['history'] = ['not a session'];
     await expectLater(store.importJson(jsonEncode(json)), throwsFormatException);
     expect([for (final t in store.templates) t.name], names);

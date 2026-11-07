@@ -175,11 +175,11 @@ LegacyData _convertLegacy(Map<String, String> files) {
         sessionOverhead: detail(w['workout_id']!, 'session_overhead_seconds') ?? 300,
         exercises: [
           for (final r
-              in (templateRows[w['workout_id']] ?? [])
+              in (templateRows[w['workout_id']] ?? <Map<String, String>>[])
                 ..sort((a, b) => (_int(a['order_index']) ?? 0).compareTo(_int(b['order_index']) ?? 0)))
             () {
               final method = canonicalMethod(r['training_method']);
-              final perSet = (setTemplates['${r['workout_id']}/${r['order_index']}'] ?? [])
+              final perSet = (setTemplates['${r['workout_id']}/${r['order_index']}'] ?? <Map<String, String>>[])
                 ..sort((a, b) => (_int(a['set_number']) ?? 0).compareTo(_int(b['set_number']) ?? 0));
               final count = _int(r['target_sets']) ?? 3;
               final rest = _int(r['rest_seconds']) ?? 180;

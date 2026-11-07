@@ -8,7 +8,7 @@ import 'package:gymer/store.dart';
 /// A trimmed export in the Flet app's "gymer-backup" ZIP layout.
 List<int> fletBackup() {
   final files = {
-    'manifest.json': jsonEncode({'format': 'gymer-backup', 'version': 1, 'files': {}}),
+    'manifest.json': jsonEncode({'format': 'gymer-backup', 'version': 1, 'files': <String, Object>{}}),
     'workouts.csv': 'workout_id,name\nA,Legs\n',
     'workout_exercises.csv':
         'workout_id,order_index,exercise_name,target_sets,default_weight,default_weight_unit,default_reps,rest_seconds,training_method\n'

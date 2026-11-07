@@ -269,7 +269,7 @@ class CelebrationSettingsState extends State<CelebrationSettings> {
                       title: const Text('Explore celebration styles'),
                       trailing: const Icon(Icons.play_arrow_rounded, size: 20),
                       onTap: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const CelebrationsPreview())),
+                          Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const CelebrationsPreview())),
                     ),
                   ],
                 ),

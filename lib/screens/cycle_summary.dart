@@ -12,7 +12,7 @@ import '../store.dart';
 String _estimate(double v) => formatNumber((v * 2).round() / 2, NumKind.weight);
 
 void openCycleSummary(BuildContext context, Mesocycle cycle) {
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => _CycleSummaryScreen(cycleId: cycle.id)));
+  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _CycleSummaryScreen(cycleId: cycle.id)));
 }
 
 class _CycleSummaryScreen extends StatelessWidget {
@@ -33,7 +33,7 @@ class _CycleSummaryScreen extends StatelessWidget {
               icon: const Icon(Icons.edit_outlined),
               onPressed: () async {
                 await Navigator.of(context).push(
-                  MaterialPageRoute(
+                  MaterialPageRoute<void>(
                     builder: (_) => CycleEditor(cycle: cycle, isNew: false, past: !cycle.active),
                   ),
                 );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -186,7 +187,7 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
     await startPlanned(context, t.id);
   }
 
-  void _menu() async {
+  Future<void> _menu() async {
     final t = widget.template;
     final hasSets = t.exercises.any((e) => e.sets.isNotEmpty);
     final choice = await showModalBottomSheet<String>(
@@ -218,11 +219,11 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
     if (!mounted) return;
     switch (choice) {
       case 'start':
-        _start();
+        unawaited(_start());
       case 'edit':
         editTemplate(context, t);
       case 'history':
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => HistoryScreen(templateId: t.id)));
+        unawaited(Navigator.of(context).push(MaterialPageRoute(builder: (_) => HistoryScreen(templateId: t.id))));
     }
   }
 

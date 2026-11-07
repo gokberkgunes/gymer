@@ -233,7 +233,7 @@ class CycleHeatmap extends StatelessWidget {
       final s = store.history.where((x) => x.id == action.substring(8)).firstOrNull;
       if (s != null) openSessionEditor(context, s);
     } else if (action.startsWith('start:')) {
-      startPlanned(context, action.substring(6));
+      unawaited(startPlanned(context, action.substring(6)));
     } else if (action == 'missed') {
       cycle.events[key] = DayEvent(templateId: d.templateId!, status: 'missed', movedTo: event?.movedTo);
       store.changed();

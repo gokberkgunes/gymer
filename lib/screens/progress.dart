@@ -14,7 +14,7 @@ import '../widgets/common.dart';
 import '../store.dart';
 
 void openExerciseProgress(BuildContext context, String name) {
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => ExerciseProgressScreen(name: name)));
+  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExerciseProgressScreen(name: name)));
 }
 
 /// Estimated one-rep max trend per exercise (History → Exercises).

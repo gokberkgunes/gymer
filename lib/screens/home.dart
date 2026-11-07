@@ -207,5 +207,5 @@ class _ActiveBar extends StatelessWidget {
 }
 
 void openSession(BuildContext context) {
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SessionScreen()));
+  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SessionScreen()));
 }

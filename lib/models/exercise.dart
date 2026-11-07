@@ -173,8 +173,8 @@ class Exercise {
 
   factory Exercise.fromJson(Map<String, dynamic> j) => Exercise(
     name: j['name'] as String,
-    primary: List<String>.from(j['primary'] ?? const []),
-    secondary: List<String>.from(j['secondary'] ?? const []),
+    primary: List<String>.from(j['primary'] as List? ?? const []),
+    secondary: List<String>.from(j['secondary'] as List? ?? const []),
     equipment: _str(j['equipment']),
     description: _str(j['description']),
     note: _str(j['note']),

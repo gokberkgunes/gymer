@@ -12,7 +12,7 @@ void openRepMaxForExercise(BuildContext context, String exercise) {
   final store = StoreScope.read(context);
   final (weight, rm, note) = store.repMaxSeed(exercise);
   Navigator.of(context).push(
-    MaterialPageRoute(
+    MaterialPageRoute<void>(
       builder: (_) => RepMaxScreen(exercise: exercise, initialWeight: weight, initialRm: rm, note: note),
     ),
   );

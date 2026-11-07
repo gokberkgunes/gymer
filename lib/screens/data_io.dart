@@ -130,7 +130,7 @@ Future<void> reportUnreadableData(BuildContext context) async {
 }
 
 void openAutoBackups(BuildContext context) =>
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AutoBackupsScreen()));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AutoBackupsScreen()));
 
 /// The automatic copies kept in app storage (see `snapshotsToKeep`), newest first. Tapping one restores it
 /// after a confirmation; the current data is backed up first, so a restore can itself be undone.

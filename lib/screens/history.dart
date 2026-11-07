@@ -276,7 +276,7 @@ class _WeekDots extends StatelessWidget {
 }
 
 void openSessionSummary(BuildContext context, Session session) {
-  Navigator.of(context).push(MaterialPageRoute(builder: (_) => _SavedSummary(sessionId: session.id)));
+  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _SavedSummary(sessionId: session.id)));
 }
 
 class _SavedSummary extends StatelessWidget {
@@ -292,7 +292,7 @@ class _SavedSummary extends StatelessWidget {
       summary: store.summarizeSession(session),
       historical: true,
       onEdit: () async {
-        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SessionEditor(original: session)));
+        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SessionEditor(original: session)));
         if (context.mounted && !store.history.any((s) => s.id == sessionId)) Navigator.pop(context);
       },
     );
@@ -308,7 +308,7 @@ void openSessionEditor(
   bool unplanned = false,
 }) {
   Navigator.of(context).push(
-    MaterialPageRoute(
+    MaterialPageRoute<void>(
       builder: (_) =>
           SessionEditor(original: s, cycle: cycle, plannedKey: plannedKey, draft: draft, unplanned: unplanned),
     ),
@@ -482,7 +482,7 @@ class _SessionEditorState extends State<SessionEditor> {
                 Expanded(
                   child: InkWell(
                     onTap: () async {
-                      final name = await pickExercise(context);
+                      final name = await pickExercise(context, inWorkout: _s.exercises.map((x) => x.name));
                       if (name == null || !context.mounted || sameExercise(name, e.name)) return;
                       if (_s.exercises.any((x) => x != e && sameExercise(x.name, name))) {
                         return notify(context, '$name is already in this workout.');
@@ -545,7 +545,7 @@ class _SessionEditorState extends State<SessionEditor> {
           ],
           OutlinedButton(
             onPressed: () async {
-              final name = await pickExercise(context);
+              final name = await pickExercise(context, inWorkout: _s.exercises.map((x) => x.name));
               if (name == null || !context.mounted) return;
               if (_s.exercises.any((x) => sameExercise(x.name, name))) {
                 return notify(context, '$name is already in this workout.');

@@ -100,14 +100,7 @@ class FinishScreen extends StatelessWidget {
                     if (s.volume > 0) ...[
                       const SizedBox(width: 8),
                       Expanded(
-                        child: _Stat(
-                          s.volume,
-                          volume,
-                          'Volume',
-                          order: 2,
-                          animate: tally,
-                          haptics: settings.haptics,
-                        ),
+                        child: _Stat(s.volume, volume, 'Volume', order: 2, animate: tally, haptics: settings.haptics),
                       ),
                     ],
                   ],
@@ -122,7 +115,8 @@ class FinishScreen extends StatelessWidget {
                     achievements: s.achievements,
                     unit: settings.unit,
                     animate: settings.achievementCelebration == 'glow',
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AchievementsScreen())),
+                    onTap: () =>
+                        Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AchievementsScreen())),
                   ),
                 ],
                 if (s.exercises.isNotEmpty) ...[
@@ -189,10 +183,17 @@ class _Stat extends StatefulWidget {
 class _StatState extends State<_Stat> with SingleTickerProviderStateMixin {
   static const _step = 300, _count = 800, _pop = 450;
   late final int _total = _step * widget.order + _count + _pop;
-  late final _controller = AnimationController(vsync: this, duration: Duration(milliseconds: _total));
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: _total),
+  );
   late final _counting = CurvedAnimation(
     parent: _controller,
-    curve: Interval(_step * widget.order / _total, (_step * widget.order + _count) / _total, curve: Curves.easeOutCubic),
+    curve: Interval(
+      _step * widget.order / _total,
+      (_step * widget.order + _count) / _total,
+      curve: Curves.easeOutCubic,
+    ),
   );
   late final double _popStart = (_step * widget.order + _count) / _total;
   bool _landed = false;
@@ -281,7 +282,10 @@ class _Slam extends StatefulWidget {
 
 class _SlamState extends State<_Slam> with SingleTickerProviderStateMixin {
   static const _delay = 1600, _run = 700;
-  late final _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: _delay + _run));
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: _delay + _run),
+  );
   bool _landed = false;
 
   @override

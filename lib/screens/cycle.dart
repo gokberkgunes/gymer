@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -38,8 +39,8 @@ class CycleScreen extends StatelessWidget {
                 icon: const Icon(Icons.more_horiz_rounded),
                 onSelected: (v) async {
                   if (v == 'edit') editCycle(context, cycle);
-                  if (v == 'rir') editWeeklyRir(context, cycle);
-                  if (v == 'extend') _extend(context, store, cycle);
+                  if (v == 'rir') unawaited(editWeeklyRir(context, cycle));
+                  if (v == 'extend') unawaited(_extend(context, store, cycle));
                   if (v == 'summary') openCycleSummary(context, cycle);
                   if (v == 'end' &&
                       await confirm(

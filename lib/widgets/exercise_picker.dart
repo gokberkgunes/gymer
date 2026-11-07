@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import 'common.dart';
 import '../store.dart';
 
-Future<String?> pickExercise(BuildContext context) {
+/// [inWorkout]: exercises already in the workout being edited. They stay listed (and selectable, so the caller can
+/// explain why it cannot be added again) but are dimmed on a different background.
+Future<String?> pickExercise(BuildContext context, {Iterable<String> inWorkout = const []}) {
   final store = StoreScope.read(context);
+  final present = {for (final name in inWorkout) name.trim().toLowerCase()};
   return pickName(
     context,
     title: 'Exercise',
+    present: (name) => present.contains(name.trim().toLowerCase()),
     values: () => [for (final e in store.exercises) e.name],
     subtitle: (name) {
       final e = store.exercise(name);
@@ -30,6 +34,7 @@ Future<String?> pickName(
   bool Function(String)? isFavourite,
   void Function(String)? toggleFavourite,
   List<String> Function()? recent,
+  bool Function(String)? present,
 }) {
   return showModalBottomSheet<String>(
     context: context,
@@ -43,6 +48,7 @@ Future<String?> pickName(
       isFavourite: isFavourite,
       toggleFavourite: toggleFavourite,
       recent: recent,
+      present: present,
     ),
   );
 }
@@ -55,6 +61,7 @@ class _Picker extends StatefulWidget {
   final bool Function(String)? isFavourite;
   final void Function(String)? toggleFavourite;
   final List<String> Function()? recent;
+  final bool Function(String)? present;
   const _Picker({
     required this.title,
     required this.values,
@@ -63,6 +70,7 @@ class _Picker extends StatefulWidget {
     this.isFavourite,
     this.toggleFavourite,
     this.recent,
+    this.present,
   });
 
   @override
@@ -104,7 +112,7 @@ class _PickerState extends State<_Picker> {
     };
     final remaining = grouped ? matches.where((n) => !promoted.contains(n.toLowerCase())).toList() : matches;
 
-    Widget row(String name) => ListTile(
+    Widget tileFor(String name) => ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
       title: Text(name),
       subtitle: switch (widget.subtitle?.call(name)) {
@@ -123,6 +131,19 @@ class _PickerState extends State<_Picker> {
             ),
       onTap: () => Navigator.pop(context, name),
     );
+    Widget row(String name) {
+      final tile = tileFor(name);
+      if (!(widget.present?.call(name) ?? false)) return tile;
+      // Already in this workout: a different background with the row dimmed on top of it.
+      return Tooltip(
+        message: 'Already in this workout',
+        child: ColoredBox(
+          color: cs.surfaceContainerHigh,
+          child: Opacity(opacity: 0.45, child: tile),
+        ),
+      );
+    }
+
     Widget section(String label) => Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
       child: Text(label, style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant)),

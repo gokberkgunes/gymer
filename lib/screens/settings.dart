@@ -33,7 +33,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
     Widget link(IconData icon, String title, String subtitle, Widget page) => ListTile(
       leading: Icon(icon),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),

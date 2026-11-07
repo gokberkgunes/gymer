@@ -23,7 +23,7 @@ void main() {
     await store.flush();
     store.active!.exercises.first.sets.first.weight = 42.5; // Not yet saved to disk.
     final before = jsonDecode(jsonEncode(store.toJson()));
-    final replacement = jsonEncode({...store.toJson(), 'templates': [], 'active': null});
+    final replacement = jsonEncode({...store.toJson(), 'templates': <Object>[], 'active': null});
     await store.importJson(replacement);
     final backups = Directory('${directory.path}/backups');
     final recovery = (await backups.list().where((entry) => entry is File).toList()).single as File;

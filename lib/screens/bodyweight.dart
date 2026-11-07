@@ -25,7 +25,7 @@ class BodyweightSummaryCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BodyweightScreen())),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BodyweightScreen())),
           child: Padding(
             padding: EdgeInsets.all(context.style.sp(16)),
             child: Row(

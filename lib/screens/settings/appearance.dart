@@ -41,7 +41,8 @@ class AppearanceScreen extends StatelessWidget {
                     children: [
                       for (final (i, a) in accents.indexed)
                         _Swatch(
-                          color: a.$2,
+                          // The shade the app really uses: light mode darkens bright accents for legibility.
+                          color: dark ? a.$2 : readableAccent(a.$2, Theme.of(context).colorScheme.surfaceContainerHigh),
                           label: a.$1,
                           selected: s.accent == i,
                           onTap: () => set((x) => x.accent = i),

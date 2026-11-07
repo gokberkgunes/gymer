@@ -20,7 +20,7 @@ part 'template_editor/time.dart';
 
 void editTemplate(BuildContext context, WorkoutTemplate tpl, {bool fromActive = false}) {
   Navigator.of(context).push(
-    MaterialPageRoute(
+    MaterialPageRoute<void>(
       fullscreenDialog: true,
       builder: (_) => TemplateEditor(original: tpl, fromActive: fromActive),
     ),
@@ -150,7 +150,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
   }
 
   Future<void> _addExercise() async {
-    final name = await pickExercise(context);
+    final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name));
     if (name == null || !mounted) return;
     if (_d.exercises.any((x) => x.name.toLowerCase() == name.toLowerCase())) {
       return notify(context, '$name is already in this workout.');
@@ -169,7 +169,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
   /// Replacing an exercise keeps sets/rests/types but never carries the
   /// old exercise's loads; the replacement's own latest values are used.
   Future<void> _chooseExercise(TemplateExercise e) async {
-    final name = await pickExercise(context);
+    final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name));
     if (name == null || !mounted || name.toLowerCase() == e.name.toLowerCase()) return;
     if (_d.exercises.any((x) => x != e && x.name.toLowerCase() == name.toLowerCase())) {
       return notify(context, '$name is already in this workout.');
@@ -363,7 +363,9 @@ class _TemplateEditorState extends State<TemplateEditor> {
               icon: const Icon(Icons.timer_outlined, size: 18),
               label: Text('~${formatTargetDuration(timing.total).replaceAll(' min', 'm')}'),
               onPressed: () async {
-                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => TimeApproximator(template: _d)));
+                await Navigator.of(
+                  context,
+                ).push(MaterialPageRoute<void>(builder: (_) => TimeApproximator(template: _d)));
                 setState(() {});
               },
             ),

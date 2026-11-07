@@ -11,6 +11,24 @@ const accents = <(String, Color)>[
   ('Rose', Color(0xFFFF6B9A)),
 ];
 
+/// WCAG contrast ratio between two colours (1 to 21).
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  return ((la > lb ? la : lb) + 0.05) / ((la > lb ? lb : la) + 0.05);
+}
+
+/// The accent as used in light mode. The accent also colours text and icons (trophies, gains, pills, the RIR
+/// stepper), and the bright accents made for dark mode are unreadable on light surfaces (Lime on white is about
+/// 1.3:1). Keep the hue and saturation and lower the lightness until it reaches 4.5:1 (WCAG AA for text) against
+/// [against], the darkest light surface it sits on. Dark mode uses the accent unchanged.
+Color readableAccent(Color accent, Color against, {double target = 4.5}) {
+  var hsl = HSLColor.fromColor(accent);
+  while (contrastRatio(hsl.toColor(), against) < target && hsl.lightness > 0.05) {
+    hsl = hsl.withLightness(hsl.lightness - 0.01);
+  }
+  return hsl.toColor();
+}
+
 /// (label, dark, light). Presets after 'auto' are carried over from the Flet app.
 const backgrounds = <String, (String, Color, Color)>{
   'auto': ('Ink', Color(0xFF0D0E10), Color(0xFFF6F6F4)),
@@ -83,7 +101,7 @@ Object themeKey(Brightness b, Settings s) =>
 
 ThemeData buildTheme(Brightness brightness, Settings s) {
   final dark = brightness == Brightness.dark;
-  final accent = accents[s.accent.clamp(0, accents.length - 1)].$2;
+  final chosen = accents[s.accent.clamp(0, accents.length - 1)].$2;
   final preset = backgrounds[s.background] ?? backgrounds['auto']!;
   final bg = dark ? preset.$2 : preset.$3;
   final ink = s.background == 'auto' || !backgrounds.containsKey(s.background);
@@ -102,6 +120,7 @@ ThemeData buildTheme(Brightness brightness, Settings s) {
     surfaceHigh = Color.lerp(bg, Colors.black, 0.05)!;
     line = Color.lerp(bg, Colors.black, 0.10)!;
   }
+  final accent = dark ? chosen : readableAccent(chosen, surfaceHigh);
   final text = dark ? const Color(0xFFF2F2F0) : const Color(0xFF111214);
   final muted = dark ? const Color(0xFF8A8F98) : const Color(0xFF6E727A);
   final onAccent = ThemeData.estimateBrightnessForColor(accent) == Brightness.dark ? Colors.white : Colors.black;

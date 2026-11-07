@@ -203,7 +203,7 @@ class _SessionScreenState extends State<SessionScreen> {
     }
     final summary = store.finishSession(saveStructure: saveStructure);
     if (summary == null || !mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => FinishScreen(summary: summary)));
+    unawaited(Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => FinishScreen(summary: summary))));
   }
 
   Future<void> _discard(AppStore store) async {
@@ -307,7 +307,7 @@ class _SessionScreenState extends State<SessionScreen> {
                       ),
                     OutlinedButton.icon(
                       onPressed: () async {
-                        final name = await pickExercise(context);
+                        final name = await pickExercise(context, inWorkout: session.exercises.map((e) => e.name));
                         if (name == null || !context.mounted) return;
                         final error = store.addSessionExercise(name);
                         if (error != null) notify(context, error);
