@@ -213,47 +213,111 @@ void linkSession(Mesocycle c, Session s) {
   c.events[date] = DayEvent(templateId: s.templateId!, sessionId: s.id);
 }
 
-/// RP hypertrophy volume landmarks supplied for the Flet app: weekly sets.
+/// RP hypertrophy volume landmarks (weekly sets per muscle), as stated in the linked RP articles. Back's MRV is
+/// only in an image in its article, so it is not provided.
 class Landmark {
   final String mv, mev, mav, mrv, url;
   const Landmark(this.mv, this.mev, this.mav, this.url, [this.mrv = 'Not provided']);
+
+  /// A landmark as (low, high) weekly sets: "6–8" → (6, 8), "4" → (4, 4); null when not provided.
+  static (double, double)? range(String text) {
+    final numbers = RegExp(r'\d+(?:\.\d+)?').allMatches(text).map((m) => double.parse(m[0]!)).toList();
+    if (numbers.isEmpty) return null;
+    return (numbers.first, numbers.last);
+  }
+
+  (double, double)? get mevRange => range(mev);
+  (double, double)? get mavRange => range(mav);
+  (double, double)? get mrvRange => range(mrv);
 }
 
 const rpLandmarks = <String, Landmark>{
   'Back': Landmark('2–6', '6–8', '8–20', 'https://rpstrength.com/blogs/articles/back-hypertrophy-training-tips'),
-  'Quads': Landmark('2–4', '4–6', '6–14', 'https://rpstrength.com/blogs/articles/quad-hypertrophy-training-tips'),
+  'Quads': Landmark(
+    '2–4',
+    '4–6',
+    '6–14',
+    'https://rpstrength.com/blogs/articles/quad-hypertrophy-training-tips',
+    '14–18',
+  ),
   'Hamstrings': Landmark(
     '0–2',
     '2–4',
     '2–8',
     'https://rpstrength.com/blogs/articles/hamstring-hypertrophy-training-tips',
+    '8–14',
   ),
-  'Glutes': Landmark('2–6', '6–8', '8–24', 'https://rpstrength.com/blogs/articles/glute-hypertrophy-training-tips'),
-  'Chest': Landmark('2–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/chest-hypertrophy-training-tips'),
+  'Glutes': Landmark(
+    '2–6',
+    '6–8',
+    '8–24',
+    'https://rpstrength.com/blogs/articles/glute-hypertrophy-training-tips',
+    '24–30',
+  ),
+  'Chest': Landmark(
+    '2–4',
+    '4–6',
+    '6–16',
+    'https://rpstrength.com/blogs/articles/chest-hypertrophy-training-tips',
+    '16–24',
+  ),
   'Front Delts': Landmark(
     '0–2',
     '0–2',
     '4–8',
     'https://rpstrength.com/blogs/articles/front-delt-hypertrophy-training-tips',
+    '8–12',
   ),
   'Side Delts': Landmark(
     '2–6',
     '6–8',
     '8–24',
     'https://rpstrength.com/blogs/articles/side-delt-hypertrophy-training-tips',
+    '24–30',
   ),
   'Rear Delts': Landmark(
     '0–4',
     '0–4',
     '4–12',
     'https://rpstrength.com/blogs/articles/rear-delt-hypertrophy-training-tips',
+    '12–20',
   ),
-  'Biceps': Landmark('6–8', '8–10', '14–20', 'https://rpstrength.com/blogs/articles/bicep-hypertrophy-training-tips'),
-  'Triceps': Landmark('0–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/triceps-hypertrophy-training-tips'),
-  'Calves': Landmark('2–4', '4–6', '6–16', 'https://rpstrength.com/blogs/articles/calves-hypertrophy-training-tips'),
-  'Abs': Landmark('0–4', '0–4', '4–12', 'https://rpstrength.com/blogs/articles/ab-hypertrophy-training-tips'),
-  'Traps': Landmark('0–4', '0–4', '4–12', 'https://rpstrength.com/blogs/articles/trap-hypertrophy-training-tips'),
-  'Forearms': Landmark('0–4', '0–8', '8–24', 'https://rpstrength.com/blogs/articles/forearm-hypertrophy-training-tips'),
+  'Biceps': Landmark(
+    '6–8',
+    '8–10',
+    '14–20',
+    'https://rpstrength.com/blogs/articles/bicep-hypertrophy-training-tips',
+    '20–26',
+  ),
+  'Triceps': Landmark(
+    '0–4',
+    '4–6',
+    '6–16',
+    'https://rpstrength.com/blogs/articles/triceps-hypertrophy-training-tips',
+    '16–20',
+  ),
+  'Calves': Landmark(
+    '2–4',
+    '4–6',
+    '6–16',
+    'https://rpstrength.com/blogs/articles/calves-hypertrophy-training-tips',
+    '16–24',
+  ),
+  'Abs': Landmark('0–4', '0–4', '4–12', 'https://rpstrength.com/blogs/articles/ab-hypertrophy-training-tips', '12–20'),
+  'Traps': Landmark(
+    '0–4',
+    '0–4',
+    '4–12',
+    'https://rpstrength.com/blogs/articles/trap-hypertrophy-training-tips',
+    '12–20',
+  ),
+  'Forearms': Landmark(
+    '0–4',
+    '0–8',
+    '8–24',
+    'https://rpstrength.com/blogs/articles/forearm-hypertrophy-training-tips',
+    '24–30',
+  ),
 };
 
 /// (MEV, MAV) per muscle, kept for callers that only need those two.

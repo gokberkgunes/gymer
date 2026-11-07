@@ -443,8 +443,8 @@ class _Volume extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                'Estimated from your repeating schedule: direct sets count as 1, indirect sets as 0.5.',
-                style: t.bodySmall,
+                'Planned per week from your schedule; indirect sets count half. Tap a muscle for its landmarks.',
+                style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
             ),
             if (names.isEmpty)
@@ -455,17 +455,13 @@ class _Volume extends StatelessWidget {
                   style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
+            const SizedBox(height: 4),
             for (final m in names)
-              ListTile(
-                dense: true,
-                title: Text(m, style: const TextStyle(fontWeight: FontWeight.bold)),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('${n(volume[m]!.sets)} sets / ${rpLandmarks[m]?.mev ?? '—'} MEV'),
-                    const Icon(Icons.chevron_right_rounded, size: 18),
-                  ],
-                ),
+              _VolumeRow(
+                muscle: m,
+                sets: volume[m]!.sets,
+                label: n(volume[m]!.sets),
+                landmark: rpLandmarks[m],
                 onTap: () => _landmarkInfo(context, m),
               ),
             if (protocols) ...[
@@ -512,6 +508,13 @@ class _Volume extends StatelessWidget {
                 'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
                 'set, so it may not be directly comparable to these ranges.',
               ),
+              const SizedBox(height: 8),
+              const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text(
+                'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end starts at MRV. '
+                'The small mark is your planned weekly sets.',
+              ),
               const SizedBox(height: 12),
               if (l == null)
                 const Text('No RP landmark is available for this muscle.')
@@ -539,4 +542,102 @@ class _Volume extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------- Editors
+/// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath. No chevrons or
+/// labels: the dialog behind the tap explains the bar.
+class _VolumeRow extends StatelessWidget {
+  final String muscle, label;
+  final double sets;
+  final Landmark? landmark;
+  final VoidCallback onTap;
+  const _VolumeRow({
+    required this.muscle,
+    required this.sets,
+    required this.label,
+    required this.landmark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final l = landmark;
+    final mev = l?.mevRange, mrv = l?.mrvRange;
+    // The number is muted below MEV and warning-coloured from MRV up; otherwise plain.
+    final numberColor = mev != null && sets < mev.$1
+        ? cs.onSurfaceVariant
+        : mrv != null && sets >= mrv.$1
+        ? cs.warning
+        : cs.onSurface;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: context.style.sp(8)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(muscle, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                ),
+                Text(
+                  '$label ${sets == 1 ? 'set' : 'sets'}',
+                  style: t.bodyMedium?.copyWith(color: numberColor, fontFeatures: tabular),
+                ),
+              ],
+            ),
+            if (l != null && l.mavRange != null) ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                height: 10,
+                child: CustomPaint(
+                  painter: _LandmarkBar(sets: sets, landmark: l, colors: cs),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A 4 px track: faint from MEV to MAV, solid across MAV, warning from MRV on, and a small mark at [sets].
+class _LandmarkBar extends CustomPainter {
+  final double sets;
+  final Landmark landmark;
+  final ColorScheme colors;
+  const _LandmarkBar({required this.sets, required this.landmark, required this.colors});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final mev = landmark.mevRange, mav = landmark.mavRange!, mrv = landmark.mrvRange;
+    // Room past the last landmark (or the planned sets, if higher) so the end of the scale never looks like a wall.
+    final top = math.max(mrv?.$2 ?? mav.$2 * 1.25, sets) * 1.08;
+    double x(double v) => (v / top).clamp(0.0, 1.0) * size.width;
+    final mid = size.height / 2;
+    final track = RRect.fromRectAndRadius(Rect.fromLTRB(0, mid - 2, size.width, mid + 2), const Radius.circular(2));
+    canvas
+      ..save()
+      ..clipRRect(track)
+      ..drawRRect(track, Paint()..color = colors.onSurface.withValues(alpha: 0.08));
+    void zone(double from, double to, Color color) =>
+        canvas.drawRect(Rect.fromLTRB(x(from), mid - 2, x(to), mid + 2), Paint()..color = color);
+    zone(mev?.$1 ?? mav.$1, mav.$1, colors.primary.withValues(alpha: 0.25));
+    zone(mav.$1, mav.$2, colors.primary.withValues(alpha: 0.6));
+    if (mrv != null) zone(mrv.$1, top, colors.warning.withValues(alpha: 0.45));
+    canvas.restore();
+    final mark = x(sets).clamp(1.5, size.width - 1.5);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(mark, mid), width: 3, height: size.height),
+        const Radius.circular(1.5),
+      ),
+      Paint()..color = colors.onSurface,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LandmarkBar old) => old.sets != sets || old.landmark != landmark || old.colors != colors;
+}

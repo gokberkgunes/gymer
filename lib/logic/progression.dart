@@ -553,7 +553,9 @@ Calibration? calibrationRecommendation({
   if (oneRm == null) return null;
   final target = method == 'Straight' ? math.max(0, targetRir ?? 0) : targetRir;
   if (target == null || target < 0) return null;
-  final goal = method == 'Straight' ? (repMin + repMax) ~/ 2 : calibrationTargetReps;
+  // Straight sets start at the bottom of the rep range: double progression then has the whole range (8 → 12 by
+  // default) to add reps before the first load increase, instead of starting mid-range and jumping sooner.
+  final goal = method == 'Straight' ? repMin : calibrationTargetReps;
   final suggested = practicalWeight(oneRm * wathanPercent(goal + target) / 100, unit, weight, increment);
   return suggested > 0 ? Calibration(suggested, goal, target, true) : null;
 }
