@@ -50,12 +50,7 @@ class SettingsScreen extends StatelessWidget {
             'Profiles, bar weight and available plates',
             const _PlateSettings(),
           ),
-          link(
-            Icons.emoji_events_outlined,
-            'Achievements',
-            'Milestones and progress',
-            const AchievementsScreen(),
-          ),
+          link(Icons.emoji_events_outlined, 'Achievements', 'Milestones and progress', const AchievementsScreen()),
           link(
             Icons.celebration_outlined,
             'Celebrations',
@@ -176,23 +171,20 @@ class _WorkoutSettings extends StatelessWidget {
             'Track RIR',
             Switch(value: s.trackRir, onChanged: (v) => store.updateSettings((x) => x.trackRir = v)),
             info: InfoDot(tooltip: 'What is RIR?', onTap: () => showRirInfo(context)),
-            subtitle:
-                'Turn this off if you do not want to rate effort after each set. Weight and reps will still be tracked normally.',
           ),
           _switch(
             context,
             'Dim completed sets',
             s.dimCompleted,
             (x, v) => x.dimCompleted = v,
-            subtitle: 'Adds a subtle grey tint to completed set rows.',
+            subtitle: 'Grey tint on completed sets',
           ),
           _switch(
             context,
             'Collapse completed exercises',
             s.collapseCompleted,
             (x, v) => x.collapseCompleted = v,
-            subtitle:
-                'Automatically folds an exercise after all of its sets are complete. Use the chevron to reopen it.',
+            subtitle: 'Fold an exercise once its sets are done',
           ),
         ]),
         const SectionLabel('Customisation'),
@@ -437,6 +429,7 @@ class _TimerSettings extends StatelessWidget {
                 s.restNotice,
                 const {'live': 'Sticky', 'alarm': 'Alarm', 'both': 'Combined', 'off': 'Off'},
                 (v) => store.updateSettings((x) => x.restNotice = v),
+                compact: true,
                 note: switch (s.restNotice) {
                   'live' => 'Silent live timer in the status bar; counts into overtime.',
                   'alarm' => 'A "Rest over" alert, even with the phone locked.',
@@ -1451,6 +1444,7 @@ Widget _stackedChoice<T>(
   ValueChanged<T> onChanged, {
   String? note,
   InfoDot? info,
+  bool compact = false,
 }) {
   final cs = Theme.of(context).colorScheme;
   final label = Text(title, style: Theme.of(context).textTheme.bodyLarge);
@@ -1461,7 +1455,7 @@ Widget _stackedChoice<T>(
       children: [
         info == null ? label : LabelWithInfo(label, info),
         const SizedBox(height: 8),
-        _segmented(value, options, onChanged, expand: true),
+        _segmented(value, options, onChanged, expand: true, compact: compact),
         if (note != null) ...[
           const SizedBox(height: 8),
           Text(note, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),

@@ -131,82 +131,85 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
             ],
           ),
         ),
-        const SectionLabel('RIR targets'),
-        Row(
-          children: [
-            Text('Target reps', style: t.bodyLarge),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 90,
-              child: NumField(
-                value: targetReps.toDouble(),
-                kind: NumKind.targetReps,
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() => _targetReps = v.round());
-                  store.updateSettings((s) => s.repMaxTargetReps = v.round());
-                },
+        // Targets need a known 1RM; until then the tables would be a column of dashes.
+        if (oneRm != null) ...[
+          const SectionLabel('RIR targets'),
+          Row(
+            children: [
+              Text('Target reps', style: t.bodyLarge),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 90,
+                child: NumField(
+                  value: targetReps.toDouble(),
+                  kind: NumKind.targetReps,
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _targetReps = v.round());
+                    store.updateSettings((s) => s.repMaxTargetReps = v.round());
+                  },
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          table([
+            header(['RIR', '$targetReps reps', 'Target weight']),
+            for (final rir in const [3, 2, 1])
+              () {
+                final double target = (oneRm * wathanPercent(targetReps + rir) / 100).roundToDouble();
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '$rir',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Expanded(child: Text('$targetReps', textAlign: TextAlign.right)),
+                      Expanded(
+                        flex: 2,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            load(target, const TextStyle(fontWeight: FontWeight.bold, fontFeatures: tabular)),
+                            if (widget.exercise != null) ...[
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                style: OutlinedButton.styleFrom(minimumSize: compactButton),
+                                onPressed: target <= 0 || store.active == null
+                                    ? null
+                                    : () {
+                                        final message = store.applyRepMaxTarget(
+                                          widget.exercise!,
+                                          target,
+                                          targetReps,
+                                          rir,
+                                        );
+                                        Navigator.pop(context);
+                                        notify(context, message);
+                                      },
+                                child: const Text('Use'),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }(),
+          ]),
+          if (widget.exercise != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Use loads that target into the next unfinished set.',
+              style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
           ],
-        ),
-        const SizedBox(height: 8),
-        table([
-          header(['RIR', '$targetReps reps', 'Target weight']),
-          for (final rir in const [3, 2, 1])
-            () {
-              final target = oneRm == null ? null : (oneRm * wathanPercent(targetReps + rir) / 100).roundToDouble();
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '$rir',
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(child: Text('$targetReps', textAlign: TextAlign.right)),
-                    Expanded(
-                      flex: 2,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          load(target, const TextStyle(fontWeight: FontWeight.bold, fontFeatures: tabular)),
-                          if (widget.exercise != null) ...[
-                            const SizedBox(width: 8),
-                            OutlinedButton(
-                              style: OutlinedButton.styleFrom(minimumSize: compactButton),
-                              onPressed: target == null || target <= 0 || store.active == null
-                                  ? null
-                                  : () {
-                                      final message = store.applyRepMaxTarget(
-                                        widget.exercise!,
-                                        target,
-                                        targetReps,
-                                        rir,
-                                      );
-                                      Navigator.pop(context);
-                                      notify(context, message);
-                                    },
-                              child: const Text('Use'),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }(),
-        ]),
-        if (widget.exercise != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Use loads that target into the next unfinished set.',
-            style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-          ),
         ],
         const SectionLabel('1–20 RM table'),
         table([

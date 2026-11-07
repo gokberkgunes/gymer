@@ -28,7 +28,7 @@ String fmtDuration(Duration d) {
 }
 
 String fmtVolume(double v) {
-  if (v >= 10000) return '${(v / 1000).toStringAsFixed(1)}k';
+  if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
   return v.round().toString();
 }
 

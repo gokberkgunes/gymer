@@ -228,6 +228,7 @@ ThemeData buildTheme(Brightness brightness, Settings s) {
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: SegmentedButton.styleFrom(
         visualDensity: VisualDensity.compact,
+        foregroundColor: muted,
         selectedBackgroundColor: accent,
         selectedForegroundColor: onAccent,
         side: BorderSide(color: line),

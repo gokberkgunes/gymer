@@ -240,6 +240,7 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
         child: Padding(
           padding: EdgeInsets.fromLTRB(16, st.sp(16), 16, st.sp(16)),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Column(
@@ -294,7 +295,11 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
               // Only real dates; never-done workouts stay clean. Edit is in the long-press menu.
               if (ago != null) ...[
                 const SizedBox(width: 8),
-                Text(ago, style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+                // Level with the workout's name, not floating in the middle of the tile.
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(ago, style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+                ),
               ],
             ],
           ),
@@ -333,12 +338,12 @@ LinearGradient rainbowGradient(bool dark, double offset) {
           Color(0xFFB783FF),
         ]
       : const [
-          Color(0xFFAD1740),
-          Color(0xFFA54200),
-          Color(0xFF806300),
-          Color(0xFF08733B),
-          Color(0xFF075B9A),
-          Color(0xFF7137A8),
+          Color(0xFFE0405E),
+          Color(0xFFE8802A),
+          Color(0xFFD1A800),
+          Color(0xFF2FB36B),
+          Color(0xFF2D93E0),
+          Color(0xFF8E5CE6),
         ];
   return LinearGradient(
     colors: [...colors, colors.first],

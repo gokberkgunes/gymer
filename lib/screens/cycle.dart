@@ -74,11 +74,28 @@ class CycleScreen extends StatelessWidget {
           ],
           SectionLabel(
             'Weekly RIR',
-            trailing: TextButton(onPressed: () => editWeeklyRir(context, cycle), child: const Text('Edit weekly RIR')),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InfoDot(
+                  tooltip: 'Recording reps and effort',
+                  onTap: () => _infoDialog(context, 'Record performed reps and actual effort', const [
+                    (
+                      '',
+                      'A cycle target is a prescription. Actual RIR is your estimate of clean reps left after the set. '
+                          'Record the reps you performed and leave actual RIR blank when unknown.',
+                    ),
+                    (
+                      'Example',
+                      'Target 3 RIR, 8 reps performed, 2 reps left. Record 8 reps and actual RIR 2. The target remains 3.',
+                    ),
+                  ]),
+                ),
+                TextButton(onPressed: () => editWeeklyRir(context, cycle), child: const Text('Edit weekly RIR')),
+              ],
+            ),
           ),
           _RirStrip(cycle: cycle),
-          const SizedBox(height: 10),
-          const _RirLoggingCard(),
           SectionLabel('Repeating ${cycle.microDays}-day schedule'),
           _Schedule(cycle: cycle),
           const SectionLabel('Training'),
@@ -202,36 +219,6 @@ void showRirOverrideInfo(BuildContext context) => _infoDialog(context, 'Prescrib
         'is recorded separately. A target never proves how hard a set actually was.',
   ),
 ]);
-
-class _RirLoggingCard extends StatelessWidget {
-  const _RirLoggingCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Record performed reps and actual effort', style: t.titleSmall),
-            const SizedBox(height: 4),
-            const Text(
-              'A cycle target is a prescription. Actual RIR is your estimate of clean reps left after the set. Record the '
-              'reps you performed and leave actual RIR blank when unknown.',
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Example: target 3 RIR, 8 reps performed, 2 reps left. Record 8 reps and actual RIR 2. The target remains 3.',
-              style: t.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _Empty extends StatelessWidget {
   const _Empty();
@@ -664,9 +651,8 @@ class CycleHeatmap extends StatelessWidget {
     final days = calendarDays(cycle, store.history);
     final perRow = math.max(1, cycle.microDays);
     const weekdays = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
-    final cell = math.max(compact ? 12.0 : 10.0, math.min(28.0, 300 / perRow));
 
-    Widget tile(CycleDay d) {
+    Widget tile(CycleDay d, double cell) {
       final today = dateKey(d.date) == dateKey(DateTime.now());
       final planned = d.templateId != null || d.incoming.isNotEmpty;
       final Color fill = switch (d.status) {
@@ -717,13 +703,13 @@ class CycleHeatmap extends StatelessWidget {
       );
     }
 
-    final rows = <Widget>[
+    List<Widget> rows(double cell) => <Widget>[
       Row(
         children: [
           const SizedBox(width: 28),
           for (final d in days.take(perRow))
             Container(
-              width: cell + 3,
+              width: cell + 4,
               alignment: Alignment.center,
               child: Text(
                 weekdays[d.date.weekday - 1],
@@ -745,7 +731,7 @@ class CycleHeatmap extends StatelessWidget {
                 ),
               ),
               for (final d in days.skip(r * perRow).take(perRow))
-                Padding(padding: const EdgeInsets.only(right: 4), child: tile(d)),
+                Padding(padding: const EdgeInsets.only(right: 4), child: tile(d, cell)),
             ],
           ),
         ),
@@ -755,12 +741,17 @@ class CycleHeatmap extends StatelessWidget {
           child: Text('Green: as planned  ·  Blue: another day  ·  Red: missed', style: t.bodySmall),
         ),
     ];
+    Widget grid(double cell) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows(cell));
     return Card(
       child: Padding(
         padding: EdgeInsets.all(compact ? 8 : 12),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
+        // The squares share the card's width (up to a comfortable size) instead of leaving a gap on the right.
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final fit = (constraints.maxWidth - 28) / perRow - 4;
+            final cell = fit.clamp(compact ? 12.0 : 10.0, 44.0);
+            return SingleChildScrollView(scrollDirection: Axis.horizontal, child: grid(cell));
+          },
         ),
       ),
     );

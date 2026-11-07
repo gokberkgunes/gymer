@@ -148,14 +148,19 @@ class _GlintPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (progress <= 0 || progress >= 1) return;
     final x = -size.width * 0.5 + size.width * 2 * Curves.easeInOut.transform(progress);
-    final rect = Rect.fromLTWH(x, 0, size.width * 0.45, size.height);
+    // A soft horizontal fade, leaned 20 degrees: both long edges fade to nothing, so no hard line shows.
+    final rect = Rect.fromLTWH(x, -size.height, size.width * 0.45, size.height * 3);
     final paint = Paint()
       ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
         colors: [color.withValues(alpha: 0), color.withValues(alpha: 0.18), color.withValues(alpha: 0)],
       ).createShader(rect);
-    canvas.drawRect(rect, paint);
+    canvas
+      ..save()
+      ..translate(size.width / 2, size.height / 2)
+      ..rotate(20 * 3.141592653589793 / 180)
+      ..translate(-size.width / 2, -size.height / 2)
+      ..drawRect(rect, paint)
+      ..restore();
   }
 
   @override

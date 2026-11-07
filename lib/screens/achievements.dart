@@ -78,8 +78,10 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                     const SizedBox(height: 12),
                     LinearProgressIndicator(
                       value: earned / progress.length,
-                      minHeight: 4,
+                      minHeight: 10,
                       borderRadius: context.style.brSmall,
+                      color: cs.primary,
+                      backgroundColor: cs.onSurface.withValues(alpha: 0.14),
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
@@ -188,9 +190,10 @@ class _AchievementTile extends StatelessWidget {
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: progress.fraction,
-              minHeight: 3,
+              minHeight: 7,
               borderRadius: context.style.brSmall,
-              color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+              color: cs.primary,
+              backgroundColor: cs.onSurface.withValues(alpha: 0.14),
             ),
           ],
         ],
