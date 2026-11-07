@@ -6,6 +6,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/num_field.dart';
 import 'plates.dart';
+import '../store.dart';
 
 void openRepMaxForExercise(BuildContext context, String exercise) {
   final store = StoreScope.read(context);

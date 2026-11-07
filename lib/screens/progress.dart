@@ -11,6 +11,7 @@ import '../theme.dart';
 import 'exercises.dart';
 import 'bodyweight.dart';
 import '../widgets/common.dart';
+import '../store.dart';
 
 void openExerciseProgress(BuildContext context, String name) {
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => ExerciseProgressScreen(name: name)));

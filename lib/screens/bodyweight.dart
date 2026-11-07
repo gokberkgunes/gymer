@@ -8,6 +8,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/num_field.dart';
+import '../store.dart';
 
 class BodyweightSummaryCard extends StatelessWidget {
   const BodyweightSummaryCard({super.key});

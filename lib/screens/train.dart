@@ -10,6 +10,7 @@ import 'cycle.dart';
 import 'history.dart';
 import 'home.dart' show openSession;
 import 'template_editor.dart';
+import '../store.dart';
 
 /// The Workout tab: cycle status and calendar on top, then workouts, with the
 /// active or today's workout first behind an animated rainbow border.

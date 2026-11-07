@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import 'common.dart';
+import '../store.dart';
 
 /// A compact location switch, shared by plate settings and the calculator's top-right controls.
 class PlateProfilePicker extends StatelessWidget {

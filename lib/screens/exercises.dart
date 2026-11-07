@@ -8,6 +8,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/num_field.dart';
+import '../store.dart';
 
 /// Exercise database: fuzzy search (leading space = exact), add, delete.
 class ExercisesScreen extends StatefulWidget {
@@ -430,9 +431,8 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
                   : 'Default ${formatNumber(store.settings.bar, NumKind.weight)}',
               suffix: unit,
               dense: false,
-              onChanged: (v) => setState(
-                () => _e = unit == 'lb' ? _e.copyWith(barLb: () => v) : _e.copyWith(barKg: () => v),
-              ),
+              onChanged: (v) =>
+                  setState(() => _e = unit == 'lb' ? _e.copyWith(barLb: () => v) : _e.copyWith(barKg: () => v)),
             ),
             const SizedBox(height: 4),
             Text('For the plate calculator, e.g. 10 for an EZ bar.', style: t.bodySmall),

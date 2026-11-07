@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/plate_profile_picker.dart';
 import 'settings.dart';
+import '../store.dart';
 
 /// The plate calculator as a bottom sheet: one side of the bar drawn to scale with labelled plates.
 /// When the plates cannot make [target], the nearest loads either side are
@@ -275,7 +276,7 @@ class BarPainter extends CustomPainter {
   final bool groupRepeated;
 
   /// Plates before this index are static; later ones slide in as [t] runs from 0 to 1.
-  final int keep;
+  final int? keep; // null: every plate is already on the bar
   final double t;
   BarPainter({
     required this.plates,
@@ -284,7 +285,7 @@ class BarPainter extends CustomPainter {
     required this.bar,
     this.compact = false,
     this.groupRepeated = false,
-    this.keep = 1 << 20,
+    this.keep,
     this.t = 1,
   });
 
@@ -353,13 +354,13 @@ class BarPainter extends CustomPainter {
     var newOrder = 0;
     var firstNew = -1;
     for (final (index, group) in groups.indexed) {
-      if (plateIndex >= keep && firstNew < 0) firstNew = index;
+      if (keep != null && plateIndex >= keep! && firstNew < 0) firstNew = index;
       plateIndex += group.count;
     }
     final fresh = firstNew < 0 ? 0 : groups.length - firstNew;
     plateIndex = 0;
     for (final (index, group) in groups.indexed) {
-      final isNew = plateIndex >= keep && t < 1;
+      final isNew = keep != null && plateIndex >= keep! && t < 1;
       plateIndex += group.count;
       double slide = 1;
       if (isNew) {

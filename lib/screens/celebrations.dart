@@ -11,6 +11,7 @@ import '../widgets/common.dart';
 import '../widgets/num_field.dart';
 import '../widgets/record_effect.dart';
 import '../logic/numbers.dart';
+import '../store.dart';
 
 /// A completed personal-best set in the chosen style, always playing.
 class RecordSetPreview extends StatelessWidget {

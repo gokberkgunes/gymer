@@ -12,6 +12,7 @@ import 'rep_max.dart';
 import 'session.dart';
 import 'settings.dart';
 import 'train.dart';
+import '../store.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});

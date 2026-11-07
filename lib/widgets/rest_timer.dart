@@ -4,6 +4,7 @@ import '../models.dart';
 import '../theme.dart';
 import 'common.dart';
 import 'tick.dart';
+import '../store.dart';
 
 String _mss(int seconds) => '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
