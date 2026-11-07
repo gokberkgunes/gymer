@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../logic/circuits.dart';
 import '../logic/methods.dart';
 import '../logic/numbers.dart';
+import '../logic/progression.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
@@ -87,7 +88,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         Expanded(child: Stat('$weekSets', weekSets == 1 ? 'set' : 'sets')),
                         Expanded(
                           child: Stat(
-                            fmtVolume(thisWeek.fold(0.0, (a, s) => a + s.volume)),
+                            // Past workouts keep their recorded unit; total them in the current one.
+                            fmtVolume(
+                              thisWeek.fold(0.0, (a, s) => a + convertWeight(s.volume, s.unit, store.settings.unit)),
+                            ),
                             '${store.settings.unit} volume',
                           ),
                         ),
@@ -478,12 +482,14 @@ class _SessionEditorState extends State<SessionEditor> {
                   child: InkWell(
                     onTap: () async {
                       final name = await pickExercise(context);
-                      if (name != null) {
-                        setState(() {
-                          renameCircuitExercise(_s.circuits, e.name, name);
-                          e.name = name;
-                        });
+                      if (name == null || !context.mounted || sameExercise(name, e.name)) return;
+                      if (_s.exercises.any((x) => x != e && sameExercise(x.name, name))) {
+                        return notify(context, '$name is already in this workout.');
                       }
+                      setState(() {
+                        renameCircuitExercise(_s.circuits, e.name, name);
+                        e.name = name;
+                      });
                     },
                     child: Text(e.name, style: t.titleMedium?.copyWith(fontSize: 18)),
                   ),
@@ -539,7 +545,10 @@ class _SessionEditorState extends State<SessionEditor> {
           OutlinedButton(
             onPressed: () async {
               final name = await pickExercise(context);
-              if (name == null) return;
+              if (name == null || !context.mounted) return;
+              if (_s.exercises.any((x) => sameExercise(x.name, name))) {
+                return notify(context, '$name is already in this workout.');
+              }
               setState(
                 () => _s.exercises.add(
                   SessionExercise(

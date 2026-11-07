@@ -92,7 +92,6 @@ class _CycleEditorState extends State<CycleEditor> {
       for (final w in target.weekRir.keys.toList()) {
         if (w > build) target.weekRir[w] = _d.deloadRir;
       }
-      if (target.rirScheduleMode == 'steady' && _d.deloadRir != 4) target.rirScheduleMode = 'custom';
     }
     target.schedule.removeWhere((day, _) => day > target.microDays);
   }
@@ -495,7 +494,7 @@ Future<void> editWeeklyRir(BuildContext context, Mesocycle cycle) {
   return Navigator.of(context).push(MaterialPageRoute(builder: (_) => WeeklyRirEditor(cycle: cycle)));
 }
 
-/// Per-week RIR targets with the Steady and "Ramp 4 → 1" presets.
+/// Per-week RIR targets with the Steady and "Ramp 4 → 1" presets; deload weeks take the cycle's deload RIR.
 class WeeklyRirEditor extends StatefulWidget {
   final Mesocycle cycle;
   const WeeklyRirEditor({super.key, required this.cycle});
@@ -512,7 +511,7 @@ class _WeeklyRirEditorState extends State<WeeklyRirEditor> {
   late bool _steady =
       c.rirScheduleMode != 'custom' &&
       _rir.take(buildWeeks).toSet().length == 1 &&
-      _rir.skip(buildWeeks).every((v) => v == 4) &&
+      _rir.skip(buildWeeks).every((v) => v == c.deloadRir) &&
       c.weekRir.length == total;
   late int _steadyLevel = _steady ? _rir.first : 3;
 
@@ -520,7 +519,7 @@ class _WeeklyRirEditorState extends State<WeeklyRirEditor> {
     _steadyLevel = _steady ? (_steadyLevel > 1 ? _steadyLevel - 1 : 3) : _steadyLevel;
     _steady = true;
     for (var i = 0; i < total; i++) {
-      _rir[i] = i >= buildWeeks ? 4 : _steadyLevel;
+      _rir[i] = i >= buildWeeks ? c.deloadRir : _steadyLevel;
     }
   });
 
@@ -530,7 +529,7 @@ class _WeeklyRirEditorState extends State<WeeklyRirEditor> {
     for (var i = 0; i < total; i++) {
       final n = i + 1;
       _rir[i] = n > buildWeeks
-          ? 4
+          ? c.deloadRir
           : buildWeeks == 1
           ? 1
           : buildWeeks < 4

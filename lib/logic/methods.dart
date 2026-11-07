@@ -100,21 +100,6 @@ String setRole(String type) {
   return 'unknown';
 }
 
-const setTypeShort = {
-  'Normal': '',
-  'Warm-up': 'W',
-  'Top Set': 'T',
-  'Back-off': 'B',
-  'AMRAP': 'A',
-  'Activation': 'A',
-  'Myo-set': 'M',
-  'Rest-Pause': 'R',
-  'Drop Set': 'D',
-  'Mechanical Drop Set': 'MD',
-  'Cluster Set': 'C',
-  'Myo-Rep Match': 'MM',
-};
-
 const loadModes = {
   'external': 'External load',
   'bodyweight': 'Bodyweight + added load',

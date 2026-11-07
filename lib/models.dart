@@ -26,6 +26,10 @@ List<double>? _plates(Object? v, List<double> former) {
 
 String _str(Object? v) => v is String ? v : '';
 
+/// Exercise names match ignoring case and surrounding spaces, everywhere: an import or an old rename that
+/// differs only in case must never split an exercise's history.
+bool sameExercise(String a, String b) => a.trim().toLowerCase() == b.trim().toLowerCase();
+
 String dateKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 

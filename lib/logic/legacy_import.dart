@@ -190,7 +190,11 @@ LegacyData _convertLegacy(Map<String, String> files) {
                         for (final t in perSet)
                           TemplateSet(
                             type: canonicalSetType(t['set_type']),
-                            weight: _weightIn(t['weight'], _text(t['weight_unit']) ?? r['default_weight_unit'], unitSetting),
+                            weight: _weightIn(
+                              t['weight'],
+                              _text(t['weight_unit']) ?? r['default_weight_unit'],
+                              unitSetting,
+                            ),
                             reps: _int(t['reps']),
                             rest: _parseRest(t['rest_seconds']) ?? rest,
                             groupStart: t['protocol_group_start'] == '1',
@@ -409,7 +413,11 @@ int? _parseRest(String? raw) {
   final text = (raw ?? '').trim();
   if (text.isEmpty) return null;
   final m = RegExp(r'^(\d+):(\d{2})$').firstMatch(text);
-  if (m != null) return int.parse(m[1]!) * 60 + int.parse(m[2]!);
+  if (m != null) {
+    final seconds = int.parse(m[2]!);
+    // As parseRest: "1:75" is not a time; fall back to the default rest instead of reading 135 s.
+    return seconds < 60 ? int.parse(m[1]!) * 60 + seconds : null;
+  }
   return _int(text);
 }
 

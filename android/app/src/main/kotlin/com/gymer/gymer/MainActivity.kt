@@ -22,9 +22,14 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymer/live_timer").setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> {
+                    val endsAt = call.argument<Number>("endsAt")?.toLong()
+                    if (endsAt == null) {
+                        result.error("live_timer", "No end time was provided.", null)
+                        return@setMethodCallHandler
+                    }
                     LiveTimer.show(
                         this,
-                        call.argument<Number>("endsAt")!!.toLong(),
+                        endsAt,
                         call.argument<String>("title") ?: "Rest",
                         call.argument<String>("text") ?: "",
                         call.argument<Boolean>("endAtZero") ?: false,

@@ -4,6 +4,9 @@ part of '../store.dart';
 extension AppStoreHistory on AppStore {
   void saveHistorySession(Session edited) {
     final i = history.indexWhere((s) => s.id == edited.id);
+    if (i >= 0 && edited.cycleId != null && dateKey(history[i].startedAt) != dateKey(edited.startedAt)) {
+      _relabelForDate(edited);
+    }
     if (i >= 0) {
       history[i] = edited;
     } else {
@@ -12,6 +15,28 @@ extension AppStoreHistory on AppStore {
     history.sort((a, b) => b.startedAt.compareTo(a.startedAt));
     _historyVersion++;
     changed();
+  }
+
+  /// A workout moved to another date takes that date's week, phase and target RIR. Moved outside its cycle's
+  /// dates, it no longer belongs to the cycle (a moved workout in Build would otherwise still count as a deload,
+  /// or the reverse, in progression and reviews). A calendar day it fulfils stays linked and shows as moved.
+  void _relabelForDate(Session s) {
+    final cycle = cycles.where((c) => c.id == s.cycleId).firstOrNull;
+    if (cycle == null) return;
+    final status = cycleStatus(cycle, s.startedAt);
+    final linked = cycle.events.values.any((e) => e.sessionId == s.id);
+    if (status.running) {
+      s
+        ..microcycle = status.currentMicro
+        ..phase = status.phase
+        ..targetRir = status.suggestedRir;
+    } else if (!linked) {
+      s
+        ..cycleId = null
+        ..microcycle = null
+        ..phase = null
+        ..targetRir = null;
+    }
   }
 
   void deleteSession(String id) {
@@ -93,7 +118,7 @@ extension AppStoreHistory on AppStore {
       double bestValue = 0;
       for (final e in s.exercises.where(
         (e) =>
-            e.name == exercise &&
+            sameExercise(e.name, exercise) &&
             (combined
                 ? e.loadMode == (this.exercise(exercise)?.loadMode ?? defaultLoadModeFor(exercise))
                 : e.loadMode == 'external'),
@@ -129,13 +154,13 @@ extension AppStoreHistory on AppStore {
     if (info != null && info.loadMode != 'external') {
       return (null, null, 'Bodyweight and assisted loads do not establish a total RM.');
     }
-    final live = active?.exercises.where((x) => x.name == name).firstOrNull;
+    final live = active?.exercises.where((x) => sameExercise(x.name, name)).firstOrNull;
     for (final set in [...?live?.sets].reversed) {
       if (!set.done || !isStraightType(set.type) || (set.weight ?? 0) <= 0 || (set.reps ?? 0) <= 0) continue;
       return _seedFrom(set.weight!, set.reps!, set.rir, active!.unit);
     }
     for (final s in history) {
-      for (final x in s.exercises.where((x) => x.name == name)) {
+      for (final x in s.exercises.where((x) => sameExercise(x.name, name))) {
         for (final set in x.sets.reversed) {
           if (!set.done || !isStraightType(set.type) || (set.weight ?? 0) <= 0 || (set.reps ?? 0) <= 0) continue;
           if (x.loadMode != 'external') {

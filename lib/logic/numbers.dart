@@ -4,6 +4,8 @@ library;
 
 import 'dart:math' as math;
 
+final _numberChar = RegExp(r'[0-9.]');
+
 /// Evaluates + - * / with parentheses and unary signs, e.g. "45+45" or
 /// "100*0.9". Returns null for anything else, like the Python ast evaluator.
 double? evaluateExpression(String? input) {
@@ -13,7 +15,7 @@ double? evaluateExpression(String? input) {
 
   double? number() {
     final start = i;
-    while (i < text.length && (RegExp(r'[0-9.]').hasMatch(text[i]))) {
+    while (i < text.length && _numberChar.hasMatch(text[i])) {
       i++;
     }
     if (start == i) return null;
@@ -115,6 +117,7 @@ String? unusualReason(NumKind kind, double v, {double? usualWeight}) {
 }
 
 double median(List<double> v) {
+  if (v.isEmpty) throw ArgumentError.value(v, 'v', 'median of no values');
   final s = [...v]..sort();
   final m = s.length ~/ 2;
   return s.length.isOdd ? s[m] : (s[m - 1] + s[m]) / 2;

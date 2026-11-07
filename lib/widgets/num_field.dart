@@ -125,6 +125,8 @@ class _NumFieldState extends State<NumField> {
 
   /// Evaluate and pretty-print; invalid input stays in place, marked red.
   bool _normalize() {
+    // Focus can be lost while the field is being torn down (e.g. its exercise collapses); nothing to tidy then.
+    if (!mounted) return false;
     final raw = stripSentinel(_c.text);
     if (raw.isEmpty) {
       if (_c.text.isNotEmpty) _setText('');

@@ -22,7 +22,7 @@ void reconcileCircuits(List<ExerciseCircuit> circuits, Iterable<String> names) {
 
 void renameCircuitExercise(List<ExerciseCircuit> circuits, String oldName, String newName) {
   for (final c in circuits) {
-    c.exercises = [for (final name in c.exercises) name == oldName ? newName : name];
+    c.exercises = [for (final name in c.exercises) sameExercise(name, oldName) ? newName : name];
   }
 }
 

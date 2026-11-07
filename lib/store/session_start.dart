@@ -516,7 +516,7 @@ extension AppStoreSessionStart on AppStore {
     for (final s in history) {
       if (s.cycleId != c.id || s.templateId != session.templateId || !s.startedAt.isBefore(boundary)) continue;
       if (s.phase == 'Deload') continue;
-      final e = s.exercises.where((e) => e.name == te.name && e.method == te.method).firstOrNull;
+      final e = s.exercises.where((e) => sameExercise(e.name, te.name) && e.method == te.method).firstOrNull;
       if (e != null) {
         refSession = s;
         ref = e;

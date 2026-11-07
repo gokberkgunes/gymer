@@ -228,8 +228,9 @@ void main() {
     expect(store.history.first.exercises.first.sets.last.done, isFalse, reason: 'unfinished sets are kept');
 
     store.updateSettings((s) => s.unit = 'lb');
-    expect(store.history.first.unit, 'lb');
-    expect(store.history.first.exercises.first.sets.first.weight, closeTo(220.46, 0.01));
+    // Plans follow the unit; finished workouts keep what was recorded and are converted when read.
+    expect((store.history.first.unit, store.history.first.exercises.first.sets.first.weight), ('kg', 100));
+    expect(store.lastTimeSets(press.name, legs.id)!.first.weight, closeTo(220.46, 0.01));
     expect(press.sets.first.weight, closeTo(220.46, 0.01));
   });
 

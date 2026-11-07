@@ -203,9 +203,12 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
       chosen.add(muscle);
       other.remove(muscle);
     }
+    // Known muscles in landmark order, then any other tag (e.g. from an import) kept as it was.
     List<String> ordered(Set<String> s) => [
       for (final m in volumeLandmarks.keys)
         if (s.contains(m)) m,
+      for (final m in s)
+        if (!volumeLandmarks.containsKey(m)) m,
     ];
     setState(
       () => _e = _e.copyWith(primary: ordered(primary ? chosen : other), secondary: ordered(primary ? other : chosen)),

@@ -16,7 +16,7 @@ class _WorkoutSettings extends StatelessWidget {
             context,
             'Units',
             _segmented(s.unit, const {'kg': 'kg', 'lb': 'lb'}, (v) => store.updateSettings((x) => x.unit = v)),
-            subtitle: 'Changing units converts every stored weight',
+            subtitle: 'Converts plans; past workouts keep their recorded unit',
           ),
           _row(
             context,
@@ -338,8 +338,8 @@ class _AdvancedSettings extends StatelessWidget {
             s.requirePreviousSet,
             (x, v) => x.requirePreviousSet = v,
             subtitle:
-                'When on, a set can only be completed after earlier sets of that same exercise are complete. '
-                'Other exercises do not matter.',
+                'When on, a set can only be completed after earlier sets of that exercise are complete. '
+                'In supersets and circuits, rounds follow the linked order.',
           ),
           _switch(
             context,
@@ -378,8 +378,7 @@ class _AdvancedSettings extends StatelessWidget {
             'Enter completes set',
             s.enterCompletesSet,
             (x, v) => x.enterCompletesSet = v,
-            subtitle:
-                'Enter on the last editable box can complete the set. This shortcut never starts or resumes the workout clock.',
+            subtitle: 'Enter on the last editable box completes the set.',
           ),
           _switch(context, 'Enter moves to next set', s.enterMovesToNextSet, (x, v) => x.enterMovesToNextSet = v),
           _switch(

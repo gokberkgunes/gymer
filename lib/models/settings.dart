@@ -356,12 +356,19 @@ class Settings {
       defaultTimerDisplay: s('defaultTimerDisplay', d.defaultTimerDisplay, {'elapsed', 'countdown'}),
       repMaxTargetReps: _int(j['repMaxTargetReps']) ?? d.repMaxTargetReps,
       setTypes: j['setTypes'] is List ? List<String>.from(j['setTypes'] as List) : null,
-      increments: j['increments'] == null
-          ? null
-          : {
+      // A damaged entry is skipped (its equipment falls back to the default) rather than making the file unreadable.
+      increments: j['increments'] is Map
+          ? {
+              ...defaultIncrements,
               for (final e in (j['increments'] as Map).entries)
-                e.key as String: (((e.value as List)[0] as num).toDouble(), ((e.value as List)[1] as num).toDouble()),
-            },
+                if (e.key is String &&
+                    e.value is List &&
+                    (e.value as List).length >= 2 &&
+                    (e.value as List)[0] is num &&
+                    (e.value as List)[1] is num)
+                  e.key as String: (((e.value as List)[0] as num).toDouble(), ((e.value as List)[1] as num).toDouble()),
+            }
+          : null,
       barKg: _dbl(j['barKg']) ?? d.barKg,
       barLb: _dbl(j['barLb']) ?? d.barLb,
       platesKg: _plates(j['platesKg'], formerPlatesKg),

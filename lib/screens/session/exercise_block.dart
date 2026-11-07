@@ -16,6 +16,15 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
   /// While the exercise name is pressed, the whole card lights up (not just the name area).
   bool _pressed = false;
 
+  /// Clears the tint shortly after release; cancelled by a new press so a quick second press stays lit.
+  Timer? _release;
+
+  @override
+  void dispose() {
+    _release?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
@@ -120,9 +129,10 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
         onHighlightChanged: (v) {
+          _release?.cancel();
           if (v) return setState(() => _pressed = true);
           // Keep the tint briefly after a quick tap so it is visible, then fade it out.
-          Future.delayed(const Duration(milliseconds: 250), () {
+          _release = Timer(const Duration(milliseconds: 250), () {
             if (mounted) setState(() => _pressed = false);
           });
         },

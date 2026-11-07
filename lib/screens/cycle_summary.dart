@@ -8,6 +8,9 @@ import 'cycle.dart';
 import 'finish.dart';
 import '../store.dart';
 
+/// Estimates shown to the nearest half unit: two decimals would claim precision an estimate does not have.
+String _estimate(double v) => formatNumber((v * 2).round() / 2, NumKind.weight);
+
 void openCycleSummary(BuildContext context, Mesocycle cycle) {
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => _CycleSummaryScreen(cycleId: cycle.id)));
 }
@@ -162,7 +165,7 @@ class CycleSummaryContent extends StatelessWidget {
                               Text(change.name, style: t.bodyLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
                               const SizedBox(height: 4),
                               Text(
-                                '${formatNumber(change.first, NumKind.weight)} → ${formatNumber(change.last, NumKind.weight)} ${summary.unit}',
+                                '${_estimate(change.first)} → ${_estimate(change.last)} ${summary.unit}',
                                 style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
                               ),
                             ],
@@ -170,9 +173,13 @@ class CycleSummaryContent extends StatelessWidget {
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          change.change.abs() < 0.05
+                          change.change.abs() < 0.25
                               ? '—'
-                              : '${change.change > 0 ? '+' : ''}${formatNumber(change.change, NumKind.weight)} ${summary.unit}',
+                              : '${change.change > 0
+                                    ? '+'
+                                    : change.change < 0
+                                    ? '−'
+                                    : ''}${_estimate(change.change.abs())} ${summary.unit}',
                           style: t.titleMedium?.copyWith(
                             color: change.change > 0.05 ? cs.primary : cs.onSurfaceVariant,
                             fontFeatures: tabular,

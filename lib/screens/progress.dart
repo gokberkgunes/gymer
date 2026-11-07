@@ -220,7 +220,7 @@ class ExerciseProgressScreen extends StatelessWidget {
             const SectionLabel('Exercise history'),
             for (final (sess, ex) in [
               for (final h in store.history)
-                for (final x in h.exercises.where((x) => x.name == name)) (h, x),
+                for (final x in h.exercises.where((x) => sameExercise(x.name, name))) (h, x),
             ].take(100))
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),

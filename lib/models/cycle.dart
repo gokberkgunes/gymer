@@ -124,7 +124,10 @@ class Mesocycle {
     deloadManual: j['deloadManual'] as bool? ?? false,
     deloadLoadPct: _int(j['deloadLoadPct']) ?? 90,
     deloadVolumePct: _int(j['deloadVolumePct']) ?? 50,
-    weekRir: {for (final e in (j['weekRir'] as Map? ?? {}).entries) int.parse('${e.key}'): _int(e.value)!},
+    weekRir: {
+      for (final e in (j['weekRir'] as Map? ?? {}).entries)
+        if ((int.tryParse('${e.key}'), _int(e.value)) case (final week?, final rir?)) week: rir,
+    },
     rirScheduleMode: _str(j['rirMode']),
     rirLock: j['rirLock'] as bool? ?? true,
     restLock: j['restLock'] as bool? ?? false,

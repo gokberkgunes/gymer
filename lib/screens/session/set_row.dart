@@ -140,7 +140,17 @@ class _SetRow extends StatelessWidget {
     final record = store.recordKind(e, s);
     final increase = store.plannedLoadIncrease(e, index);
     final previous = warmup ? null : store.lastTimeSets(e.name, store.active?.templateId);
-    final prev = previous != null && index < previous.length && previous[index].done ? previous[index] : null;
+    // Match by position among sets of the same kind, so a different number of warm-ups last time never shifts the
+    // working sets' "last time" values onto the wrong rows.
+    SetEntry? prev;
+    if (previous != null) {
+      final position = e.sets.take(index).where((x) => x.warmup == s.warmup).length;
+      final same = [
+        for (final x in previous)
+          if (x.warmup == s.warmup) x,
+      ];
+      if (position < same.length && same[position].done) prev = same[position];
+    }
     final repsVisible = store.active == null || store.historicalRepsVisible(store.active!);
     final String? lastTime = prev == null || (prev.weight == null && prev.reps == null)
         ? null
@@ -389,7 +399,8 @@ class _SetRow extends StatelessWidget {
 
     return Dismissible(
       key: ObjectKey(s),
-      direction: DismissDirection.endToStart,
+      // Logged work is never one stray swipe away from deletion; completed sets are removed with the − button.
+      direction: s.done ? DismissDirection.none : DismissDirection.endToStart,
       dismissThresholds: const {DismissDirection.endToStart: 0.25},
       background: Container(
         decoration: BoxDecoration(color: cs.error, borderRadius: st.setTile(position, count)),

@@ -12,8 +12,9 @@ extension AppStoreCatalog on AppStore {
     changed();
   }
 
-  /// Like storage.convert_all_weights: every stored load follows the unit,
-  /// rounded to two decimals with conversion noise snapped away.
+  /// Plans follow the new unit: workout templates and the workout in progress, rounded to two decimals with
+  /// conversion noise snapped away. Finished workouts keep the unit they were recorded in; every reader converts
+  /// with `session.unit`, so history is never rewritten (repeated toggles would otherwise compound rounding).
   void _convertAllWeights(String from, String to) {
     double? c(double? w, String src) =>
         w == null ? null : double.parse(snapWeight(convertWeight(w, src, to)).toStringAsFixed(2));
@@ -32,7 +33,6 @@ extension AppStoreCatalog on AppStore {
       s.bodyweight = c(s.bodyweight, src);
     }
 
-    history.forEach(session);
     if (active != null) session(active!);
     for (final t in templates) {
       for (final e in t.exercises) {
@@ -118,7 +118,7 @@ extension AppStoreCatalog on AppStore {
   bool inHistory(String name) => history.any((s) => s.exercises.any((e) => e.name.toLowerCase() == name.toLowerCase()));
 
   void deleteExercise(String name) {
-    exercises.removeWhere((e) => e.name == name);
+    exercises.removeWhere((e) => sameExercise(e.name, name));
     changed();
   }
 
@@ -130,20 +130,20 @@ extension AppStoreCatalog on AppStore {
       return 'An exercise with that name already exists.';
     }
     final previous = exercise(from);
-    exercises = [for (final x in exercises) x.name == from ? updated : x]
+    exercises = [for (final x in exercises) sameExercise(x.name, from) ? updated : x]
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     if (from != updated.name) {
       for (final t in templates) {
         renameCircuitExercise(t.circuits, from, updated.name);
         for (final e in t.exercises) {
-          if (e.name == from) e.name = updated.name;
+          if (sameExercise(e.name, from)) e.name = updated.name;
         }
       }
       for (final s in [...history, ?active]) {
         renameCircuitExercise(s.circuits, from, updated.name);
-        if (s.warmupExercise == from) s.warmupExercise = updated.name;
+        if (s.warmupExercise != null && sameExercise(s.warmupExercise!, from)) s.warmupExercise = updated.name;
         for (final e in [...s.exercises, ...s.warmupExercises]) {
-          if (e.name == from) e.name = updated.name;
+          if (sameExercise(e.name, from)) e.name = updated.name;
         }
       }
       if (rest?.exercise == from) rest = rest!.copyWith(exercise: updated.name);
@@ -151,7 +151,7 @@ extension AppStoreCatalog on AppStore {
     // A new default context clears inherited template defaults that no longer match.
     if (previous != null && previous.context != updated.context) {
       for (final t in templates) {
-        for (final e in t.exercises.where((e) => e.name == updated.name)) {
+        for (final e in t.exercises.where((e) => sameExercise(e.name, updated.name))) {
           for (final s in e.sets.where((s) => s.context == null)) {
             s
               ..weight = null
