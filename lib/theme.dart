@@ -17,12 +17,20 @@ double contrastRatio(Color a, Color b) {
   return ((la > lb ? la : lb) + 0.05) / ((la > lb ? lb : la) + 0.05);
 }
 
+/// The light-mode danger colour ([ColorScheme.error]); [readableAccent] keeps the accent's hue clear of it.
+const lightError = Color(0xFFD32F2F);
+
 /// The accent as used in light mode. The accent also colours text and icons (trophies, gains, pills, the RIR
 /// stepper), and the bright accents made for dark mode are unreadable on light surfaces (Lime on white is about
-/// 1.3:1). Keep the hue and saturation and lower the lightness until it reaches 4.5:1 (WCAG AA for text) against
-/// [against], the darkest light surface it sits on. Dark mode uses the accent unchanged.
+/// 1.3:1). Lower the lightness until it reaches 4.5:1 (WCAG AA for text) against [against], the darkest light
+/// surface it sits on. Darkening a warm accent drifts it toward the danger red, so a hue within 25° of
+/// [lightError] is first turned away from it (Coral becomes a burnt orange, Rose a deeper pink) and the finish
+/// button never looks like the discard button. Dark mode uses the accent unchanged.
 Color readableAccent(Color accent, Color against, {double target = 4.5}) {
   var hsl = HSLColor.fromColor(accent);
+  final danger = HSLColor.fromColor(lightError).hue;
+  final offset = ((hsl.hue - danger + 540) % 360) - 180; // signed distance in degrees, -180..180
+  if (offset.abs() < 25) hsl = hsl.withHue((danger + (offset >= 0 ? 25 : -25) + 360) % 360);
   while (contrastRatio(hsl.toColor(), against) < target && hsl.lightness > 0.05) {
     hsl = hsl.withLightness(hsl.lightness - 0.01);
   }
@@ -142,7 +150,7 @@ ThemeData buildTheme(Brightness brightness, Settings s) {
     onPrimary: onAccent,
     secondary: accent,
     onSecondary: onAccent,
-    error: dark ? const Color(0xFFFF5C5C) : const Color(0xFFD32F2F),
+    error: dark ? const Color(0xFFFF5C5C) : lightError,
     onError: Colors.white,
     surface: surface,
     onSurface: text,
