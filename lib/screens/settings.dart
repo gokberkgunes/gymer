@@ -1356,9 +1356,10 @@ class AppearanceScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: _segmented(
                 s.warmupAppearance,
-                const {'fire': 'Fire', 'stripes': 'Stripes', 'plain': 'Plain'},
+                const {'fire': 'Fire', 'embers': 'Embers', 'heat': 'Heat', 'stripes': 'Stripes', 'plain': 'Plain'},
                 (v) => set((x) => x.warmupAppearance = v),
                 expand: true,
+                compact: true,
               ),
             ),
           ),
@@ -1418,9 +1419,22 @@ Widget _row(
 }
 
 /// [expand]: full width, for a choice stacked under its title (all stacked choices use this so they line up).
-Widget _segmented<T>(T value, Map<T, String> options, ValueChanged<T> onChanged, {bool expand = false}) {
+Widget _segmented<T>(
+  T value,
+  Map<T, String> options,
+  ValueChanged<T> onChanged, {
+  bool expand = false,
+  bool compact = false,
+}) {
   final button = SegmentedButton<T>(
     showSelectedIcon: false,
+    // Five short options need tighter padding and smaller text to share one row.
+    style: compact
+        ? const ButtonStyle(
+            padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+            textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+          )
+        : null,
     segments: [for (final e in options.entries) ButtonSegment(value: e.key, label: Text(e.value))],
     selected: {value},
     onSelectionChanged: (v) => onChanged(v.first),

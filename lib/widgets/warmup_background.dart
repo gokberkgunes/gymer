@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
+/// Whether a warm-up style animates (the others are still).
+bool warmupStyleMoves(String style) => const {'fire', 'embers', 'heat'}.contains(style);
+
 /// The warm-up texture sits behind the entire exercise card, leaving set tiles and inputs solid.
 class WarmupBackground extends StatefulWidget {
   final String style;
@@ -19,7 +22,7 @@ class _WarmupBackgroundState extends State<WarmupBackground> with SingleTickerPr
   late final _motion = AnimationController(vsync: this, duration: const Duration(seconds: 6));
 
   void _sync() {
-    if (widget.active && widget.style == 'fire' && !MediaQuery.disableAnimationsOf(context)) {
+    if (widget.active && warmupStyleMoves(widget.style) && !MediaQuery.disableAnimationsOf(context)) {
       if (!_motion.isAnimating) _motion.repeat();
     } else {
       _motion.stop();
@@ -53,7 +56,11 @@ class _WarmupBackgroundState extends State<WarmupBackground> with SingleTickerPr
         ? _WarmupStripes(
             cs.brightness == Brightness.light ? cs.surfaceContainerHigh : cs.onSurface.withValues(alpha: 0.03),
           )
-        : _WarmupFire(_motion, cs, MediaQuery.disableAnimationsOf(context));
+        : switch (widget.style) {
+            'embers' => _WarmupEmbers(_motion, cs, MediaQuery.disableAnimationsOf(context)),
+            'heat' => _WarmupHeat(_motion, cs, MediaQuery.disableAnimationsOf(context)),
+            _ => _WarmupFire(_motion, cs, MediaQuery.disableAnimationsOf(context)),
+          };
     // Only the background layer repaints while the flames move; the controls above it stay still.
     return Stack(
       children: [
@@ -204,4 +211,120 @@ class _WarmupStripes extends CustomPainter {
 
   @override
   bool shouldRepaint(_WarmupStripes old) => color != old.color;
+}
+
+/// Embers: no flames, just a warm glow at the foot of the card and sparks that drift up and flicker out.
+class _WarmupEmbers extends CustomPainter {
+  final Animation<double> motion;
+  final ColorScheme colors;
+  final bool reducedMotion;
+  _WarmupEmbers(this.motion, this.colors, this.reducedMotion) : super(repaint: motion);
+
+  double _seed(int i, double salt) {
+    final v = math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+    return v - v.floorToDouble();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final rect = Offset.zero & size;
+    final t = reducedMotion ? 0.25 : motion.value;
+    canvas.save();
+    canvas.clipRect(rect);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            colors.warning.withValues(alpha: 0.13),
+            colors.error.withValues(alpha: 0.04),
+            colors.error.withValues(alpha: 0),
+          ],
+          stops: const [0, 0.45, 1],
+        ).createShader(rect),
+    );
+    final glow = Paint();
+    final core = Paint();
+    for (var i = 0; i < 44; i++) {
+      final cycles = 1 + (_seed(i, 1) * 2).floor(); // whole cycles per loop keep the animation seamless
+      final p = (t * cycles + _seed(i, 2)) % 1;
+      final flicker = 0.65 + 0.35 * math.sin(math.pi * 2 * (t * 3 + _seed(i, 3)));
+      final fade = math.pow(math.sin(p * math.pi), 1.3).toDouble() * flicker;
+      final x = size.width * (0.02 + 0.96 * _seed(i, 4)) + math.sin(math.pi * 2 * (p * 1.5 + _seed(i, 5))) * 7;
+      final y = size.height * (1.04 - p * 1.1);
+      final radius = 1.1 + 2.1 * _seed(i, 6);
+      final color = i.isEven ? colors.warning : colors.error;
+      glow.color = color.withValues(alpha: 0.22 * fade);
+      core.color = color.withValues(alpha: 0.85 * fade);
+      canvas.drawCircle(Offset(x, y), radius * 3.2, glow);
+      canvas.drawCircle(Offset(x, y), radius, core);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_WarmupEmbers old) =>
+      colors != old.colors || motion != old.motion || reducedMotion != old.reducedMotion;
+}
+
+/// Heat: a hazy glow at the base and soft wavering ribbons of warm air rising through the card.
+class _WarmupHeat extends CustomPainter {
+  final Animation<double> motion;
+  final ColorScheme colors;
+  final bool reducedMotion;
+  _WarmupHeat(this.motion, this.colors, this.reducedMotion) : super(repaint: motion);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final rect = Offset.zero & size;
+    final t = reducedMotion ? 0.25 : motion.value;
+    canvas.save();
+    canvas.clipRect(rect);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            colors.error.withValues(alpha: 0.12),
+            colors.warning.withValues(alpha: 0.06),
+            colors.warning.withValues(alpha: 0),
+          ],
+        ).createShader(rect),
+    );
+    const bands = 6;
+    final soft = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 14;
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2;
+    for (var i = 0; i < bands; i++) {
+      final p = (t + i / bands) % 1;
+      final baseY = size.height * (1.08 - p * 1.2);
+      final fade = math.sin(p * math.pi);
+      final path = Path();
+      for (double x = -8; x <= size.width + 8; x += 6) {
+        final u = x / size.width;
+        final y = baseY + math.sin(u * math.pi * 3 + math.pi * 2 * (t * 2) + i * 1.7) * (3 + 3 * p);
+        x <= -8 ? path.moveTo(x, y) : path.lineTo(x, y);
+      }
+      soft.color = colors.warning.withValues(alpha: 0.05 * fade);
+      line.color = colors.warning.withValues(alpha: 0.16 * fade);
+      canvas.drawPath(path, soft);
+      canvas.drawPath(path, line);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_WarmupHeat old) =>
+      colors != old.colors || motion != old.motion || reducedMotion != old.reducedMotion;
 }

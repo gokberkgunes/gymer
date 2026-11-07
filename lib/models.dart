@@ -1087,7 +1087,7 @@ class Settings {
   int rounding;
   String density;
   int setSpacing;
-  String warmupAppearance; // fire | stripes | plain
+  String warmupAppearance; // fire | embers | heat | stripes | plain
   double fontScale;
   double uiScale;
 
@@ -1305,7 +1305,7 @@ class Settings {
       rounding: _int(j['rounding']) ?? d.rounding,
       density: s('density', d.density, {'compact', 'normal', 'roomy'}),
       setSpacing: _int(j['setSpacing']) ?? d.setSpacing,
-      warmupAppearance: s('warmupAppearance', d.warmupAppearance, {'fire', 'stripes', 'plain'}),
+      warmupAppearance: s('warmupAppearance', d.warmupAppearance, {'fire', 'embers', 'heat', 'stripes', 'plain'}),
       fontScale: _dbl(j['fontScale']) ?? d.fontScale,
       uiScale: _dbl(j['uiScale']) ?? d.uiScale,
     );
