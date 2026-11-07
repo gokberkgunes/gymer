@@ -35,6 +35,14 @@ class TrainScreen extends StatelessWidget {
     final workouts = [...store.templates]
       ..sort((a, b) => (a.id == featured ? 0 : 1).compareTo(b.id == featured ? 0 : 1));
     final cycleRir = status != null && status.running ? status.suggestedRir : null;
+    // When each workout was last done, in one pass over history rather than one pass per tile.
+    final lastDone = <String, DateTime>{};
+    for (final h in store.history) {
+      final id = h.templateId;
+      if (id == null) continue;
+      final seen = lastDone[id];
+      if (seen == null || h.startedAt.isAfter(seen)) lastDone[id] = h.startedAt;
+    }
 
     return ListView(
       padding: pageInsets,
@@ -63,7 +71,13 @@ class TrainScreen extends StatelessWidget {
         for (final w in workouts)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: _WorkoutTile(template: w, featured: w.id == featured, label: label, cycleRir: cycleRir),
+            child: _WorkoutTile(
+              template: w,
+              featured: w.id == featured,
+              label: label,
+              cycleRir: cycleRir,
+              last: lastDone[w.id],
+            ),
           ),
       ],
     );
@@ -121,7 +135,14 @@ class _WorkoutTile extends StatefulWidget {
   final bool featured;
   final String label;
   final int? cycleRir;
-  const _WorkoutTile({required this.template, required this.featured, required this.label, required this.cycleRir});
+  final DateTime? last;
+  const _WorkoutTile({
+    required this.template,
+    required this.featured,
+    required this.label,
+    required this.cycleRir,
+    required this.last,
+  });
 
   @override
   State<_WorkoutTile> createState() => _WorkoutTileState();
@@ -218,10 +239,7 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
         if (muscles.contains(m)) m,
     ];
 
-    final last = store.history
-        .where((h) => h.templateId == w.id)
-        .map((h) => h.startedAt)
-        .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
+    final last = widget.last;
     final ago = last == null ? null : _ago(last);
     final sets = w.exercises.fold(0, (a, e) => a + e.sets.length);
 
@@ -322,7 +340,8 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
           child: child,
         ),
       ),
-      child: card,
+      // The border animates; the card inside it does not need repainting with it.
+      child: RepaintBoundary(child: card),
     );
   }
 }

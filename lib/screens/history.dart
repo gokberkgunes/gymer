@@ -157,8 +157,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   if (s.duration.inMinutes > 0) fmtDuration(s.duration),
                                   plural(s.doneSets, 'set'),
                                   if (s.volume > 0) '${fmtVolume(s.volume)} ${s.unit}',
-                                  if ((perDay[dateKey(s.startedAt)] ?? 0) > 1)
-                                    fmtRecent(s.startedAt, store.settings.unit).split(', ').last,
+                                  if ((perDay[dateKey(s.startedAt)] ?? 0) > 1) fmtRecent(s.startedAt).split(', ').last,
                                 ].join(' · '),
                                 style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                               ),
@@ -187,7 +186,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ListTile(
                       title: Text(c.name),
                       subtitle: Text(
-                        '${fmtRecent(c.start, store.settings.unit, includeTime: false)} · '
+                        '${fmtRecent(c.start, includeTime: false)} · '
                         '${c.length} ${c.periodNoun(plural: c.length != 1)}',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
@@ -436,6 +435,8 @@ class _SessionEditorState extends State<SessionEditor> {
     final cs = Theme.of(context).colorScheme;
     final unit = _s.unit;
     final report = store.sessionVolume(_s);
+    // The workout order once per build, not once per set row.
+    final steps = {for (final step in workoutSteps(_s.exercises, _s.circuits)) step.set: step};
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.draft ? 'Log past workout' : 'History'),
@@ -508,7 +509,7 @@ class _SessionEditorState extends State<SessionEditor> {
               ],
             ),
             if (e.method != 'Straight') Text(e.method, style: t.labelSmall),
-            for (final (i, set) in [...e.sets].indexed) _historySetRow(context, store, e, i, set, unit),
+            for (final (i, set) in [...e.sets].indexed) _historySetRow(context, store, e, i, set, unit, steps[set]),
             DropdownButtonFormField<String>(
               initialValue: e.loadMode,
               isExpanded: true,
@@ -566,12 +567,19 @@ class _SessionEditorState extends State<SessionEditor> {
     );
   }
 
-  Widget _historySetRow(BuildContext context, AppStore store, SessionExercise e, int i, SetEntry set, String unit) {
+  Widget _historySetRow(
+    BuildContext context,
+    AppStore store,
+    SessionExercise e,
+    int i,
+    SetEntry set,
+    String unit,
+    WorkoutStep? step,
+  ) {
     final t = Theme.of(context).textTheme;
     final usesRir = methodSetUsesRir(e.method, set.type);
     final number = set.warmup ? 'W' : '${e.sets.take(i + 1).where((x) => !x.warmup).length}';
     final weightKind = e.loadMode == 'external' ? NumKind.weight : NumKind.load;
-    final step = workoutSteps(_s.exercises, _s.circuits).where((step) => step.set == set).firstOrNull;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(

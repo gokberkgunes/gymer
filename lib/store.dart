@@ -220,6 +220,7 @@ class AppStore extends ChangeNotifier {
   final _previousCache = <String, List<SetEntry>?>{};
   final _bestCache = <(String, SetContext), LiftBest?>{};
   final _comparisonCache = <(String, String, String, String?, DateTime), List<SetEntry>?>{};
+  final _progressCache = <(String, bool, String?), List<ExercisePoint>>{};
 
   static double _tenth(double v) => (v * 10).round() / 10;
 }

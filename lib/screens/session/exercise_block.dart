@@ -3,7 +3,19 @@ part of '../session.dart';
 class _ExerciseBlock extends StatefulWidget {
   final SessionExercise exercise;
   final _SessionScreenState screen;
-  const _ExerciseBlock({super.key, required this.exercise, required this.screen});
+
+  /// The workout order (by set) and this card's block position, computed once per screen build rather than
+  /// once per card, so typing a digit does not rebuild the whole schedule for every exercise.
+  final Map<SetEntry, WorkoutStep> steps;
+  final int blockIndex, blockCount;
+  const _ExerciseBlock({
+    super.key,
+    required this.exercise,
+    required this.screen,
+    required this.steps,
+    required this.blockIndex,
+    required this.blockCount,
+  });
 
   @override
   State<_ExerciseBlock> createState() => _ExerciseBlockState();
@@ -40,9 +52,8 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
     final canWarmup =
         warmup || ramp != null || (e.loadMode == 'external' && e.work.isNotEmpty && !e.work.any((s) => s.done));
     final circuit = warmup ? null : circuitFor(session.circuits, e.name);
-    final scheduledSteps = {for (final step in sessionSteps(session)) step.set: step};
-    final blocks = exerciseBlocks(session);
-    final blockIndex = blocks.indexWhere((block) => block.contains(e));
+    final scheduledSteps = widget.steps;
+    final blockIndex = widget.blockIndex;
     final visibleSets = session.visibleSetsFor(e);
     final collapsed =
         e.collapsed ??
@@ -98,7 +109,7 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
           circuit == null ? 'Move up' : 'Move group up',
           () => store.moveSessionExercise(e, -1),
         ),
-      if (blockIndex < blocks.length - 1)
+      if (blockIndex < widget.blockCount - 1)
         (
           'moveDown',
           Icons.arrow_downward_rounded,

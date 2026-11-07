@@ -11,7 +11,6 @@ class CycleHeatmap extends StatelessWidget {
     final store = StoreScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final days = calendarDays(cycle, store.history);
     final perRow = math.max(1, cycle.microDays);
     const weekdays = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
@@ -27,7 +26,7 @@ class CycleHeatmap extends StatelessWidget {
       };
       final strong = d.status == 'missed' || d.status == 'done' || d.offPlan;
       final border = today
-          ? (dark ? Colors.white : Colors.black)
+          ? cs.onSurface
           : (planned && d.sessions.isEmpty ? cs.primary : cs.onSurface.withValues(alpha: 0.28));
       final label = const {
         'done': 'Completed',
@@ -39,7 +38,7 @@ class CycleHeatmap extends StatelessWidget {
       }[d.status];
       return Tooltip(
         message:
-            '${fmtRecent(d.date, store.settings.unit, includeTime: false)} · ${store.template(d.templateId)?.name ?? 'Rest'} · $label'
+            '${fmtRecent(d.date, includeTime: false)} · ${store.template(d.templateId)?.name ?? 'Rest'} · $label'
             '${d.offPlan && d.status != 'moved_done' ? ' · Workout completed off schedule' : ''}',
         child: InkWell(
           onTap: () => _dayActions(context, store, d),
@@ -135,13 +134,13 @@ class CycleHeatmap extends StatelessWidget {
       name ?? 'Rest',
       switch (d.status) {
         'missed' => 'Missed',
-        'moved' => 'Moved to ${fmtRecent(d.movedTo!, store.settings.unit, includeTime: false)}',
+        'moved' => 'Moved to ${fmtRecent(d.movedTo!, includeTime: false)}',
         'moved_done' => 'Completed off schedule',
         'done' => 'Completed as planned',
         _ => '',
       },
       for (final (from, id) in d.incoming)
-        '${store.template(id)?.name ?? 'Workout'} · moved from ${fmtRecent(from, store.settings.unit, includeTime: false)}',
+        '${store.template(id)?.name ?? 'Workout'} · moved from ${fmtRecent(from, includeTime: false)}',
     ].where((x) => x.isNotEmpty).toList();
 
     final action = await showModalBottomSheet<String>(
@@ -158,10 +157,7 @@ class CycleHeatmap extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      fmtRecent(d.date, store.settings.unit, includeTime: false),
-                      style: Theme.of(sheet).textTheme.titleLarge,
-                    ),
+                    Text(fmtRecent(d.date, includeTime: false), style: Theme.of(sheet).textTheme.titleLarge),
                     for (final line in details) Text(line),
                   ],
                 ),
@@ -273,10 +269,7 @@ class CycleHeatmap extends StatelessWidget {
                 child: Text('Choose recorded workout', style: Theme.of(sheet).textTheme.titleLarge),
               ),
               for (final s in options)
-                ListTile(
-                  title: Text(fmtRecent(s.startedAt, store.settings.unit)),
-                  onTap: () => Navigator.pop(sheet, s.id),
-                ),
+                ListTile(title: Text(fmtRecent(s.startedAt)), onTap: () => Navigator.pop(sheet, s.id)),
             ],
           ),
         ),

@@ -230,6 +230,8 @@ class _SessionScreenState extends State<SessionScreen> {
     final store = StoreScope.of(context);
     final session = store.active;
     if (session == null) return const Scaffold();
+    final blocks = exerciseBlocks(session);
+    final steps = {for (final step in sessionSteps(session)) step.set: step};
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -255,7 +257,7 @@ class _SessionScreenState extends State<SessionScreen> {
             tooltip: 'Discard workout',
             style: IconButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             icon: const Icon(Icons.delete_outline_rounded),
             onPressed: () => _discard(store),
@@ -287,11 +289,18 @@ class _SessionScreenState extends State<SessionScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(14, 0, 14, 130),
                   children: [
-                    for (final block in exerciseBlocks(session))
+                    for (final (blockIndex, block) in blocks.indexed)
                       Column(
                         children: [
                           for (final e in block) ...[
-                            _ExerciseBlock(key: ObjectKey(e), exercise: e, screen: this),
+                            _ExerciseBlock(
+                              key: ObjectKey(e),
+                              exercise: e,
+                              screen: this,
+                              steps: steps,
+                              blockIndex: blockIndex,
+                              blockCount: blocks.length,
+                            ),
                             const SizedBox(height: 12),
                           ],
                         ],

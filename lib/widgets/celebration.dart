@@ -92,6 +92,21 @@ class _Particle {
   final String? emoji;
   final double start, end; // fractions of the animation
   final bool round;
+
+  /// The emoji laid out once, on first paint, not on every frame.
+  TextPainter? _glyph;
+  TextPainter? get glyph => emoji == null
+      ? null
+      : _glyph ??= (TextPainter(
+          text: TextSpan(
+            text: emoji,
+            style: TextStyle(fontSize: size * 0.85),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout());
+
+  void dispose() => _glyph?.dispose();
+
   _Particle({
     required this.from,
     required this.to,
@@ -123,17 +138,17 @@ class _ParticlePainter extends CustomPainter {
       canvas.save();
       canvas.translate(pos.dx, pos.dy);
       canvas.rotate(p.rotation + p.spin * local);
-      if (p.emoji != null) {
-        final tp = TextPainter(
-          text: TextSpan(
-            text: p.emoji,
-            style: TextStyle(fontSize: p.size * 0.85),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: opacity));
-        tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
-        canvas.restore();
+      final tp = p.glyph;
+      if (tp != null) {
+        // Colour emoji ignore text colour, so fading needs a layer; a fully opaque emoji (the whole shower)
+        // is painted directly instead of paying for a layer per emoji per frame.
+        if (opacity >= 1) {
+          tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+        } else if (opacity > 0) {
+          canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: opacity));
+          tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+          canvas.restore();
+        }
       } else {
         final paint = Paint()..color = p.color.withValues(alpha: opacity);
         final rect = Rect.fromCenter(center: Offset.zero, width: p.size, height: p.size * (p.round ? 1 : 1.5));
@@ -173,6 +188,9 @@ class _SetConfettiState extends State<SetConfetti> with SingleTickerProviderStat
     final colors = palettes[palette];
     final w = size.width, h = size.height;
     final origin = h - 60;
+    for (final p in _particles) {
+      p.dispose();
+    }
     _particles = [
       for (var i = 0; i < 13 + _rng.nextInt(9); i++)
         () {
@@ -212,6 +230,9 @@ class _SetConfettiState extends State<SetConfetti> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    for (final p in _particles) {
+      p.dispose();
+    }
     _c.dispose();
     super.dispose();
   }
@@ -242,7 +263,7 @@ class WorkoutCelebration extends StatefulWidget {
 
 class _WorkoutCelebrationState extends State<WorkoutCelebration> with SingleTickerProviderStateMixin {
   late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 6000));
-  List<_Particle> _particles = const [];
+  List<_Particle> _shower = const [], _jets = const [];
   String _message = '';
   Color _border = Colors.white;
 
@@ -328,8 +349,19 @@ class _WorkoutCelebrationState extends State<WorkoutCelebration> with SingleTick
             );
           }(),
     ];
+    for (final p in [..._shower, ..._jets]) {
+      p.dispose();
+    }
     setState(() {
-      _particles = particles;
+      // Split once here rather than on every frame.
+      _shower = [
+        for (final p in particles)
+          if (p.start == 0 && p.end == 1) p,
+      ];
+      _jets = [
+        for (final p in particles)
+          if (!(p.start == 0 && p.end == 1)) p,
+      ];
       _message = widget.headline ?? message;
       _border = colors.first;
     });
@@ -338,6 +370,9 @@ class _WorkoutCelebrationState extends State<WorkoutCelebration> with SingleTick
 
   @override
   void dispose() {
+    for (final p in [..._shower, ..._jets]) {
+      p.dispose();
+    }
     _c.dispose();
     super.dispose();
   }
@@ -349,12 +384,10 @@ class _WorkoutCelebrationState extends State<WorkoutCelebration> with SingleTick
       builder: (context, _) {
         if (!_c.isAnimating) return const SizedBox.expand();
         final t = _c.value;
-        final shower = _particles.where((p) => p.start == 0 && p.end == 1).toList();
-        final jets = _particles.where((p) => !(p.start == 0 && p.end == 1)).toList();
         return Stack(
           children: [
-            CustomPaint(size: Size.infinite, painter: _ParticlePainter(shower, t, fade: false)),
-            CustomPaint(size: Size.infinite, painter: _ParticlePainter(jets, t)),
+            CustomPaint(size: Size.infinite, painter: _ParticlePainter(_shower, t, fade: false)),
+            CustomPaint(size: Size.infinite, painter: _ParticlePainter(_jets, t)),
             // Below the status bar and camera cutout, over the top of the page (the "Workout complete" title).
             Positioned(
               top: MediaQuery.paddingOf(context).top + 12,

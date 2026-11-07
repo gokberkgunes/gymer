@@ -8,6 +8,7 @@ import 'package:archive/archive.dart';
 
 import '../models.dart';
 import 'methods.dart';
+import 'progression.dart';
 
 class LegacyData {
   final List<WorkoutTemplate> templates;
@@ -425,7 +426,7 @@ double? _weightIn(String? raw, String? from, String to) {
   final w = _num(raw);
   if (w == null) return null;
   final src = (from ?? '').trim().toLowerCase() == 'lb' ? 'lb' : 'kg';
-  return src == to ? w : (src == 'kg' ? w * 2.2046226218 : w / 2.2046226218);
+  return convertWeight(w, src, to);
 }
 
 SetContext _context(Map<String, String> r) => SetContext(

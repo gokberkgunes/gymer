@@ -63,37 +63,41 @@ class _RecordEffectState extends State<RecordEffect> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final radius = widget.borderRadius ?? context.style.brSmall;
-    final reducedMotion = MediaQuery.disableAnimationsOf(context);
-    return AnimatedBuilder(
-      animation: _controller,
-      child: widget.child,
-      builder: (context, child) {
-        final t = reducedMotion ? 0.4 : _controller.value;
-        // Paint beneath the values so the stronger foil never washes out their contrast.
-        // Keep the tree stable when enabled or undone so fields retain their focus and editing state.
-        return RepaintBoundary(
-          child: CustomPaint(
-            painter: widget.active && widget.enabled
-                ? _RecordHologram(t, cs, radius, widget.outline, widget.edition)
-                : null,
-            child: child,
-          ),
-        );
-      },
+    // The painter repaints itself from the controller; the row on top sits behind its own repaint boundary,
+    // so its fields and icons are not redrawn on every frame of the shimmer. The tree stays the same when the
+    // effect turns on or off, so fields keep their focus and editing state.
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: widget.active && widget.enabled
+            ? _RecordHologram(
+                _controller,
+                MediaQuery.disableAnimationsOf(context),
+                cs,
+                radius,
+                widget.outline,
+                widget.edition,
+              )
+            : null,
+        child: RepaintBoundary(child: widget.child),
+      ),
     );
   }
 }
 
 class _RecordHologram extends CustomPainter {
-  final double t;
+  final Animation<double> motion;
+  final bool reducedMotion;
   final ColorScheme colors;
   final BorderRadius radius;
   final bool outline;
   final AchievementEdition edition;
-  const _RecordHologram(this.t, this.colors, this.radius, this.outline, this.edition);
+  _RecordHologram(this.motion, this.reducedMotion, this.colors, this.radius, this.outline, this.edition)
+    : super(repaint: motion);
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Paint beneath the values so the stronger foil never washes out their contrast.
+    final t = reducedMotion ? 0.4 : motion.value;
     final rect = Offset.zero & size;
     final shape = radius.toRRect(rect);
     final energy = 0.9 + 0.1 * math.cos(t * math.pi * 2);
@@ -218,5 +222,10 @@ class _RecordHologram extends CustomPainter {
 
   @override
   bool shouldRepaint(_RecordHologram old) =>
-      t != old.t || colors != old.colors || radius != old.radius || outline != old.outline || edition != old.edition;
+      motion != old.motion ||
+      reducedMotion != old.reducedMotion ||
+      colors != old.colors ||
+      radius != old.radius ||
+      outline != old.outline ||
+      edition != old.edition;
 }

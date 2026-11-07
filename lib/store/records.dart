@@ -36,6 +36,7 @@ extension AppStoreRecords on AppStore {
     _previousCache.clear();
     _bestCache.clear();
     _comparisonCache.clear();
+    _progressCache.clear();
   }
 
   /// What was done last time, set by set: same workout first, else any workout.

@@ -163,6 +163,7 @@ class _SetRow extends StatelessWidget {
     const restStyle = TextStyle(fontSize: 10, fontWeight: FontWeight.bold, fontFeatures: tabular);
     final Widget? restLabel = nearSet
         ? TickBuilder(
+            anchor: timer.startedAt,
             builder: (_) => Tooltip(
               message: timer.overdue ? 'Rest complete' : 'Rest remaining',
               child: Text(signedRest(timer.remainingSeconds), style: restStyle),
@@ -179,7 +180,7 @@ class _SetRow extends StatelessWidget {
               : cs.primary.withValues(alpha: 0.12)
         : cs.surfaceContainerHigh;
     final fieldFill = Theme.of(context).brightness == Brightness.dark
-        ? Color.lerp(cs.surfaceContainerHigh, Colors.white, 0.07)
+        ? Color.lerp(cs.surfaceContainerHigh, cs.onSurface, 0.07)
         : cs.surface;
 
     final typeButton = Tooltip(
@@ -406,7 +407,7 @@ class _SetRow extends StatelessWidget {
         decoration: BoxDecoration(color: cs.error, borderRadius: st.setTile(position, count)),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 16),
-        child: const Icon(Icons.delete_rounded, color: Colors.white),
+        child: Icon(Icons.delete_rounded, color: cs.onError),
       ),
       onDismissed: (_) => removeSetWithUndo(context, store, e, s),
       child: content,

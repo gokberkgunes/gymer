@@ -110,7 +110,18 @@ extension AppStoreHistory on AppStore {
   List<SetEntry> previousSets(String exercise, [String? templateId]) =>
       _latestSetValues(exercise, templateId, anyWorkout: templateId == null) ?? const [];
 
+  /// Cached until history (or the display unit) changes: History → Exercises asks for every performed
+  /// exercise on every build.
   List<ExercisePoint> progress(String exercise) {
+    _syncHistoryCaches();
+    return _progressCache.putIfAbsent((
+      exercise.toLowerCase(),
+      usesBodyweightProgress(exercise),
+      this.exercise(exercise)?.loadMode,
+    ), () => _progress(exercise));
+  }
+
+  List<ExercisePoint> _progress(String exercise) {
     final points = <ExercisePoint>[];
     final combined = usesBodyweightProgress(exercise);
     for (final s in history.reversed) {

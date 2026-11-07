@@ -39,9 +39,24 @@ class _GymerAppState extends State<GymerApp> {
 
   ThemeData _theme(Brightness b, Settings s) => _themes.putIfAbsent(themeKey(b, s), () => buildTheme(b, s));
 
+  /// What the app root depends on. The root rebuilds only when this changes, not on every keystroke or set:
+  /// screens listen to the store themselves through [StoreScope].
+  Object _rootKey() {
+    final s = widget.store.settings;
+    return (themeKey(Brightness.light, s), s.themeMode, s.uiScale, s.fontScale);
+  }
+
+  late Object _root = _rootKey();
+
+  void _onStore() {
+    final key = _rootKey();
+    if (key != _root) setState(() => _root = key);
+  }
+
   @override
   void initState() {
     super.initState();
+    widget.store.addListener(_onStore);
     final alerts = widget.store.alerts;
     _lifecycle = AppLifecycleListener(
       onPause: widget.store.flush,
@@ -54,6 +69,7 @@ class _GymerAppState extends State<GymerApp> {
 
   @override
   void dispose() {
+    widget.store.removeListener(_onStore);
     _lifecycle.dispose();
     super.dispose();
   }
@@ -62,9 +78,8 @@ class _GymerAppState extends State<GymerApp> {
   Widget build(BuildContext context) {
     return StoreScope(
       store: widget.store,
-      child: ListenableBuilder(
-        listenable: widget.store,
-        builder: (context, _) {
+      child: Builder(
+        builder: (context) {
           final s = widget.store.settings;
           return MaterialApp(
             title: 'Gymer',

@@ -56,8 +56,13 @@ class ExerciseProgressList extends StatelessWidget {
             padding: EdgeInsets.only(bottom: context.style.sp(10)),
             child: () {
               final latest = r.points.last.value;
-              final first = r.points.first.value;
-              final delta = first == 0 ? 0 : (latest - first) / first * 100;
+              // Best of the first few sessions against best of the latest few, so one off day at either end
+              // does not decide the trend.
+              final window = math.max(1, math.min(3, r.points.length ~/ 2));
+              double best(Iterable<ExercisePoint> points) => points.map((p) => p.value).reduce(math.max);
+              final first = best(r.points.take(window));
+              final recent = best(r.points.skip(r.points.length - window));
+              final delta = first == 0 ? 0 : (recent - first) / first * 100;
               return Card(
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
@@ -98,6 +103,7 @@ class ExerciseProgressList extends StatelessWidget {
                           child: CustomPaint(
                             painter: LineChartPainter(
                               values: [for (final p in r.points) p.value],
+                              dates: [for (final p in r.points) p.date],
                               color: cs.primary,
                               fill: false,
                             ),
@@ -199,6 +205,7 @@ class ExerciseProgressScreen extends StatelessWidget {
                         size: Size.infinite,
                         painter: LineChartPainter(
                           values: [for (final p in points) p.value],
+                          dates: [for (final p in points) p.date],
                           color: cs.primary,
                           grid: cs.outlineVariant,
                         ),
@@ -235,7 +242,7 @@ class ExerciseProgressScreen extends StatelessWidget {
                             Expanded(
                               child: Text(sess.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleSmall),
                             ),
-                            Text(fmtRecent(sess.startedAt, unit, includeTime: false), style: t.bodySmall),
+                            Text(fmtRecent(sess.startedAt, includeTime: false), style: t.bodySmall),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -311,11 +318,14 @@ class _RepMaxTable extends StatelessWidget {
 
 class LineChartPainter extends CustomPainter {
   final List<double> values;
+
+  /// When given, points sit at their date along the x axis, so gaps in training show as gaps.
+  final List<DateTime>? dates;
   final Color color;
   final Color? grid;
   final bool fill;
 
-  LineChartPainter({required this.values, required this.color, this.grid, this.fill = true});
+  LineChartPainter({required this.values, this.dates, required this.color, this.grid, this.fill = true});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -326,8 +336,15 @@ class LineChartPainter extends CustomPainter {
     final h = size.height - pad * 2;
 
     final w = size.width - pad * 2;
-    Offset at(int i) =>
-        Offset(pad + (values.length == 1 ? w / 2 : i / (values.length - 1) * w), pad + h - (values[i] - lo) / span * h);
+    final when = dates;
+    final days = when == null || when.length != values.length ? 0 : daysBetween(when.first, when.last);
+    double x(int i) {
+      if (values.length == 1) return w / 2;
+      if (days > 0) return daysBetween(when!.first, when[i]) / days * w;
+      return i / (values.length - 1) * w;
+    }
+
+    Offset at(int i) => Offset(pad + x(i), pad + h - (values[i] - lo) / span * h);
 
     if (grid != null) {
       final gp = Paint()
@@ -376,7 +393,12 @@ class LineChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(LineChartPainter old) =>
-      old.color != color || old.grid != grid || old.fill != fill || !_sameValues(old.values);
+      old.color != color ||
+      old.grid != grid ||
+      old.fill != fill ||
+      !_sameValues(old.values) ||
+      old.dates?.lastOrNull != dates?.lastOrNull ||
+      old.dates?.length != dates?.length;
 
   bool _sameValues(List<double> other) {
     if (other.length != values.length) return false;

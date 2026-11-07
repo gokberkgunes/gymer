@@ -42,6 +42,7 @@ Future<Uint8List> renderWorkoutImage(FinishSummary summary, ThemeData theme) asy
     if (data == null) throw StateError('Could not create workout image.');
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
   } finally {
+    drawing.dispose();
     image?.dispose();
     picture.dispose();
     scaled.dispose();
@@ -56,6 +57,15 @@ class _ShareDrawing {
   final ThemeData theme;
   _ShareDrawing(this.canvas, this.theme);
   ColorScheme get cs => theme.colorScheme;
+
+  /// Every laid-out text, released once the image is rendered.
+  final _painters = <TextPainter>[];
+
+  void dispose() {
+    for (final painter in _painters) {
+      painter.dispose();
+    }
+  }
 
   TextPainter text(
     String value,
@@ -94,6 +104,7 @@ class _ShareDrawing {
       painter = layout(--fontSize);
     }
     painter.paint(canvas, Offset(x, y));
+    _painters.add(painter);
     return painter;
   }
 
@@ -154,6 +165,7 @@ class _ShareDrawing {
         textDirection: TextDirection.ltr,
       )..layout();
       icon.paint(canvas, Offset(margin, y));
+      _painters.add(icon);
       text('PERSONAL BESTS', margin + 26, y + 2, content - 26, size: 12, color: cs.onSurfaceVariant, spacing: 1);
       y += 30;
       for (final best in summary.bests) {

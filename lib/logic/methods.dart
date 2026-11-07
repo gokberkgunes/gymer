@@ -26,14 +26,6 @@ const methodSetTypes = {
 const methodsWithActivation = {'Myo-Reps', 'Rest-Pause', 'Drop Set', 'Mechanical Drop Set', 'Myo-Rep Match'};
 const sameLoadMethods = {'AMRAP', 'Myo-Reps', 'Rest-Pause', 'Mechanical Drop Set', 'Cluster', 'Myo-Rep Match'};
 
-const _continuationType = {
-  'Myo-Reps': 'Myo-set',
-  'Rest-Pause': 'Rest-Pause',
-  'Drop Set': 'Drop Set',
-  'Mechanical Drop Set': 'Mechanical Drop Set',
-  'Myo-Rep Match': 'Myo-Rep Match',
-};
-
 const _methodAliases = {
   '': 'Straight',
   'normal': 'Straight',
@@ -75,7 +67,7 @@ List<String> plannedSetTypes(String method, {required int warmups, required int 
   final types = [for (var i = 0; i < warmups; i++) 'Warm-up'];
   for (var i = 0; i < work; i++) {
     if (methodsWithActivation.contains(method)) {
-      types.add(i == 0 ? 'Activation' : _continuationType[method]!);
+      types.add(i == 0 ? 'Activation' : activationFollowup[method]!);
     } else if (method == 'Cluster') {
       types.add('Cluster Set');
     } else if (method == 'AMRAP') {

@@ -24,24 +24,38 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
   Timer? _restWatch;
+  late final AppStore _store;
   String? _alerted;
 
   @override
   void initState() {
     super.initState();
     // A restored timer that already ran out must not buzz on app launch.
-    final r = StoreScope.read(context).rest;
+    final store = _store = StoreScope.read(context);
+    final r = store.rest;
     if (r != null && r.overdue) _alerted = _key(r.startedAt, r.totalSeconds);
-    _restWatch = Timer.periodic(const Duration(milliseconds: 500), (_) => _checkRest());
+    store.addListener(_syncRestWatch);
+    _syncRestWatch();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) reportUnreadableData(context);
     });
   }
 
+  /// The rest-over check only runs while a rest timer exists, instead of waking the app twice a second forever.
+  void _syncRestWatch() {
+    final resting = _store.rest != null;
+    if (resting && _restWatch == null) {
+      _restWatch = Timer.periodic(const Duration(milliseconds: 500), (_) => _checkRest());
+    } else if (!resting && _restWatch != null) {
+      _restWatch!.cancel();
+      _restWatch = null;
+    }
+  }
+
   String _key(DateTime start, int total) => '${start.microsecondsSinceEpoch}/$total';
 
   void _checkRest() {
-    final store = StoreScope.read(context);
+    final store = _store = StoreScope.read(context);
     final r = store.rest;
     if (r == null || !r.overdue) return;
     final key = _key(r.startedAt, r.totalSeconds);
@@ -54,6 +68,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    _store.removeListener(_syncRestWatch);
     _restWatch?.cancel();
     super.dispose();
   }
@@ -98,11 +113,15 @@ class _HomeShellState extends State<HomeShell> {
                 child: IndexedStack(
                   index: _tab,
                   children: [
-                    TrainScreen(onOpenCycle: () => _select(2)),
-                    const HistoryScreen(),
-                    const CycleScreen(),
-                    const RepMaxScreen(asTab: true),
-                    const SettingsScreen(),
+                    for (final (i, tab) in [
+                      TrainScreen(onOpenCycle: () => _select(2)),
+                      const HistoryScreen(),
+                      const CycleScreen(),
+                      const RepMaxScreen(asTab: true),
+                      const SettingsScreen(),
+                    ].indexed)
+                      // Hidden tabs keep their state but not their animations (e.g. Train's rainbow border).
+                      TickerMode(enabled: i == _tab, child: tab),
                   ],
                 ),
               ),

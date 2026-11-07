@@ -243,7 +243,7 @@ class _SetPreview extends StatelessWidget {
 
     // Mirrors the workout screen's set rows: same tile colours, input boxes and rounded-square check.
     final fieldFill = Theme.of(context).brightness == Brightness.dark
-        ? Color.lerp(cs.surfaceContainerHigh, Colors.white, 0.07)
+        ? Color.lerp(cs.surfaceContainerHigh, cs.onSurface, 0.07)
         : cs.surface;
     Widget box(String text, bool done) => Expanded(
       child: Container(

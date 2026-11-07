@@ -215,14 +215,13 @@ const _monthsLong = [
   'December',
 ];
 
-/// "2 November" (+ year when not this year), with the time in the user's
-/// convention: 24-hour for kg, 12-hour for lb.
-String fmtRecent(DateTime d, String unit, {bool includeTime = true}) {
+/// "2 November" (+ year when not this year), with the time in the phone's own 12- or 24-hour setting.
+String fmtRecent(DateTime d, {bool includeTime = true}) {
   var text = '${d.day} ${_monthsLong[d.month - 1]}';
   if (d.year != DateTime.now().year) text += ' ${d.year}';
   if (!includeTime) return text;
   final String time;
-  if (unit == 'lb') {
+  if (!WidgetsBinding.instance.platformDispatcher.alwaysUse24HourFormat) {
     final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
     final suffix = d.hour < 12 ? 'AM' : 'PM';
     time = d.minute == 0 ? '$h$suffix' : '$h:${d.minute.toString().padLeft(2, '0')}$suffix';

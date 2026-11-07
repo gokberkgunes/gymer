@@ -32,6 +32,7 @@ class FloatingRestTimer extends StatelessWidget {
     return Tooltip(
       message: '${r.overdue ? 'Rest complete' : 'Rest'} · ${r.exercise}\nTap to open the workout · hold for countdown',
       child: TickBuilder(
+        anchor: r.startedAt,
         builder: (context) {
           final overdue = r.overdue;
           final color = overdue ? cs.error : cs.primary;

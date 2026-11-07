@@ -147,6 +147,7 @@ extension AppStoreCatalog on AppStore {
         }
       }
       if (rest?.exercise == from) rest = rest!.copyWith(exercise: updated.name);
+      _historyVersion++; // names in history changed in place: cached lookups must be rebuilt
     }
     // A new default context clears inherited template defaults that no longer match.
     if (previous != null && previous.context != updated.context) {

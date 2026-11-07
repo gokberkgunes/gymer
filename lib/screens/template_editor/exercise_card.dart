@@ -75,7 +75,7 @@ class _ExerciseCard extends StatelessWidget {
     final st = context.style;
     // Inputs one shade lighter than the set tile, as in the workout screen.
     final fieldFill = Theme.of(context).brightness == Brightness.dark
-        ? Color.lerp(cs.surfaceContainerHigh, Colors.white, 0.07)
+        ? Color.lerp(cs.surfaceContainerHigh, cs.onSurface, 0.07)
         : cs.surface;
     final e = exercise;
     final info = store.exercise(e.name);
