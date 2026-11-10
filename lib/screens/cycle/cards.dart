@@ -333,14 +333,23 @@ class _Schedule extends StatelessWidget {
     final store = StoreScope.of(context);
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
+    // A seven-day microcycle repeats on the same weekdays, so its days are named and listed Monday first.
+    final weekly = cycle.microDays == 7;
+    DateTime dateOf(int d) => addDays(cycle.start, d - 1);
+    final days = [for (var d = 1; d <= cycle.microDays; d++) d];
+    if (weekly) days.sort((a, b) => dateOf(a).weekday.compareTo(dateOf(b).weekday));
     return Card(
       child: Column(
         children: [
-          for (var d = 1; d <= cycle.microDays; d++) ...[
-            if (d > 1) const Divider(indent: 16, endIndent: 16),
+          for (final (i, d) in days.indexed) ...[
+            if (i > 0) const Divider(indent: 16, endIndent: 16),
             InkWell(
               onTap: () async {
-                final id = await pickTemplate(context, cycle.schedule[d], title: 'Schedule day $d');
+                final id = await pickTemplate(
+                  context,
+                  cycle.schedule[d],
+                  title: weekly ? 'Schedule ${fmtWeekday(dateOf(d))} (day $d)' : 'Schedule day $d',
+                );
                 if (id == null) return;
                 if (id.isEmpty) {
                   cycle.schedule.remove(d);
@@ -353,7 +362,18 @@ class _Schedule extends StatelessWidget {
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: context.style.sp(12)),
                 child: Row(
                   children: [
-                    SizedBox(width: 56, child: Text('Day $d', style: t.labelSmall)),
+                    SizedBox(
+                      width: 56,
+                      child: weekly
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(fmtWeekday(dateOf(d)), style: t.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+                                Text('Day $d', style: t.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                              ],
+                            )
+                          : Text('Day $d', style: t.labelSmall),
+                    ),
                     Expanded(
                       child: Text(
                         store.template(cycle.schedule[d])?.name ?? 'Rest',
@@ -512,8 +532,9 @@ class _Volume extends StatelessWidget {
               const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text(
-                'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end starts at MRV. '
-                'The small mark is your planned weekly sets.',
+                'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end is the MRV '
+                'range. The numbers beneath are where these zones begin and end; the small mark is your planned '
+                'weekly sets.',
               ),
               const SizedBox(height: 12),
               if (l == null)
@@ -542,8 +563,9 @@ class _Volume extends StatelessWidget {
   }
 }
 
-/// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath. No chevrons or
-/// labels: the dialog behind the tap explains the bar.
+/// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath and the landmark
+/// boundaries as small muted numbers under it. No names, legends or chevrons: the dialog behind the tap explains
+/// the bar.
 class _VolumeRow extends StatelessWidget {
   final String muscle, label;
   final double sets;
@@ -588,12 +610,31 @@ class _VolumeRow extends StatelessWidget {
               ],
             ),
             if (l != null && l.mavRange != null) ...[
-              const SizedBox(height: 6),
-              SizedBox(
-                height: 10,
-                child: CustomPaint(
-                  painter: _LandmarkBar(sets: sets, landmark: l, colors: cs),
-                ),
+              const SizedBox(height: 2),
+              Builder(
+                builder: (context) {
+                  final scaler = MediaQuery.textScalerOf(context);
+                  final style = t.labelSmall!.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular);
+                  final numbers = TextPainter(
+                    text: TextSpan(text: '0', style: style),
+                    textScaler: scaler,
+                    textDirection: TextDirection.ltr,
+                  )..layout();
+                  return SizedBox(
+                    // The planned sets above the track, the landmark numbers below it.
+                    height: numbers.height + 2 + _LandmarkBar.trackHeight + 2 + numbers.height,
+                    child: CustomPaint(
+                      painter: _LandmarkBar(
+                        sets: sets,
+                        landmark: l,
+                        colors: cs,
+                        numberStyle: style,
+                        plannedColor: numberColor,
+                        textScaler: scaler,
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ],
@@ -603,20 +644,49 @@ class _VolumeRow extends StatelessWidget {
   }
 }
 
-/// A 4 px track: faint from MEV to MAV, solid across MAV, warning from MRV on, and a small mark at [sets].
+/// A 4 px track: faint from MEV to MAV, solid across MAV, warning across MRV to the bar's end, and a small mark at
+/// [sets], with the planned sets (rounded) written above the mark. Beneath the track, 0 and each zone boundary
+/// (MEV start, MAV start and end, MRV start and end) is a small number centred on its position; a number that
+/// would touch its neighbour is left out.
 class _LandmarkBar extends CustomPainter {
+  static const trackHeight = 10.0;
   final double sets;
   final Landmark landmark;
   final ColorScheme colors;
-  const _LandmarkBar({required this.sets, required this.landmark, required this.colors});
+  final TextStyle numberStyle;
+  final Color plannedColor;
+  final TextScaler textScaler;
+  const _LandmarkBar({
+    required this.plannedColor,
+    required this.sets,
+    required this.landmark,
+    required this.colors,
+    required this.numberStyle,
+    required this.textScaler,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final mev = landmark.mevRange, mav = landmark.mavRange!, mrv = landmark.mrvRange;
-    // Room past the last landmark (or the planned sets, if higher) so the end of the scale never looks like a wall.
-    final top = math.max(mrv?.$2 ?? mav.$2 * 1.25, sets) * 1.08;
+    // The scale ends exactly at the top of MRV, so its number sits at the bar's right end. Planned sets beyond it
+    // stretch the scale a little past the mark; without an MRV, the track runs a quarter past MAV.
+    final end = mrv?.$2 ?? mav.$2 * 1.25;
+    final top = sets > end ? sets * 1.04 : end;
     double x(double v) => (v / top).clamp(0.0, 1.0) * size.width;
-    final mid = size.height / 2;
+    TextPainter text(String s, TextStyle style) => TextPainter(
+      text: TextSpan(text: s, style: style),
+      textScaler: textScaler,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    double centred(double at, TextPainter tp) =>
+        (at - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)).toDouble();
+
+    final planned = text('${sets.round()}', numberStyle.copyWith(color: plannedColor, fontWeight: FontWeight.w700));
+    planned.paint(canvas, Offset(centred(x(sets), planned), 0));
+    canvas
+      ..save()
+      ..translate(0, planned.height + 2);
+    const mid = trackHeight / 2;
     final track = RRect.fromRectAndRadius(Rect.fromLTRB(0, mid - 2, size.width, mid + 2), const Radius.circular(2));
     canvas
       ..save()
@@ -628,16 +698,34 @@ class _LandmarkBar extends CustomPainter {
     zone(mav.$1, mav.$2, colors.primary.withValues(alpha: 0.6));
     if (mrv != null) zone(mrv.$1, top, colors.warning.withValues(alpha: 0.45));
     canvas.restore();
+
+    final boundaries = <double>{0, ?mev?.$1, mav.$1, mav.$2, ?mrv?.$1, ?mrv?.$2}.toList()..sort();
+    var lastRight = double.negativeInfinity;
+    for (final v in boundaries) {
+      final tp = text(v == v.roundToDouble() ? '${v.round()}' : '$v', numberStyle);
+      final left = centred(x(v), tp);
+      if (left < lastRight + 4) continue;
+      tp.paint(canvas, Offset(left, trackHeight + 2));
+      lastRight = left + tp.width;
+    }
+
     final mark = x(sets).clamp(1.5, size.width - 1.5);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(mark, mid), width: 3, height: size.height),
+        Rect.fromCenter(center: Offset(mark, mid), width: 3, height: trackHeight),
         const Radius.circular(1.5),
       ),
       Paint()..color = colors.onSurface,
     );
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_LandmarkBar old) => old.sets != sets || old.landmark != landmark || old.colors != colors;
+  bool shouldRepaint(_LandmarkBar old) =>
+      old.sets != sets ||
+      old.landmark != landmark ||
+      old.colors != colors ||
+      old.numberStyle != numberStyle ||
+      old.plannedColor != plannedColor ||
+      old.textScaler != textScaler;
 }

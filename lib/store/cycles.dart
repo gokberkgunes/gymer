@@ -188,7 +188,9 @@ extension AppStoreCycles on AppStore {
               canonicalSetType(previous.type) == canonicalSetType(set.type) &&
               previous.groupStart == set.groupStart;
           final weight = compatible
-              ? convertWeight(previous.weight ?? 0, unit!, settings.unit)
+              ? (unit == settings.unit
+                    ? previous.weight ?? 0
+                    : gymLoad(planned.name, convertWeight(previous.weight ?? 0, unit!, settings.unit), settings.unit))
               : reference == null
               ? set.weight
               : null;

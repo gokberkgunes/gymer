@@ -1,6 +1,7 @@
 part of '../cycle.dart';
 
-/// Training heatmap: green as planned, blue on another day, red missed.
+/// Training heatmap: green as planned, blue on another day, red missed (each tile's tooltip says which). A
+/// seven-day microcycle is laid out as calendar weeks from Monday, whatever weekday the cycle started on.
 class CycleHeatmap extends StatelessWidget {
   final Mesocycle cycle;
   final bool compact;
@@ -66,42 +67,71 @@ class CycleHeatmap extends StatelessWidget {
       );
     }
 
+    // Rows of tiles (null where a calendar week reaches outside the cycle) and each row's label.
+    final weekly = cycle.microDays == 7 && days.isNotEmpty;
+    final cells = <CycleDay?>[if (weekly) ...List<CycleDay?>.filled(days.first.date.weekday - 1, null), ...days];
+    if (weekly) cells.addAll(List<CycleDay?>.filled((7 - cells.length % 7) % 7, null));
+    final tileRows = [
+      for (var i = 0; i < cells.length; i += perRow) cells.sublist(i, math.min(i + perRow, cells.length)),
+    ];
+    final labels = [for (var r = 0; r < tileRows.length; r++) '${cycle.periodShort}${r + 1}'];
+    if (weekly && days.first.date.weekday != DateTime.monday) {
+      // Calendar weeks straddle two microcycles: label each with the one it mostly holds, and when two
+      // neighbouring rows would share a label, keep it on the row holding more of that microcycle.
+      int count(int r, int micro) => tileRows[r].where((d) => d?.micro == micro).length;
+      final majority = [
+        for (final row in tileRows)
+          () {
+            final micros = [for (final d in row) ?d?.micro];
+            return micros.reduce(
+              (a, b) => micros.where((m) => m == a).length >= micros.where((m) => m == b).length ? a : b,
+            );
+          }(),
+      ];
+      for (var r = 0; r < tileRows.length; r++) {
+        labels[r] = '${cycle.periodShort}${majority[r]}';
+      }
+      for (var r = 0; r + 1 < tileRows.length; r++) {
+        if (majority[r] != majority[r + 1]) continue;
+        if (count(r, majority[r]) < count(r + 1, majority[r])) {
+          labels[r] = '';
+        } else {
+          labels[r + 1] = '';
+        }
+      }
+    }
+
     List<Widget> rows(double cell) => <Widget>[
       Row(
         children: [
           const SizedBox(width: 28),
-          for (final d in days.take(perRow))
+          for (final (i, d) in tileRows.first.indexed)
             Container(
               width: cell + 4,
               alignment: Alignment.center,
               child: Text(
-                weekdays[d.date.weekday - 1],
+                weekly ? weekdays[i] : weekdays[d!.date.weekday - 1],
                 style: t.labelSmall?.copyWith(fontSize: compact ? 9.5 : 10, fontWeight: FontWeight.w600),
               ),
             ),
         ],
       ),
-      for (var r = 0; r * perRow < days.length; r++)
+      for (final (r, row) in tileRows.indexed)
         Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Row(
             children: [
               SizedBox(
                 width: 28,
-                child: Text(
-                  '${cycle.periodShort}${r + 1}',
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-                ),
+                child: Text(labels[r], style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
               ),
-              for (final d in days.skip(r * perRow).take(perRow))
-                Padding(padding: const EdgeInsets.only(right: 4), child: tile(d, cell)),
+              for (final d in row)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: d == null ? SizedBox.square(dimension: cell) : tile(d, cell),
+                ),
             ],
           ),
-        ),
-      if (!compact)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text('Green: as planned  ·  Blue: another day  ·  Red: missed', style: t.bodySmall),
         ),
     ];
     Widget grid(double cell) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows(cell));

@@ -35,6 +35,9 @@ String fmtVolume(double v) {
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/// "Mon", "Tue" and so on.
+String fmtWeekday(DateTime d) => _weekdays[d.weekday - 1];
+
 String fmtDate(DateTime d) => '${_weekdays[d.weekday - 1]}, ${d.day} ${_months[d.month - 1]}';
 
 /// "1 set", "2 sets".

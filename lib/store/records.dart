@@ -2,8 +2,15 @@ part of '../store.dart';
 
 /// Last-time values, personal bests and finish summaries.
 extension AppStoreRecords on AppStore {
-  SetEntry _inUnit(SetEntry s, String from, [String? to]) => SetEntry(
-    weight: s.weight == null ? null : convertWeight(s.weight!, from, to ?? settings.unit),
+  /// [s] in unit [to] (default: the settings unit). When [gym] names the exercise, a converted weight is
+  /// rounded to a load that exercise can actually be loaded with ([gymLoad]); comparisons, records and charts
+  /// leave it out and keep the exact conversion.
+  SetEntry _inUnit(SetEntry s, String from, [String? to, String? gym]) => SetEntry(
+    weight: s.weight == null
+        ? null
+        : gym != null && from != (to ?? settings.unit)
+        ? gymLoad(gym, convertWeight(s.weight!, from, to ?? settings.unit), to ?? settings.unit)
+        : convertWeight(s.weight!, from, to ?? settings.unit),
     reps: s.reps,
     rir: s.rir,
     done: s.done,
@@ -24,7 +31,7 @@ extension AppStoreRecords on AppStore {
       if (!anyWorkout && s.templateId != templateId) continue;
       final e = s.exercises.where((e) => e.name.toLowerCase() == exercise.toLowerCase()).firstOrNull;
       if (e == null || !e.sets.any((x) => x.done)) continue;
-      return [for (final set in e.sets) _inUnit(set, s.unit)];
+      return [for (final set in e.sets) _inUnit(set, s.unit, null, exercise)];
     }
     return null;
   }

@@ -230,8 +230,11 @@ void main() {
     store.updateSettings((s) => s.unit = 'lb');
     // Plans follow the unit; finished workouts keep what was recorded and are converted when read.
     expect((store.history.first.unit, store.history.first.exercises.first.sets.first.weight), ('kg', 100));
-    expect(store.lastTimeSets(press.name, legs.id)!.first.weight, closeTo(220.46, 0.01));
-    expect(press.sets.first.weight, closeTo(220.46, 0.01));
+    expect(store.lastTimeSets(press.name, legs.id)!.first.weight, 220);
+    // Plans become loads the gym can make in the new unit, never 220.46, and switching back restores 100 kg.
+    expect(press.sets.first.weight, 220);
+    store.updateSettings((s) => s.unit = 'kg');
+    expect(press.sets.first.weight, 100);
   });
 
   test('records, last-time values, set undo and exercise moves', () async {

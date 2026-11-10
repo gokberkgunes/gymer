@@ -42,7 +42,7 @@ extension AppStoreSessionStart on AppStore {
           .where((e) => e.name.toLowerCase() == exercise.toLowerCase() && e.method == method)
           .firstOrNull;
       if (e == null || !e.sets.any((x) => x.done)) continue;
-      final sets = [for (final x in e.sets) _inUnit(x, s.unit)];
+      final sets = [for (final x in e.sets) _inUnit(x, s.unit, null, exercise)];
       if (s.templateId == templateId) return sets;
       fallback ??= sets;
     }
@@ -135,7 +135,10 @@ extension AppStoreSessionStart on AppStore {
               weight != null &&
               weight.isFinite &&
               weight > 0) {
-            return convertWeight(weight, session.unit, active?.unit ?? settings.unit);
+            final unit = active?.unit ?? settings.unit;
+            return session.unit == unit
+                ? weight
+                : gymLoad(exercise.name, convertWeight(weight, session.unit, unit), unit);
           }
         }
       }
@@ -310,7 +313,7 @@ extension AppStoreSessionStart on AppStore {
       name: name,
       method: method,
       loadMode: starting.loadMode,
-      sets: [for (final set in starting.sets) _inUnit(set, cycle.startingLoadUnit, session.unit)],
+      sets: [for (final set in starting.sets) _inUnit(set, cycle.startingLoadUnit, session.unit, name)],
     );
   }
 
@@ -429,7 +432,8 @@ extension AppStoreSessionStart on AppStore {
       final reps = method == 'Cluster'
           ? clusterTargetReps
           : method == 'Straight'
-          ? info?.repMin ?? lowRepLimit // bottom of the range, as calibrationRecommendation
+          ? info?.repMin ??
+                lowRepLimit // bottom of the range, as calibrationRecommendation
           : calibrationTargetReps;
       return Calibration(starting.weight!, reps, session.targetRir, method != 'Cluster');
     }
@@ -444,7 +448,7 @@ extension AppStoreSessionStart on AppStore {
           final straightFallback =
               method != 'Straight' && method != 'Cluster' && x.method == 'Straight' && isStraightType(set.type);
           if (sameMethod || straightFallback) {
-            latest = _inUnit(set, s.unit);
+            latest = _inUnit(set, s.unit, null, name);
             break search;
           }
         }
@@ -541,7 +545,11 @@ extension AppStoreSessionStart on AppStore {
       var r = i < refWork.length ? refWork[i] : null;
       final context = contextFor(te.name, ts);
       if (r != null && (!r.done || r.context != context)) r = null;
-      final refWeight = r?.weight == null ? null : convertWeight(r!.weight!, refSession!.unit, session.unit);
+      final refWeight = r?.weight == null
+          ? null
+          : refSession!.unit == session.unit
+          ? r!.weight!
+          : gymLoad(te.name, convertWeight(r!.weight!, refSession.unit, session.unit), session.unit);
       final refReps = r?.reps;
       final weight = eligible && refWeight != null && refWeight > 0 && (refReps ?? 0) > 0
           ? recoveryWeight(refWeight, c.deloadLoadPct, practicalWeightStep(refWeight, session.unit, step))

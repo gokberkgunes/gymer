@@ -187,43 +187,41 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
     await startPlanned(context, t.id);
   }
 
-  Future<void> _menu() async {
-    final t = widget.template;
-    final hasSets = t.exercises.any((e) => e.sets.isNotEmpty);
+  /// Start, Edit, Duplicate and History, shared by the card's menu button and long press.
+  List<(String, IconData, String)> get _actions => [
+    if (widget.template.exercises.any((e) => e.sets.isNotEmpty)) ('start', Icons.play_arrow_rounded, 'Start'),
+    ('edit', Icons.edit_rounded, 'Edit'),
+    ('duplicate', Icons.copy_rounded, 'Duplicate'),
+    ('history', Icons.history_rounded, 'History'),
+  ];
+
+  Future<void> _sheet() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (hasSets)
-              ListTile(
-                leading: const Icon(Icons.play_arrow_rounded),
-                title: const Text('Start'),
-                onTap: () => Navigator.pop(sheet, 'start'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.edit_rounded),
-              title: const Text('Edit'),
-              onTap: () => Navigator.pop(sheet, 'edit'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.history_rounded),
-              title: const Text('History'),
-              onTap: () => Navigator.pop(sheet, 'history'),
-            ),
+            for (final (value, icon, label) in _actions)
+              ListTile(leading: Icon(icon), title: Text(label), onTap: () => Navigator.pop(sheet, value)),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (mounted && choice != null) _act(choice);
+  }
+
+  void _act(String choice) {
+    final t = widget.template;
     switch (choice) {
       case 'start':
         unawaited(_start());
       case 'edit':
         editTemplate(context, t);
+      case 'duplicate':
+        editTemplate(context, StoreScope.read(context).duplicateTemplate(t));
       case 'history':
-        unawaited(Navigator.of(context).push(MaterialPageRoute(builder: (_) => HistoryScreen(templateId: t.id))));
+        unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => HistoryScreen(templateId: t.id))));
     }
   }
 
@@ -256,9 +254,9 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
       child: InkWell(
         borderRadius: st.br,
         onTap: _start,
-        onLongPress: _menu,
+        onLongPress: _sheet,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(16, st.sp(16), 16, st.sp(16)),
+          padding: EdgeInsets.fromLTRB(16, st.sp(16), 8, st.sp(16)),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -312,15 +310,40 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
                   ],
                 ),
               ),
-              // Only real dates; never-done workouts stay clean. Edit is in the long-press menu.
+              // Only real dates; never-done workouts stay clean. The small menu sits level with the name.
               if (ago != null) ...[
                 const SizedBox(width: 8),
-                // Level with the workout's name, not floating in the middle of the tile.
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(ago, style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+                SizedBox(
+                  height: 24,
+                  child: Center(
+                    child: Text(ago, style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+                  ),
                 ),
               ],
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 28,
+                height: 24,
+                child: PopupMenuButton<String>(
+                  tooltip: 'Workout actions',
+                  padding: EdgeInsets.zero,
+                  iconSize: 20,
+                  icon: Icon(Icons.more_vert_rounded, color: cs.onSurfaceVariant),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(28, 24),
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onSelected: _act,
+                  itemBuilder: (_) => [
+                    for (final (value, icon, label) in _actions)
+                      PopupMenuItem(
+                        value: value,
+                        child: Row(children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)]),
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),

@@ -12,12 +12,13 @@ extension AppStoreCatalog on AppStore {
     changed();
   }
 
-  /// Plans follow the new unit: workout templates and the workout in progress, rounded to two decimals with
-  /// conversion noise snapped away. Finished workouts keep the unit they were recorded in; every reader converts
+  /// Plans follow the new unit: workout templates and the workout in progress. Each load becomes the nearest one
+  /// the exercise can be loaded with in the new unit ([gymLoad]), so 75 kg becomes 165 lb rather than 165.35.
+  /// Bodyweight keeps one decimal. Finished workouts keep the unit they were recorded in; every reader converts
   /// with `session.unit`, so history is never rewritten (repeated toggles would otherwise compound rounding).
   void _convertAllWeights(String from, String to) {
-    double? c(double? w, String src) =>
-        w == null ? null : double.parse(snapWeight(convertWeight(w, src, to)).toStringAsFixed(2));
+    double? c(double? w, String src, String name) =>
+        w == null || src == to ? w : gymLoad(name, convertWeight(w, src, to), to);
 
     void session(Session s) {
       final src = s.unit;
@@ -25,19 +26,20 @@ extension AppStoreCatalog on AppStore {
       for (final e in [...s.exercises, ...s.warmupExercises]) {
         for (final set in e.sets) {
           set
-            ..weight = c(set.weight, src)
-            ..hintWeight = c(set.hintWeight, src);
+            ..weight = c(set.weight, src, e.name)
+            ..hintWeight = c(set.hintWeight, src, e.name);
         }
       }
       s.unit = to;
-      s.bodyweight = c(s.bodyweight, src);
+      final bodyweight = s.bodyweight;
+      s.bodyweight = bodyweight == null ? null : (convertWeight(bodyweight, src, to) * 10).roundToDouble() / 10;
     }
 
     if (active != null) session(active!);
     for (final t in templates) {
       for (final e in t.exercises) {
         for (final s in e.sets) {
-          s.weight = c(s.weight, from);
+          s.weight = c(s.weight, from, e.name);
         }
       }
     }
@@ -174,6 +176,23 @@ extension AppStoreCatalog on AppStore {
     return eq == null ? null : (unit == 'lb' ? eq.$2 : eq.$1);
   }
 
+  /// The load nearest [weight] that [name] can be loaded with in [unit]: the active plate inventory for plate
+  /// exercises (when [unit] is the settings unit), otherwise a multiple of the exercise's increment. Used when a
+  /// load changes unit, so a converted weight is always one the gym can make, written without float noise.
+  double gymLoad(String name, double weight, String unit) {
+    if (!weight.isFinite || weight <= 0) return weight;
+    if (unit == settings.unit && platesApply(name)) {
+      final plan = plates(weight, name: name);
+      final options = [?plan.exact?.total, ?plan.below?.total, ?plan.above?.total];
+      if (options.isNotEmpty) {
+        final nearest = options.reduce((a, b) => (b - weight).abs() < (a - weight).abs() ? b : a);
+        return double.parse(nearest.toStringAsFixed(2));
+      }
+    }
+    final step = incrementFor(name, unit) ?? practicalWeightStep(weight, unit);
+    return double.parse(math.max(step, (weight / step).round() * step).toStringAsFixed(2));
+  }
+
   /// Whether [name] is loaded with plates (barbell or plate-loaded), so the plate calculator applies.
   bool platesApply(String name) => usesPlates(exercise(name)?.equipment ?? '');
 
@@ -221,6 +240,10 @@ extension AppStoreCatalog on AppStore {
 
   WorkoutTemplate newTemplate() =>
       WorkoutTemplate(id: 'W${DateTime.now().microsecondsSinceEpoch}', name: '', exercises: []);
+
+  /// An unsaved copy of [t] under a new id, named after it with " copy" added; it is added only when its editor saves it.
+  WorkoutTemplate duplicateTemplate(WorkoutTemplate t) =>
+      WorkoutTemplate.fromJson({...t.toJson(), 'id': newTemplate().id, 'name': t.name.isEmpty ? '' : '${t.name} copy'});
 
   WorkoutTemplate? template(String? id) => templates.where((t) => t.id == id).firstOrNull;
 
