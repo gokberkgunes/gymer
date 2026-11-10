@@ -97,6 +97,23 @@ class _WorkoutSettings extends StatelessWidget {
             subtitle: 'Fold an exercise once its sets are done',
           ),
         ]),
+        const SectionLabel('Workout editor'),
+        _group([
+          _switch(
+            context,
+            'Weekly sets button',
+            s.editorWeeklySets,
+            (x, v) => x.editorWeeklySets = v,
+            subtitle: 'A chart button in the editor shows weekly sets per muscle',
+          ),
+          _switch(
+            context,
+            'Weekly sets on exercises',
+            s.editorMuscleTotals,
+            (x, v) => x.editorMuscleTotals = v,
+            subtitle: 'Each exercise shows its muscles’ weekly sets',
+          ),
+        ]),
         const SectionLabel('Customisation'),
         _group([
           _row(

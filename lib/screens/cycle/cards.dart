@@ -452,7 +452,6 @@ class _Volume extends StatelessWidget {
       for (final m in volume.keys)
         if (!rpLandmarks.containsKey(m)) m,
     ];
-    String n(double v) => v.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
     final protocols = volume.values.any((v) => v.direct.hasProtocols || v.indirect.hasProtocols);
     return Card(
       child: Padding(
@@ -476,14 +475,7 @@ class _Volume extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 4),
-            for (final m in names)
-              _VolumeRow(
-                muscle: m,
-                sets: volume[m]!.sets,
-                label: n(volume[m]!.sets),
-                landmark: rpLandmarks[m],
-                onTap: () => _landmarkInfo(context, m),
-              ),
+            for (final m in names) MuscleVolumeRow(muscle: m, sets: volume[m]!.sets),
             if (protocols) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
@@ -505,94 +497,97 @@ class _Volume extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _landmarkInfo(BuildContext context, String muscle) {
-    final l = rpLandmarks[muscle];
-    showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(muscle),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text(
-                'MV: maintenance volume. MEV: minimum effective volume. MAV: maximum adaptive volume. '
-                'MRV: maximum recoverable volume. Values are hard sets per week.',
-              ),
+/// The RP landmarks of [muscle] and how to read its weekly-sets bar.
+void showLandmarkInfo(BuildContext context, String muscle) {
+  final l = rpLandmarks[muscle];
+  showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(muscle),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+              'MV: maintenance volume. MEV: minimum effective volume. MAV: maximum adaptive volume. '
+              'MRV: maximum recoverable volume. Values are hard sets per week.',
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
+              'set, so it may not be directly comparable to these ranges.',
+            ),
+            const SizedBox(height: 8),
+            const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+              'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end is the MRV '
+              'range. The numbers beneath are where these zones begin and end; the small mark is your planned '
+              'weekly sets.',
+            ),
+            const SizedBox(height: 12),
+            if (l == null)
+              const Text('No RP landmark is available for this muscle.')
+            else ...[
+              const Text('RP volume landmarks', style: TextStyle(fontWeight: FontWeight.bold)),
+              for (final (k, v) in [('MV', l.mv), ('MEV', l.mev), ('MAV', l.mav), ('MRV', l.mrv)])
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 54,
+                      child: Text(k, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    Text(v),
+                  ],
+                ),
               const SizedBox(height: 8),
-              const Text(
-                'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
-                'set, so it may not be directly comparable to these ranges.',
-              ),
-              const SizedBox(height: 8),
-              const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text(
-                'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end is the MRV '
-                'range. The numbers beneath are where these zones begin and end; the small mark is your planned '
-                'weekly sets.',
-              ),
-              const SizedBox(height: 12),
-              if (l == null)
-                const Text('No RP landmark is available for this muscle.')
-              else ...[
-                const Text('RP volume landmarks', style: TextStyle(fontWeight: FontWeight.bold)),
-                for (final (k, v) in [('MV', l.mv), ('MEV', l.mev), ('MAV', l.mav), ('MRV', l.mrv)])
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 54,
-                        child: Text(k, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                      Text(v),
-                    ],
-                  ),
-                const SizedBox(height: 8),
-                SelectableText(l.url, style: Theme.of(c).textTheme.bodySmall),
-              ],
+              SelectableText(l.url, style: Theme.of(c).textTheme.bodySmall),
             ],
-          ),
+          ],
         ),
-        actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
       ),
-    );
-  }
+      actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+    ),
+  );
+}
+
+/// Weekly sets as written on the Cycle tab: up to two decimals, no trailing zeros (7.5, 12).
+String fmtSets(double v) => v.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+
+/// Weekly sets are muted below MEV and warning-coloured from MRV up; otherwise plain.
+Color weeklySetsColor(ColorScheme cs, String muscle, double sets) {
+  final l = rpLandmarks[muscle];
+  final mev = l?.mevRange, mrv = l?.mrvRange;
+  return mev != null && sets < mev.$1
+      ? cs.onSurfaceVariant
+      : mrv != null && sets >= mrv.$1
+      ? cs.warning
+      : cs.onSurface;
 }
 
 /// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath and the landmark
 /// boundaries as small muted numbers under it. No names, legends or chevrons: the dialog behind the tap explains
-/// the bar.
-class _VolumeRow extends StatelessWidget {
-  final String muscle, label;
+/// the bar. [delta], when given, is the change from the saved plan (the workout editor's weekly-sets sheet).
+class MuscleVolumeRow extends StatelessWidget {
+  final String muscle;
   final double sets;
-  final Landmark? landmark;
-  final VoidCallback onTap;
-  const _VolumeRow({
-    required this.muscle,
-    required this.sets,
-    required this.label,
-    required this.landmark,
-    required this.onTap,
-  });
+  final double? delta;
+  const MuscleVolumeRow({super.key, required this.muscle, required this.sets, this.delta});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final l = landmark;
-    final mev = l?.mevRange, mrv = l?.mrvRange;
-    // The number is muted below MEV and warning-coloured from MRV up; otherwise plain.
-    final numberColor = mev != null && sets < mev.$1
-        ? cs.onSurfaceVariant
-        : mrv != null && sets >= mrv.$1
-        ? cs.warning
-        : cs.onSurface;
+    final l = rpLandmarks[muscle];
+    final numberColor = weeklySetsColor(cs, muscle, sets);
+    final change = delta;
     return InkWell(
-      onTap: onTap,
+      onTap: () => showLandmarkInfo(context, muscle),
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: context.style.sp(8)),
         child: Column(
@@ -603,8 +598,16 @@ class _VolumeRow extends StatelessWidget {
                 Expanded(
                   child: Text(muscle, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
                 ),
+                if (change != null && change.abs() > 1e-9)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      '${change > 0 ? '+' : '−'}${fmtSets(change.abs())}',
+                      style: t.labelMedium?.copyWith(color: cs.primary, fontFeatures: tabular),
+                    ),
+                  ),
                 Text(
-                  '$label ${sets == 1 ? 'set' : 'sets'}',
+                  '${fmtSets(sets)} ${sets == 1 ? 'set' : 'sets'}',
                   style: t.bodyMedium?.copyWith(color: numberColor, fontFeatures: tabular),
                 ),
               ],

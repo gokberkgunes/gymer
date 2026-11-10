@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../logic/circuits.dart';
+import '../logic/cycle.dart' show rpLandmarks;
 import '../logic/estimate.dart';
 import '../logic/methods.dart';
 import '../logic/numbers.dart';
@@ -12,6 +13,7 @@ import '../widgets/common.dart';
 import '../widgets/circuit_editor.dart';
 import '../widgets/exercise_picker.dart';
 import '../widgets/num_field.dart';
+import 'cycle.dart' show MuscleVolumeRow, showLandmarkInfo, weeklySetsColor, fmtSets;
 import 'exercises.dart';
 import 'session.dart' show pickSetType;
 
@@ -303,11 +305,60 @@ class _TemplateEditorState extends State<TemplateEditor> {
     WidgetsBinding.instance.addPostFrameCallback((_) => setup.dispose());
   }
 
+  /// Weekly sets per muscle with this draft, against the saved plan (Settings → Workout → Weekly sets button).
+  Future<void> _weeklySets() async {
+    final v = _store.editorWeeklySets(_d);
+    final muscles = [
+      for (final m in rpLandmarks.keys)
+        if ((v.after[m] ?? 0) > 0 || (v.before[m] ?? 0) > 0) m,
+      for (final m in v.after.keys)
+        if (!rpLandmarks.containsKey(m)) m,
+    ];
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) {
+        final t = Theme.of(sheet).textTheme;
+        final cs = Theme.of(sheet).colorScheme;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Text('Weekly sets', style: t.titleLarge),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Text(
+                    v.hypothetical ? 'If this workout is added once a week' : 'With your unsaved changes',
+                    style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ),
+                if (muscles.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text('Tag muscles on exercises to see weekly sets.', style: t.bodySmall),
+                  ),
+                for (final m in muscles)
+                  MuscleVolumeRow(muscle: m, sets: v.after[m] ?? 0, delta: (v.after[m] ?? 0) - (v.before[m] ?? 0)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
+    final weekly = store.settings.editorMuscleTotals ? store.editorWeeklySets(_d).after : null;
     final cycle = store.activeCycle;
     final restLocked = cycle?.restLock ?? false;
     final timing = store.templateTiming(_d);
@@ -320,6 +371,8 @@ class _TemplateEditorState extends State<TemplateEditor> {
         ),
         title: Text(_isNew ? 'New Workout' : 'Edit Workout'),
         actions: [
+          if (store.settings.editorWeeklySets)
+            IconButton(tooltip: 'Weekly sets', icon: const Icon(Icons.bar_chart_rounded), onPressed: _weeklySets),
           if (!_isNew && !widget.fromActive)
             IconButton(
               tooltip: 'Delete',
@@ -376,6 +429,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
             _ExerciseCard(
               key: ObjectKey(e),
               exercise: e,
+              weekly: weekly,
               invalidName: _missingName.contains(e),
               restLocked: restLocked,
               groupsLocked: _groupsLocked,

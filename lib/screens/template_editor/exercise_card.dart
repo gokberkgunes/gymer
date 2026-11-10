@@ -41,6 +41,51 @@ class _PlannedWork extends StatelessWidget {
   }
 }
 
+/// A primary muscle's weekly sets with the draft, as a small pill under the exercise name ("Chest 14/wk").
+/// The number takes the Cycle tab's colours; tapping opens that muscle's landmarks.
+class _MuscleTotal extends StatelessWidget {
+  final String muscle;
+  final double sets;
+  const _MuscleTotal({required this.muscle, required this.sets});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final br = context.style.brSmall;
+    return Material(
+      color: cs.onSurface.withValues(alpha: 0.06),
+      borderRadius: br,
+      child: InkWell(
+        borderRadius: br,
+        onTap: () => showLandmarkInfo(context, muscle),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$muscle ',
+                  style: TextStyle(color: cs.onSurfaceVariant),
+                ),
+                TextSpan(
+                  text: '${fmtSets(sets)}/wk',
+                  style: TextStyle(
+                    color: weeklySetsColor(cs, muscle, sets),
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: tabular,
+                  ),
+                ),
+              ],
+            ),
+            style: t.labelMedium,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ExerciseCard extends StatelessWidget {
   final TemplateExercise exercise;
   final bool invalidName, restLocked, groupsLocked;
@@ -50,9 +95,13 @@ class _ExerciseCard extends StatelessWidget {
   final ValueChanged<int> onMove;
   final ValueChanged<TemplateSet> onEditContext;
 
+  /// Weekly sets per muscle with the draft, when Settings shows them on exercises; null otherwise.
+  final Map<String, double>? weekly;
+
   const _ExerciseCard({
     super.key,
     required this.exercise,
+    this.weekly,
     required this.invalidName,
     required this.restLocked,
     required this.groupsLocked,
@@ -247,6 +296,15 @@ class _ExerciseCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (weekly != null && (info?.primary.isNotEmpty ?? false))
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [for (final m in info!.primary) _MuscleTotal(muscle: m, sets: weekly![m] ?? 0)],
+                ),
+              ),
             if (note.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),

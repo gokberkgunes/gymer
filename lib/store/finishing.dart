@@ -146,6 +146,29 @@ extension AppStoreFinishing on AppStore {
     return (e?.primary ?? const [], e?.secondary ?? const []);
   }
 
+  /// Weekly sets per muscle while [draft] is being edited, for the workout editor. When the draft is on the
+  /// active (or pending) cycle's schedule, it replaces the saved workout there and [before] is the saved plan.
+  /// Otherwise the draft is counted as if added once a week ([hypothetical]) on top of any cycle's plan.
+  ({Map<String, double> after, Map<String, double> before, bool hypothetical}) editorWeeklySets(WorkoutTemplate draft) {
+    final cycle = activeCycle ?? pendingCycle;
+    final saved = {for (final t in templates) t.id: t};
+    Map<String, double> sets(Mesocycle c, Map<String, WorkoutTemplate> byId) => {
+      for (final MapEntry(key: m, value: v) in plannedWeeklyVolume(c, byId, musclesOf).entries) m: v.sets,
+    };
+    final before = cycle == null ? <String, double>{} : sets(cycle, saved);
+    if (cycle != null && cycle.schedule.containsValue(draft.id)) {
+      return (after: sets(cycle, {...saved, draft.id: draft}), before: before, hypothetical: false);
+    }
+    final once = sets(Mesocycle(id: '', start: DateTime(2000), schedule: {1: draft.id}), {draft.id: draft});
+    return (
+      after: {
+        for (final m in {...before.keys, ...once.keys}) m: (before[m] ?? 0) + (once[m] ?? 0),
+      },
+      before: before,
+      hypothetical: true,
+    );
+  }
+
   VolumeReport sessionVolume(Session s, {bool planned = false}) {
     final rows = <VolumeRow>[];
     for (final (i, e) in s.exercises.indexed) {

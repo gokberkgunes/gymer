@@ -132,6 +132,10 @@ class Settings {
   String chipMode;
   String chipText;
   bool showPreviousReps;
+
+  /// Workout editor: a weekly-sets button in its app bar, and muscle totals on each exercise card.
+  bool editorWeeklySets;
+  bool editorMuscleTotals;
   bool dimCompleted;
   bool collapseCompleted;
   List<String> pinnedExerciseActions;
@@ -184,6 +188,8 @@ class Settings {
     this.chipMode = 'time',
     this.chipText = '',
     this.showPreviousReps = false,
+    this.editorWeeklySets = false,
+    this.editorMuscleTotals = false,
     this.dimCompleted = true,
     this.collapseCompleted = true,
     List<String>? pinnedExerciseActions,
@@ -278,6 +284,8 @@ class Settings {
     'chipMode': chipMode,
     'chipText': chipText,
     'showPreviousReps': showPreviousReps,
+    'editorWeeklySets': editorWeeklySets,
+    'editorMuscleTotals': editorMuscleTotals,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
     'pinnedExerciseActions': pinnedExerciseActions,
@@ -340,6 +348,8 @@ class Settings {
       chipMode: s('chipMode', d.chipMode, {'time', 'text'}),
       chipText: j['chipText'] is String ? (j['chipText'] as String) : d.chipText,
       showPreviousReps: b('showPreviousReps', d.showPreviousReps),
+      editorWeeklySets: b('editorWeeklySets', d.editorWeeklySets),
+      editorMuscleTotals: b('editorMuscleTotals', d.editorMuscleTotals),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
       pinnedExerciseActions: j['pinnedExerciseActions'] is List
