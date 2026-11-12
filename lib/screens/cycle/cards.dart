@@ -615,7 +615,6 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
     // Keep case intact for real small-cap glyph substitution. Names match the scale's font size; frequency
     // stays smaller, with both labels kept faint.
     final labelStyle = t.labelSmall!.copyWith(
-      fontFamily: 'GymerSmallCaps',
       fontSize: numberStyle.fontSize,
       fontWeight: FontWeight.w400,
       color: cs.onSurfaceVariant.withValues(alpha: 0.65),
