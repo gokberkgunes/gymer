@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../store.dart';
 
@@ -62,8 +61,12 @@ class PlatformAlerts extends Alerts {
 
   @override
   void keepAwake(bool on) {
-    if (!_mobile) return;
-    WakelockPlus.toggle(enable: on);
+    if (kIsWeb || !Platform.isAndroid) return;
+    unawaited(
+      _live.invokeMethod<void>('keepAwake', on).catchError((Object e) {
+        debugPrint('gymer: keep-awake unavailable: $e');
+      }),
+    );
   }
 
   @override
