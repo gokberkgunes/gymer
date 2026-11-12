@@ -66,8 +66,9 @@ extension AppStoreHistory on AppStore {
         for (final te in t.exercises)
           SessionExercise(
             name: te.name,
-            method: te.method,
-            loadMode: exercise(te.name)?.loadMode ?? 'external',
+            // The same method and load-mode rules as startSession, so a logged workout compares like a live one.
+            method: canonicalMethod(te.method),
+            loadMode: exercise(te.name)?.loadMode ?? defaultLoadModeFor(te.name),
             sets: [
               for (final ts in te.sets)
                 SetEntry(type: ts.type, rest: ts.rest, groupStart: ts.groupStart, context: contextFor(te.name, ts)),

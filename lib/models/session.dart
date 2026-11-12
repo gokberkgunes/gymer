@@ -35,6 +35,11 @@ class SetEntry {
   /// Fields that failed validation on the last completion attempt (not saved).
   final Set<String> invalid = {};
 
+  /// Fields whose box currently shows text that is not a usable number (a half-typed sum like "45+", or a
+  /// value out of range), reported by the box itself (not saved). The stored value is then older than what
+  /// the user sees, so the set must not be completed from it.
+  final Set<String> badText = {};
+
   SetEntry({
     this.weight,
     this.reps,

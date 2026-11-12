@@ -31,7 +31,7 @@ class TrainScreen extends StatelessWidget {
       featured = store.active!.templateId;
       label = 'ACTIVE';
     } else if (cycle != null && status!.running) {
-      featured = cycle.schedule[status.dayInMicro];
+      featured = dueWorkouts(cycle, store.history).where((id) => store.template(id) != null).firstOrNull;
       if (featured != null) label = 'TODAY';
     }
     final workouts = [...store.templates]
@@ -150,7 +150,8 @@ class _WorkoutTile extends StatefulWidget {
   State<_WorkoutTile> createState() => _WorkoutTileState();
 }
 
-class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderStateMixin {
+class _WorkoutTileState extends State<_WorkoutTile> with TickerProviderStateMixin {
+  // Not the single-ticker mixin: the border's controller is disposed and re-created as TODAY comes and goes.
   AnimationController? _rainbow;
 
   bool get _isRainbow => widget.featured && widget.label == 'TODAY';

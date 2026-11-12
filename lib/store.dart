@@ -99,7 +99,10 @@ class AppStore extends ChangeNotifier {
       for (final t in j['templates'] as List? ?? []) WorkoutTemplate.fromJson(t as Map<String, dynamic>),
     ];
     final newExercises = [for (final e in j['exercises'] as List? ?? []) Exercise.fromJson(e as Map<String, dynamic>)];
-    final newHistory = [for (final s in j['history'] as List? ?? []) Session.fromJson(s as Map<String, dynamic>)];
+    // Newest first, always: every "last time" lookup takes the first match, so an unsorted (hand-edited or
+    // merged) file must not decide progression.
+    final newHistory = [for (final s in j['history'] as List? ?? []) Session.fromJson(s as Map<String, dynamic>)]
+      ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
     // A provisional cycle abandoned during its first calendar setup is discarded.
     final newCycles = [for (final c in j['cycles'] as List? ?? []) Mesocycle.fromJson(c as Map<String, dynamic>)]
       ..removeWhere((c) => !c.setupComplete);
@@ -110,7 +113,7 @@ class AppStore extends ChangeNotifier {
         dateKey(parsed.date): parsed,
     }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
-    final newRest = r == null || newActive == null ? null : RestTimer.fromJson(r as Map<String, dynamic>);
+    final newRest = r == null || newActive == null ? null : _tryRest(r);
     final seen = j['seenAchievements'];
     final newSeen = seen is List
         ? seen.whereType<String>().toSet()
@@ -127,6 +130,15 @@ class AppStore extends ChangeNotifier {
     bodyweights = newBodyweights;
     rest = newRest;
     _seenAchievements = newSeen;
+  }
+
+  /// A damaged rest timer is dropped: transient state must never make the whole data file unreadable.
+  static RestTimer? _tryRest(Object? entry) {
+    try {
+      return RestTimer.fromJson(entry as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
   static BodyweightEntry? _tryBodyweight(Object? entry) {

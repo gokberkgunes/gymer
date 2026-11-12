@@ -19,6 +19,8 @@ class CycleHeatmap extends StatelessWidget {
     Widget tile(CycleDay d, double cell) {
       final today = dateKey(d.date) == dateKey(DateTime.now());
       final planned = d.templateId != null || d.incoming.isNotEmpty;
+      // Its workout was deleted and nothing was recorded: a red "?" instead of a day that looks plannable.
+      final missing = d.templateId != null && d.sessionId == null && store.template(d.templateId) == null;
       final Color fill = switch (d.status) {
         'missed' => cs.error,
         _ when d.offPlan => cs.info,
@@ -26,7 +28,9 @@ class CycleHeatmap extends StatelessWidget {
         _ => cs.onSurface.withValues(alpha: 0.12),
       };
       final strong = d.status == 'missed' || d.status == 'done' || d.offPlan;
-      final border = today
+      final border = missing
+          ? cs.error
+          : today
           ? cs.onSurface
           : (planned && d.sessions.isEmpty ? cs.primary : cs.onSurface.withValues(alpha: 0.28));
       final label = const {
@@ -39,7 +43,7 @@ class CycleHeatmap extends StatelessWidget {
       }[d.status];
       return Tooltip(
         message:
-            '${fmtRecent(d.date, includeTime: false)} · ${store.template(d.templateId)?.name ?? 'Rest'} · $label'
+            '${fmtRecent(d.date, includeTime: false)} · ${store.template(d.templateId)?.name ?? (missing ? 'Deleted workout' : 'Rest')} · $label'
             '${d.offPlan && d.status != 'moved_done' ? ' · Workout completed off schedule' : ''}',
         child: InkWell(
           onTap: () => _dayActions(context, store, d),
@@ -54,11 +58,15 @@ class CycleHeatmap extends StatelessWidget {
             ),
             child: planned || d.sessions.isNotEmpty
                 ? Text(
-                    '${d.dayInMicro}',
+                    missing ? '?' : '${d.dayInMicro}',
                     style: TextStyle(
                       fontSize: compact ? 9 : 9.5,
-                      fontWeight: today ? FontWeight.bold : FontWeight.w500,
-                      color: strong ? Colors.white : null,
+                      fontWeight: today || missing ? FontWeight.bold : FontWeight.w500,
+                      color: strong
+                          ? Colors.white
+                          : missing
+                          ? cs.error
+                          : null,
                     ),
                   )
                 : null,
@@ -171,7 +179,8 @@ class CycleHeatmap extends StatelessWidget {
     final key = dateKey(d.date);
     final todayKey = dateKey(DateTime.now());
     final isToday = key == todayKey;
-    final name = store.template(d.templateId)?.name;
+    final gone = d.templateId != null && store.template(d.templateId) == null;
+    final name = gone ? 'Deleted workout' : store.template(d.templateId)?.name;
     final event = cycle.events[key];
     final running = store.activeCycle?.id == cycle.id;
     final canLog =
@@ -222,7 +231,7 @@ class CycleHeatmap extends StatelessWidget {
                   onTap: () => Navigator.pop(sheet, 'session:${s.id}'),
                 ),
               if (d.templateId != null && d.sessionId == null && !d.unplanned) ...[
-                if (d.status == 'planned' && isToday && running)
+                if (d.status == 'planned' && isToday && running && !gone)
                   ListTile(
                     leading: const Icon(Icons.play_arrow_rounded),
                     title: const Text('Start workout'),

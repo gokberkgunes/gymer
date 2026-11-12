@@ -41,6 +41,11 @@ class NumField extends StatefulWidget {
   final VoidCallback? onBackspaceEmpty;
   final VoidCallback? onBlur;
 
+  /// Told whenever the box starts or stops showing text that is not a usable value. [onChanged] is not called
+  /// for such text, so the owner's value is stale meanwhile; owners that act on the value (completing a set)
+  /// use this to refuse instead of silently using the old number.
+  final ValueChanged<bool>? onBadText;
+
   const NumField({
     super.key,
     required this.value,
@@ -59,6 +64,7 @@ class NumField extends StatefulWidget {
     this.onSubmitted,
     this.onBackspaceEmpty,
     this.onBlur,
+    this.onBadText,
     this.dense = true,
     this.align = TextAlign.left,
   });
@@ -99,9 +105,20 @@ class _NumFieldState extends State<NumField> {
     final shown = evaluateExpression(stripSentinel(_c.text));
     final current = stripSentinel(_c.text);
     final differs = widget.value == null ? current.isNotEmpty && shown != null : shown != widget.value;
-    if (differs && !(_focus.hasFocus && current.isNotEmpty && shown == null)) {
+    // Unusable text the user typed stays in the box (red) until they fix it or the owner sets a new value;
+    // replacing it with the old number on the next rebuild would hide the mistake.
+    final keepBad = _reportedBad && old.value == widget.value;
+    if (differs && !keepBad && !(_focus.hasFocus && current.isNotEmpty && shown == null)) {
       _setText(_format(widget.value) + (_focus.hasFocus && widget.value == null ? sentinel : ''));
+      _reportBad(false);
     }
+  }
+
+  bool _reportedBad = false;
+  void _reportBad(bool bad) {
+    if (bad == _reportedBad) return;
+    _reportedBad = bad;
+    widget.onBadText?.call(bad);
   }
 
   void _setText(String t) {
@@ -158,11 +175,14 @@ class _NumFieldState extends State<NumField> {
     final raw = stripSentinel(text);
     if (_badInput) setState(() => _badInput = false);
     if (raw.isEmpty) {
+      _reportBad(false);
       widget.onChanged(null);
       return;
     }
     final v = evaluateExpression(raw);
-    if (v != null && numberAllowed(v, widget.kind)) widget.onChanged(v);
+    final usable = v != null && numberAllowed(v, widget.kind);
+    _reportBad(!usable);
+    if (usable) widget.onChanged(v);
   }
 
   @override
@@ -348,6 +368,16 @@ class _DurationFieldState extends State<DurationField> {
         color: widget.readOnly ? Theme.of(context).colorScheme.onSurfaceVariant : null,
       ),
       decoration: InputDecoration(labelText: widget.label, hintText: '3:00', fillColor: widget.fill),
+      // Report every valid edit at once: on Android a tap on Save does not take focus from this field, so a
+      // value reported only on blur would be lost.
+      onChanged: (text) {
+        if (widget.readOnly) return;
+        try {
+          widget.onChanged(parseRest(text));
+        } on FormatException {
+          // Half-typed or empty: keep the last valid value until the text parses.
+        }
+      },
       onEditingComplete: () {},
       onSubmitted: (_) {
         _focus.unfocus();

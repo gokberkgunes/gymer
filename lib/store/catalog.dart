@@ -76,9 +76,9 @@ extension AppStoreCatalog on AppStore {
   }
 
   Exercise? exercise(String name) {
-    final key = name.trim().toLowerCase();
+    // Names match with sameExercise everywhere (case and surrounding spaces ignored), never with a bare ==.
     for (final e in exercises) {
-      if (e.name.toLowerCase() == key) return e;
+      if (sameExercise(e.name, name)) return e;
     }
     return null;
   }
@@ -113,11 +113,11 @@ extension AppStoreCatalog on AppStore {
   /// Names of saved workouts that use [name]; such an exercise cannot be deleted.
   List<String> workoutsUsing(String name) => [
     for (final t in templates)
-      if (t.exercises.any((e) => e.name.toLowerCase() == name.toLowerCase())) t.name,
-    if (active?.exercises.any((e) => e.name.toLowerCase() == name.toLowerCase()) ?? false) active!.name,
+      if (t.exercises.any((e) => sameExercise(e.name, name))) t.name,
+    if (active?.exercises.any((e) => sameExercise(e.name, name)) ?? false) active!.name,
   ];
 
-  bool inHistory(String name) => history.any((s) => s.exercises.any((e) => e.name.toLowerCase() == name.toLowerCase()));
+  bool inHistory(String name) => history.any((s) => s.exercises.any((e) => sameExercise(e.name, name)));
 
   void deleteExercise(String name) {
     exercises.removeWhere((e) => sameExercise(e.name, name));
@@ -128,7 +128,7 @@ extension AppStoreCatalog on AppStore {
   /// Returns an error message when the new name is taken.
   String? saveExercise(Exercise updated, {String? oldName}) {
     final from = oldName ?? updated.name;
-    if (from.toLowerCase() != updated.name.toLowerCase() && exercise(updated.name) != null) {
+    if (!sameExercise(from, updated.name) && exercise(updated.name) != null) {
       return 'An exercise with that name already exists.';
     }
     final previous = exercise(from);
@@ -148,9 +148,18 @@ extension AppStoreCatalog on AppStore {
           if (sameExercise(e.name, from)) e.name = updated.name;
         }
       }
-      if (rest?.exercise == from) rest = rest!.copyWith(exercise: updated.name);
+      // Everything that stores an exercise by name must follow a rename: cycle starting loads match by name too.
+      for (final c in cycles) {
+        for (final plan in c.startingLoads.values) {
+          for (final e in plan) {
+            if (sameExercise(e.name, from)) e.name = updated.name;
+          }
+        }
+      }
+      if (rest != null && sameExercise(rest!.exercise, from)) rest = rest!.copyWith(exercise: updated.name);
       _historyVersion++; // names in history changed in place: cached lookups must be rebuilt
     }
+    _historyVersion++; // increments and equipment feed gymLoad, which cached last-time values were rounded with
     // A new default context clears inherited template defaults that no longer match.
     if (previous != null && previous.context != updated.context) {
       for (final t in templates) {
@@ -258,6 +267,15 @@ extension AppStoreCatalog on AppStore {
     changed();
   }
 
+  /// Running or upcoming cycles that schedule this workout, for the warning before deleting it.
+  List<Mesocycle> cyclesScheduling(String templateId) => [
+    for (final c in cycles)
+      if ((c.active || !c.setupComplete) && c.schedule.containsValue(templateId)) c,
+  ];
+
+  /// The cycle keeps the deleted workout's days and shows them as missing (a red "?") until another workout
+  /// is chosen: silently turning them into rest days would hide a hole in the plan. Readers of a schedule
+  /// must therefore expect an id with no workout behind it ([template] returns null).
   void deleteTemplate(String id) {
     templates.removeWhere((t) => t.id == id);
     changed();

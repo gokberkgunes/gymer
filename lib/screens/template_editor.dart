@@ -142,7 +142,8 @@ class _TemplateEditorState extends State<TemplateEditor> {
     final ok = await confirm(
       context,
       'Delete workout',
-      'Remove "${_d.name}"? History is kept.',
+      'Remove "${_d.name}"? History is kept.'
+          '${[for (final c in _store.cyclesScheduling(_d.id)) '\n\nIt is on the schedule of "${c.name}". Its days there will show a red "?" until you choose another workout for them.'].join()}',
       action: 'Delete',
       destructive: true,
     );
@@ -154,7 +155,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
   Future<void> _addExercise() async {
     final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name));
     if (name == null || !mounted) return;
-    if (_d.exercises.any((x) => x.name.toLowerCase() == name.toLowerCase())) {
+    if (_d.exercises.any((x) => sameExercise(x.name, name))) {
       return notify(context, '$name is already in this workout.');
     }
     final s = _store.settings;
@@ -172,8 +173,8 @@ class _TemplateEditorState extends State<TemplateEditor> {
   /// old exercise's loads; the replacement's own latest values are used.
   Future<void> _chooseExercise(TemplateExercise e) async {
     final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name));
-    if (name == null || !mounted || name.toLowerCase() == e.name.toLowerCase()) return;
-    if (_d.exercises.any((x) => x != e && x.name.toLowerCase() == name.toLowerCase())) {
+    if (name == null || !mounted || sameExercise(name, e.name)) return;
+    if (_d.exercises.any((x) => x != e && sameExercise(x.name, name))) {
       return notify(context, '$name is already in this workout.');
     }
     final latest = _store.previousSets(name);

@@ -38,9 +38,7 @@ extension AppStoreSessionStart on AppStore {
     List<SetEntry>? fallback;
     for (final s in history) {
       if (s.phase == 'Deload') continue;
-      final e = s.exercises
-          .where((e) => e.name.toLowerCase() == exercise.toLowerCase() && e.method == method)
-          .firstOrNull;
+      final e = s.exercises.where((e) => sameExercise(e.name, exercise) && e.method == method).firstOrNull;
       if (e == null || !e.sets.any((x) => x.done)) continue;
       final sets = [for (final x in e.sets) _inUnit(x, s.unit, null, exercise)];
       if (s.templateId == templateId) return sets;
@@ -53,7 +51,7 @@ extension AppStoreSessionStart on AppStore {
     for (final s in history) {
       if (s.cycleId != c.id || s.templateId != templateId || s.phase == 'Deload') continue;
       for (final e in s.exercises) {
-        if (e.name.toLowerCase() != exercise.toLowerCase() || e.method != method) continue;
+        if (!sameExercise(e.name, exercise) || e.method != method) continue;
         if (e.sets.any(
           (x) => x.done && calibrationAnchor(method, x.type) && (x.weight ?? 0) > 0 && (x.reps ?? 0) > 0,
         )) {
@@ -125,7 +123,7 @@ extension AppStoreSessionStart on AppStore {
     for (final session in history) {
       if (session.phase == 'Deload') continue;
       for (final past in session.exercises) {
-        if (past.name.toLowerCase() != exercise.name.toLowerCase() ||
+        if (!sameExercise(past.name, exercise.name) ||
             past.loadMode != exercise.loadMode ||
             past.method != exercise.method) {
           continue;
@@ -175,7 +173,7 @@ extension AppStoreSessionStart on AppStore {
     final ramp = warmupRamp(
       load,
       sets: sets,
-      increment: incrementFor(target.name, session.unit) ?? 0.5,
+      increment: incrementFor(target.name, session.unit) ?? practicalWeightStep(load, session.unit),
       bar: usesBar ? plates(load, name: target.name).bar : 0,
       plates: usesBar ? settings.plates : null,
       pairs: usesBar ? settings.platePairs : null,
@@ -285,18 +283,14 @@ extension AppStoreSessionStart on AppStore {
           s.cycleId == cycle.id &&
           s.templateId == session.templateId &&
           s.phase != 'Deload' &&
-          s.exercises.any(
-            (e) => e.name.toLowerCase() == name.toLowerCase() && e.method == method && e.work.any((set) => set.done),
-          ),
+          s.exercises.any((e) => sameExercise(e.name, name) && e.method == method && e.work.any((set) => set.done)),
     )) {
       return null;
     }
     final starting = cycle.startingLoads[session.templateId]
-        ?.where((e) => e.name.toLowerCase() == name.toLowerCase() && e.method == method)
+        ?.where((e) => sameExercise(e.name, name) && e.method == method)
         .firstOrNull;
-    final plan = template(
-      session.templateId,
-    )?.exercises.where((e) => e.name.toLowerCase() == name.toLowerCase()).firstOrNull;
+    final plan = template(session.templateId)?.exercises.where((e) => sameExercise(e.name, name)).firstOrNull;
     if (starting == null ||
         plan == null ||
         canonicalMethod(plan.method) != method ||
@@ -443,7 +437,9 @@ extension AppStoreSessionStart on AppStore {
     SetEntry? latest;
     search:
     for (final s in history) {
-      for (final x in s.exercises.where((x) => x.name.toLowerCase() == name.toLowerCase())) {
+      // A deload set is light and far from failure: as a baseline it would start the new cycle too light.
+      if (s.phase == 'Deload') continue;
+      for (final x in s.exercises.where((x) => sameExercise(x.name, name))) {
         for (final set in x.sets.reversed) {
           if (!set.done || (set.weight ?? 0) <= 0 || (set.reps ?? 0) <= 0) continue;
           final sameMethod = x.method == method && calibrationAnchor(method, set.type);

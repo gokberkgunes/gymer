@@ -51,9 +51,10 @@ extension AppStoreRestClock on AppStore {
     _syncAlerts();
   }
 
-  void showRestCountdown() {
+  /// Holding the round timer switches between the elapsed and countdown views, both ways.
+  void toggleRestDisplay() {
     if (rest == null) return;
-    rest = rest!.copyWith(countdown: true);
+    rest = rest!.copyWith(countdown: !rest!.countdown);
     changed();
   }
 

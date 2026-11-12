@@ -30,7 +30,8 @@ class FloatingRestTimer extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     return Tooltip(
-      message: '${r.overdue ? 'Rest complete' : 'Rest'} · ${r.exercise}\nTap to open the workout · hold for countdown',
+      message:
+          '${r.overdue ? 'Rest complete' : 'Rest'} · ${r.exercise}\nTap to open the workout · hold for ${r.countdown ? 'elapsed time' : 'countdown'}',
       child: TickBuilder(
         anchor: r.startedAt,
         builder: (context) {
@@ -44,7 +45,7 @@ class FloatingRestTimer extends StatelessWidget {
             child: InkWell(
               customBorder: const CircleBorder(),
               onTap: onTap,
-              onLongPress: store.showRestCountdown,
+              onLongPress: store.toggleRestDisplay,
               child: SizedBox.square(
                 dimension: size,
                 child: Stack(

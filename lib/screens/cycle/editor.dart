@@ -73,8 +73,27 @@ class _CycleEditorState extends State<CycleEditor> {
     super.dispose();
   }
 
+  /// Weekly RIR values are keyed by week number and win over the steppers, so they must follow every change
+  /// of structure here: a week that changes phase or disappears cannot keep its old value (it would block Save
+  /// with a deload-effort error that nothing on this screen could clear).
+  void _restructure(void Function() change) {
+    final oldBuild = _d.length - _d.deloadMicro;
+    change();
+    final build = _d.length - _d.deloadMicro;
+    for (final w in _d.weekRir.keys.toList()) {
+      if (w > _d.length || (w > oldBuild) != (w > build)) _d.weekRir.remove(w);
+    }
+  }
+
+  void _setDeloadRir(int v) {
+    _d.deloadRir = v;
+    final build = _d.length - _d.deloadMicro;
+    for (final w in _d.weekRir.keys.toList()) {
+      if (w > build) _d.weekRir[w] = v;
+    }
+  }
+
   void _apply(Mesocycle target) {
-    final previousDeloadRir = target.deloadRir;
     target
       ..name = _name.text.trim().isEmpty ? 'Mesocycle' : _name.text.trim()
       ..start = _d.start
@@ -88,14 +107,8 @@ class _CycleEditorState extends State<CycleEditor> {
       ..deloadLoadPct = _d.deloadLoadPct
       ..deloadVolumePct = _d.deloadVolumePct
       ..rirLock = _d.rirLock
-      ..restLock = _d.restLock;
-    // An edited deload target applies to existing weekly deload overrides.
-    if (previousDeloadRir != _d.deloadRir) {
-      final build = target.length - target.deloadMicro;
-      for (final w in target.weekRir.keys.toList()) {
-        if (w > build) target.weekRir[w] = _d.deloadRir;
-      }
-    }
+      ..restLock = _d.restLock
+      ..weekRir = Map.of(_d.weekRir);
     target.schedule.removeWhere((day, _) => day > target.microDays);
   }
 
@@ -158,6 +171,7 @@ class _CycleEditorState extends State<CycleEditor> {
       void Function(int) set, {
       String? subtitle,
       int step = 1,
+      bool enabled = true,
     }) => Padding(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: context.style.sp(6)),
       child: Row(
@@ -172,7 +186,7 @@ class _CycleEditorState extends State<CycleEditor> {
             ),
           ),
           IconButton(
-            onPressed: value > min ? () => setState(() => set((value - step).clamp(min, max))) : null,
+            onPressed: enabled && value > min ? () => setState(() => set((value - step).clamp(min, max))) : null,
             icon: const Icon(Icons.remove_rounded),
           ),
           SizedBox(
@@ -184,7 +198,7 @@ class _CycleEditorState extends State<CycleEditor> {
             ),
           ),
           IconButton(
-            onPressed: value < max ? () => setState(() => set((value + step).clamp(min, max))) : null,
+            onPressed: enabled && value < max ? () => setState(() => set((value + step).clamp(min, max))) : null,
             icon: const Icon(Icons.add_rounded),
           ),
         ],
@@ -298,16 +312,41 @@ class _CycleEditorState extends State<CycleEditor> {
               _d.length,
               1,
               52,
-              (v) => _d.length = v,
+              (v) => _restructure(() => _d.length = v),
               subtitle: '${_d.periodNoun(plural: true)}, including deload',
             ),
-            stepper('Deload', _d.deloadMicro, 0, 8, (v) => _d.deloadMicro = v, subtitle: _d.periodNoun(plural: true)),
+            stepper(
+              'Deload',
+              _d.deloadMicro,
+              0,
+              8,
+              (v) => _restructure(() => _d.deloadMicro = v),
+              subtitle: _d.periodNoun(plural: true),
+            ),
           ]),
           const SectionLabel('Effort'),
           group([
-            stepper('Start RIR', _d.startRir, 0, 10, (v) => _d.startRir = v),
-            stepper('Final build RIR', _d.endRir, 0, 10, (v) => _d.endRir = v),
-            stepper('Deload RIR', _d.deloadRir, 0, 10, (v) => _d.deloadRir = v),
+            // Once weekly RIR has been edited, each week has its own value and these two no longer decide
+            // anything: show them switched off and say where the values come from, never as dead controls.
+            stepper(
+              'Start RIR',
+              _d.startRir,
+              0,
+              10,
+              (v) => _d.startRir = v,
+              enabled: _d.weekRir.isEmpty,
+              subtitle: _d.weekRir.isEmpty ? null : 'Set week by week in Edit weekly RIR',
+            ),
+            stepper(
+              'Final build RIR',
+              _d.endRir,
+              0,
+              10,
+              (v) => _d.endRir = v,
+              enabled: _d.weekRir.isEmpty,
+              subtitle: _d.weekRir.isEmpty ? null : 'Set week by week in Edit weekly RIR',
+            ),
+            stepper('Deload RIR', _d.deloadRir, 0, 10, _setDeloadRir),
             SwitchListTile(
               title: LabelWithInfo(
                 const Text('Allow target RIR override'),

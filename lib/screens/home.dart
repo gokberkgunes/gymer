@@ -25,6 +25,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
+  late final _shown = List.generate(5, (i) => ValueNotifier(i == 0));
   final _navigators = List.generate(5, (_) => GlobalKey<NavigatorState>());
   late final _observers = List.generate(5, (_) => _TabObserver(_navigationChanged));
   bool _navigationUpdatePending = false;
@@ -40,6 +41,7 @@ class _HomeShellState extends State<HomeShell> {
     final r = store.rest;
     if (r != null && r.overdue) _alerted = _key(r.startedAt, r.totalSeconds);
     store.addListener(_syncRestWatch);
+    store.addListener(_closeEndedWorkout);
     _syncRestWatch();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) reportUnreadableData(_navigators[_tab].currentContext!);
@@ -55,6 +57,26 @@ class _HomeShellState extends State<HomeShell> {
       _restWatch!.cancel();
       _restWatch = null;
     }
+  }
+
+  /// A workout page must not outlive its workout: a restore or import from another tab ends the workout while
+  /// its page is still on a tab's stack, which would leave a blank page with the bottom bar hidden. Checked
+  /// after the frame, because finishing and discarding replace or pop that page themselves right after the
+  /// store changes.
+  bool _endedCheckPending = false;
+  void _closeEndedWorkout() {
+    if (_store.active != null || _endedCheckPending) return;
+    if (!_observers.any((o) => o.workoutRoute != null)) return;
+    _endedCheckPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _endedCheckPending = false;
+      if (!mounted || _store.active != null) return;
+      for (var i = 0; i < _observers.length; i++) {
+        final route = _observers[i].workoutRoute;
+        if (route != null && route.isActive) _navigators[i].currentState?.removeRoute(route);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   String _key(DateTime start, int total) => '${start.microsecondsSinceEpoch}/$total';
@@ -74,6 +96,10 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _store.removeListener(_syncRestWatch);
+    _store.removeListener(_closeEndedWorkout);
+    for (final shown in _shown) {
+      shown.dispose();
+    }
     _restWatch?.cancel();
     super.dispose();
   }
@@ -86,6 +112,9 @@ class _HomeShellState extends State<HomeShell> {
     }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _tab = i);
+    for (final (n, shown) in _shown.indexed) {
+      shown.value = n == i;
+    }
   }
 
   void _navigationChanged() {
@@ -134,7 +163,10 @@ class _HomeShellState extends State<HomeShell> {
           child: Navigator(
             key: _navigators[i],
             observers: [_observers[i]],
-            onGenerateRoute: (_) => MaterialPageRoute<void>(builder: (_) => tab),
+            // Root pages rebuild on store changes only while shown (see StoreGate).
+            onGenerateRoute: (_) => MaterialPageRoute<void>(
+              builder: (_) => StoreGate(selected: _shown[i], child: tab),
+            ),
           ),
         ),
       ),

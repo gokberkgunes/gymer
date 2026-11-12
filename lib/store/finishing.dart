@@ -122,7 +122,7 @@ extension AppStoreFinishing on AppStore {
   /// Completed weights/reps become the template's per-set defaults.
   void _updateTemplateDefaults(Session s, WorkoutTemplate t) {
     for (final e in s.exercises) {
-      final te = t.exercises.where((x) => x.name.toLowerCase() == e.name.toLowerCase()).firstOrNull;
+      final te = t.exercises.where((x) => sameExercise(x.name, e.name)).firstOrNull;
       if (te == null || e.loadMode != (exercise(e.name)?.loadMode ?? e.loadMode)) continue;
       for (final (i, set) in e.sets.indexed) {
         if (!set.done || i >= te.sets.length) continue;

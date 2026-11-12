@@ -39,7 +39,9 @@ extension AppStoreCycles on AppStore {
   String? startPendingCycle() {
     final c = pendingCycle;
     if (c == null) return null;
-    if (c.schedule.isEmpty) return 'Assign at least one workout day before starting the mesocycle.';
+    if (c.schedule.values.every((id) => template(id) == null)) {
+      return 'Assign at least one workout day before starting the mesocycle.';
+    }
     c.setupComplete = true;
     saveCycle(c);
     return null;
@@ -75,10 +77,16 @@ extension AppStoreCycles on AppStore {
     var end = cycle.endedAt ?? status.end;
     if (end.isAfter(status.end)) end = status.end;
     if (end.isAfter(today)) end = today;
-    final due = calendarDays(
-      cycle,
-      history,
-    ).where((d) => d.templateId != null && !d.unplanned && !d.date.isAfter(end)).toList();
+    final due = calendarDays(cycle, history)
+        .where(
+          // A day whose workout was deleted could never be attended; it only counts if it was done before.
+          (d) =>
+              d.templateId != null &&
+              !d.unplanned &&
+              !d.date.isAfter(end) &&
+              (d.sessionId != null || template(d.templateId) != null),
+        )
+        .toList();
     final completed = {for (final s in sessions) s.id};
     final attended = {
       for (final d in due)
@@ -135,9 +143,9 @@ extension AppStoreCycles on AppStore {
     Iterable<String>? templateIds,
   }) {
     if (loadPercent <= 0 || loadPercent > 200) throw ArgumentError.value(loadPercent, 'loadPercent');
-    final sessions = _cycleSessions(source).reversed.where(
-      (s) => s.phase == 'Build' || (s.phase == null && cycleStatus(source, s.startedAt).phase == 'Build'),
-    );
+    final sessions = _cycleSessions(source).reversed
+        .where((s) => s.phase == 'Build' || (s.phase == null && cycleStatus(source, s.startedAt).phase == 'Build'))
+        .toList(); // a list, not a lazy filter: it is walked once per planned exercise
     double? scaled(String name, double? weight) {
       if (weight == null || weight <= 0) return null;
       return loadableAtOrBelow(name, weight * loadPercent / 100);
@@ -158,7 +166,7 @@ extension AppStoreCycles on AppStore {
           reference = session.exercises
               .where(
                 (e) =>
-                    e.name.toLowerCase() == planned.name.toLowerCase() &&
+                    sameExercise(e.name, planned.name) &&
                     e.method == method &&
                     e.loadMode == mode &&
                     e.sets.length == planned.sets.length &&
@@ -230,10 +238,24 @@ extension AppStoreCycles on AppStore {
 
   /// A reusable demo: three workouts on days 1, 3 and 5, started last week.
   Mesocycle openDemoCycle() {
+    final today = dateOnly(DateTime.now());
+    final lastMonday = addDays(today, -(today.weekday - 1) - 7);
     final existing = cycles.where((c) => c.name == 'Demo cycle').firstOrNull;
-    if (existing != null) return existing;
+    if (existing != null) {
+      // The button must always show something: an ended demo starts over when no other cycle is running.
+      if (!existing.active && activeCycle == null) {
+        existing
+          ..start = lastMonday
+          ..events.clear();
+        saveCycle(existing);
+      }
+      return existing;
+    }
     var n = 0;
     String make(String name, List<(String, int)> lifts) {
+      // Reuse the demo workouts if they are still there, instead of filling Train with duplicates.
+      final kept = templates.where((t) => t.name == name).firstOrNull;
+      if (kept != null) return kept.id;
       final t = WorkoutTemplate(
         id: 'W${DateTime.now().microsecondsSinceEpoch}${n++}',
         name: name,
@@ -252,11 +274,10 @@ extension AppStoreCycles on AppStore {
     final push = make('Demo Push', [('Bench Press', 8), ('Shoulder Press', 10), ('Triceps Pushdown', 12)]);
     final pull = make('Demo Pull', [('Lat Pulldown', 10), ('Machine Row', 10), ('Biceps Curl', 12)]);
     final legs = make('Demo Legs', [('Squat', 8), ('Romanian Deadlift', 10), ('Leg Curl', 12)]);
-    final today = dateOnly(DateTime.now());
     final c = Mesocycle(
       id: 'C${DateTime.now().microsecondsSinceEpoch}',
       name: 'Demo cycle',
-      start: addDays(today, -(today.weekday - 1) - 7),
+      start: lastMonday,
       active: activeCycle == null,
       schedule: {1: push, 3: pull, 5: legs},
     );

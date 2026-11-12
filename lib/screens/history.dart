@@ -635,7 +635,7 @@ class _SessionEditorState extends State<SessionEditor> {
                 () => _s.exercises.add(
                   SessionExercise(
                     name: name,
-                    loadMode: store.exercise(name)?.loadMode ?? 'external',
+                    loadMode: store.exercise(name)?.loadMode ?? defaultLoadModeFor(name),
                     sets: [SetEntry()],
                   ),
                 ),

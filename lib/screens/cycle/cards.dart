@@ -91,7 +91,7 @@ class CycleStatusCard extends StatelessWidget {
       'Build' => cs.success,
       _ => cs.primary,
     };
-    final todayName = store.template(cycle.schedule[status.dayInMicro])?.name;
+    final todayName = dueWorkouts(cycle, store.history).map((id) => store.template(id)?.name).nonNulls.firstOrNull;
     final period = cycle.periodNoun();
     if (compact) {
       return Material(
@@ -117,7 +117,13 @@ class CycleStatusCard extends StatelessWidget {
                         style: t.bodySmall,
                       ),
                       Text(
-                        todayName == null ? 'Today: unplanned' : 'Today: $todayName',
+                        status.phase == 'Upcoming'
+                            ? 'Starts ${fmtShortDate(status.start)}'
+                            : status.phase == 'Complete'
+                            ? ''
+                            : todayName == null
+                            ? 'Today: nothing due'
+                            : 'Today: $todayName',
                         style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                       ),
                     ],
@@ -214,7 +220,7 @@ class TodayCard extends StatelessWidget {
     final ids = [
       if (day.templateId != null && day.status == 'planned') day.templateId!,
       for (final (_, id) in day.incoming) id,
-    ];
+    ].where((id) => store.template(id) != null).toList();
     final done = day.status == 'done' || day.status == 'moved_done';
     return Material(
       color: cs.surfaceContainerHigh,
@@ -376,10 +382,15 @@ class _Schedule extends StatelessWidget {
                     ),
                     Expanded(
                       child: Text(
-                        store.template(cycle.schedule[d])?.name ?? 'Rest',
+                        // A scheduled workout that was deleted is shown as missing, never as a rest day.
+                        store.template(cycle.schedule[d])?.name ??
+                            (cycle.schedule[d] == null ? 'Rest' : '? Deleted workout'),
                         style: cycle.schedule[d] == null
                             ? t.bodyLarge?.copyWith(color: cs.onSurfaceVariant)
-                            : t.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                            : t.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: store.template(cycle.schedule[d]) == null ? cs.error : null,
+                              ),
                       ),
                     ),
                     Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),

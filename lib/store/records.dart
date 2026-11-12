@@ -29,7 +29,7 @@ extension AppStoreRecords on AppStore {
     for (final s in history) {
       if (s.phase == 'Deload') continue;
       if (!anyWorkout && s.templateId != templateId) continue;
-      final e = s.exercises.where((e) => e.name.toLowerCase() == exercise.toLowerCase()).firstOrNull;
+      final e = s.exercises.where((e) => sameExercise(e.name, exercise)).firstOrNull;
       if (e == null || !e.sets.any((x) => x.done)) continue;
       return [for (final set in e.sets) _inUnit(set, s.unit, null, exercise)];
     }
@@ -37,7 +37,14 @@ extension AppStoreRecords on AppStore {
   }
 
   void _syncHistoryCaches() {
-    final key = (identityHashCode(history), history.length, settings.unit, _historyVersion);
+    // Cached last-time values are rounded by gymLoad, so the key holds everything that rounding reads.
+    final key = (
+      identityHashCode(history),
+      history.length,
+      settings.unit,
+      settings.selectedPlateProfile,
+      _historyVersion,
+    );
     if (key == _historyCacheKey) return;
     _historyCacheKey = key;
     _previousCache.clear();
@@ -78,7 +85,7 @@ extension AppStoreRecords on AppStore {
           final past = session.exercises
               .where(
                 (e) =>
-                    e.name.toLowerCase() == exercise.name.toLowerCase() &&
+                    sameExercise(e.name, exercise.name) &&
                     e.method == exercise.method &&
                     e.loadMode == exercise.loadMode &&
                     e.work.any((s) => s.done),
@@ -118,7 +125,7 @@ extension AppStoreRecords on AppStore {
       double? weight, e1rm;
       for (final s in history) {
         for (final e in s.exercises) {
-          if (e.name.toLowerCase() != exercise.toLowerCase() || e.loadMode != 'external') continue;
+          if (!sameExercise(e.name, exercise) || e.loadMode != 'external') continue;
           for (final set in e.sets) {
             if (!set.done || set.warmup || set.context != context) continue;
             final x = _inUnit(set, s.unit);

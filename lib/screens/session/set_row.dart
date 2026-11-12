@@ -276,6 +276,7 @@ class _SetRow extends StatelessWidget {
                 ..invalid.remove('weight');
               store.changed();
             },
+            onBadText: (bad) => bad ? s.badText.add('weight') : s.badText.remove('weight'),
             onSubmitted: () => screen.submit(store, e, index, 'weight'),
             onBackspaceEmpty: () => screen.backspace(store, e, index, 'weight'),
           ),
@@ -304,6 +305,7 @@ class _SetRow extends StatelessWidget {
                 ..invalid.remove('reps');
               store.changed();
             },
+            onBadText: (bad) => bad ? s.badText.add('reps') : s.badText.remove('reps'),
             onSubmitted: () => screen.submit(store, e, index, 'reps'),
             onBackspaceEmpty: () => screen.backspace(store, e, index, 'reps'),
           ),
@@ -330,6 +332,7 @@ class _SetRow extends StatelessWidget {
                       ..invalid.remove('rir');
                     store.changed();
                   },
+                  onBadText: (bad) => bad ? s.badText.add('rir') : s.badText.remove('rir'),
                   onSubmitted: () => screen.submit(store, e, index, 'rir'),
                   onBackspaceEmpty: () => screen.backspace(store, e, index, 'rir'),
                 )

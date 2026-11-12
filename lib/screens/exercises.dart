@@ -163,6 +163,12 @@ class ExerciseEditor extends StatefulWidget {
 
 class _ExerciseEditorState extends State<ExerciseEditor> {
   late Exercise _e = widget.original;
+
+  // Nullable while editing: a default filled in on every keystroke would refill the box the moment it is
+  // cleared, so the range could never be retyped. Defaults apply on save.
+  late int? _repMin = _e.repMin;
+  late int? _repMax = _e.repMax;
+  bool get _rangeInvalid => (_repMin ?? 8) > (_repMax ?? 12);
   late final _name = TextEditingController(text: _e.name);
   late final _note = TextEditingController(text: _e.note);
   late final _desc = TextEditingController(text: _e.description);
@@ -181,10 +187,12 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
     final store = StoreScope.read(context);
     final name = _name.text.trim();
     if (name.isEmpty) return notify(context, 'Exercise name cannot be empty.');
-    if (_e.repMin > _e.repMax) return notify(context, 'Straight minimum reps must not exceed maximum reps.');
+    if (_rangeInvalid) return notify(context, 'Straight minimum reps must not exceed maximum reps.');
     final error = store.saveExercise(
       _e.copyWith(
         name: name,
+        repMin: _repMin ?? 8,
+        repMax: _repMax ?? 12,
         note: _note.text.trim(),
         description: _desc.text.trim(),
         context: _e.context.copyWith(setup: _setup.text.trim()),
@@ -349,23 +357,23 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
             children: [
               Expanded(
                 child: NumField(
-                  value: _e.repMin.toDouble(),
+                  value: _repMin?.toDouble(),
                   kind: NumKind.reps,
                   placeholder: 'Straight minimum reps',
                   dense: false,
-                  invalid: _e.repMin > _e.repMax,
-                  onChanged: (v) => setState(() => _e = _e.copyWith(repMin: v?.round() ?? 8)),
+                  invalid: _rangeInvalid,
+                  onChanged: (v) => setState(() => _repMin = v?.round()),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: NumField(
-                  value: _e.repMax.toDouble(),
+                  value: _repMax?.toDouble(),
                   kind: NumKind.reps,
                   placeholder: 'Straight maximum reps',
                   dense: false,
-                  invalid: _e.repMin > _e.repMax,
-                  onChanged: (v) => setState(() => _e = _e.copyWith(repMax: v?.round() ?? 12)),
+                  invalid: _rangeInvalid,
+                  onChanged: (v) => setState(() => _repMax = v?.round()),
                 ),
               ),
             ],

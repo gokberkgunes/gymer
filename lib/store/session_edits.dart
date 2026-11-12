@@ -17,6 +17,17 @@ extension AppStoreSessionEdits on AppStore {
               ? _deloadExercise(te, cycle, s)
               : _buildExercise(te, s, cycle);
           if (existing == null) return fresh;
+          // A deload exercise is its own plan (straight sets, fewer of them): editing the workout mid-deload
+          // must not turn its rows back into the build plan's method and roles. Only rests follow the edit.
+          if (s.phase == 'Deload') {
+            final work = te.sets.where((ts) => !isWarmup(ts.type)).toList();
+            var w = 0;
+            for (final set in existing.sets.where((set) => !set.warmup && !set.done)) {
+              if (w < work.length) set.rest = work[w].rest;
+              w++;
+            }
+            return existing;
+          }
           existing.method = canonicalMethod(te.method);
           existing.sets = [
             for (final (i, ts) in te.sets.indexed)
@@ -49,7 +60,7 @@ extension AppStoreSessionEdits on AppStore {
     for (final e in s.exercises) {
       for (final (i, set) in e.sets.indexed) {
         if (!set.done) continue;
-        final te = t.exercises.where((x) => x.name.toLowerCase() == e.name.toLowerCase()).firstOrNull;
+        final te = t.exercises.where((x) => sameExercise(x.name, e.name)).firstOrNull;
         if (te == null || i >= te.sets.length) {
           return '${e.name}: completed sets cannot be removed or replaced while the workout is active.';
         }
@@ -62,13 +73,11 @@ extension AppStoreSessionEdits on AppStore {
   String? addSessionExercise(String name) {
     final s = active;
     if (s == null) return null;
-    if (s.exercises.any((e) => e.name.toLowerCase() == name.toLowerCase())) {
+    if (s.exercises.any((e) => sameExercise(e.name, name))) {
       return 'That exercise is already in the current workout.';
     }
     final info = addExercise(name);
-    final fromTemplate = template(
-      s.templateId,
-    )?.exercises.where((e) => e.name.toLowerCase() == info.name.toLowerCase()).firstOrNull;
+    final fromTemplate = template(s.templateId)?.exercises.where((e) => sameExercise(e.name, info.name)).firstOrNull;
     final te =
         fromTemplate ??
         TemplateExercise(
@@ -88,6 +97,19 @@ extension AppStoreSessionEdits on AppStore {
   }
 
   String? removeSessionExercise(SessionExercise e) {
+    // "Skip warm-up" arrives here with the ramp card: skipping must work after some ramp sets are done.
+    // Finished ramp sets stay recorded; only the rest of the ramp is dropped.
+    if (active?.isWarmupExercise(e) ?? false) {
+      if (e.sets.any((s) => s.done)) {
+        e.sets.removeWhere((s) => !s.done);
+      } else {
+        active!.warmupExercises.remove(e);
+      }
+      _finishWarmupPhase();
+      if (rest?.exercise == e.name && rest?.warmup == true) _dismissRest();
+      changed();
+      return null;
+    }
     if (e.sets.any((s) => s.done)) return 'Completed exercises cannot be removed from the current session.';
     active?.exercises.remove(e);
     active?.warmupExercises.removeWhere((warmup) => identical(warmup, e) || warmup.name == e.name);
@@ -101,7 +123,7 @@ extension AppStoreSessionEdits on AppStore {
   String? substituteExercise(SessionExercise e, String newName) {
     if (e.sets.any((s) => s.done)) return 'Substitute before completing sets for this exercise.';
     final s = active!;
-    if (s.exercises.any((x) => x != e && x.name.toLowerCase() == newName.toLowerCase())) {
+    if (s.exercises.any((x) => x != e && sameExercise(x.name, newName))) {
       return 'That exercise is already in the current workout.';
     }
     final info = addExercise(newName);
@@ -302,11 +324,15 @@ extension AppStoreSessionEdits on AppStore {
     final set = e.sets[index];
     set.invalid.clear();
     final weightKind = e.loadMode == 'external' ? NumKind.weight : NumKind.load;
-    set.weight ??= fallbackValue(e, index, 'weight')?.toDouble();
-    set.reps ??= fallbackValue(e, index, 'reps')?.toInt();
+    // No placeholder for a box the user is visibly (if wrongly) filling in.
+    if (!set.badText.contains('weight')) set.weight ??= fallbackValue(e, index, 'weight')?.toDouble();
+    if (!set.badText.contains('reps')) set.reps ??= fallbackValue(e, index, 'reps')?.toInt();
     if (set.weight == null || !numberAllowed(set.weight!, weightKind)) set.invalid.add('weight');
     if (set.reps == null || !numberAllowed(set.reps!.toDouble(), NumKind.reps)) set.invalid.add('reps');
     if (set.rir != null && !numberAllowed(set.rir!.toDouble(), NumKind.rir)) set.invalid.add('rir');
+    // A box still showing unusable text holds an older value than the user sees: mark it (red, no popup) and
+    // leave the set open, instead of completing with a number the user did not type.
+    set.invalid.addAll(set.badText);
     if (!methodSetUsesRir(e.method, set.type)) set.rir = null;
     return set.invalid.isEmpty;
   }

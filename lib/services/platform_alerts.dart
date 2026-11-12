@@ -72,13 +72,27 @@ class PlatformAlerts extends Alerts {
   }
 
   @override
-  void scheduleRest(DateTime at, String exercise) => _schedule(at, exercise);
+  void scheduleRest(DateTime at, String exercise) => _alarm(() => _schedule(at, exercise, _alarmRequest));
 
-  Future<void> _schedule(DateTime at, String exercise) async {
-    if (!_ready) return;
+  /// Scheduling takes several awaited platform calls, so requests run one after another and each carries a
+  /// number: a schedule that has been overtaken by a newer schedule or a cancel stops before it posts, and a
+  /// cancelled alarm can never be scheduled afterwards.
+  int _alarmRequest = 0;
+  Future<void> _alarmQueue = Future.value();
+
+  void _alarm(Future<void> Function() step) {
+    _alarmRequest++;
+    _alarmQueue = _alarmQueue.then((_) => step()).catchError((Object e) {
+      debugPrint('gymer: rest alarm failed: $e');
+    });
+  }
+
+  Future<void> _schedule(DateTime at, String exercise, int request) async {
+    if (!_ready || request != _alarmRequest) return;
     await _askOnce();
     final exact = await canScheduleExact() ?? true;
     await _plugin.cancel(id: _restId);
+    if (request != _alarmRequest || !at.isAfter(DateTime.now())) return;
     await _plugin.zonedSchedule(
       id: _restId,
       title: 'Rest over',
@@ -126,7 +140,7 @@ class PlatformAlerts extends Alerts {
 
   @override
   void cancelRest() {
-    if (_ready) _plugin.cancel(id: _restId);
+    if (_ready) _alarm(() => _plugin.cancel(id: _restId));
   }
 
   /// The live timer is only posted while the app is in the background; inside the app the in-app timer

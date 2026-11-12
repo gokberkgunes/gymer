@@ -188,6 +188,20 @@ List<CycleDay> calendarDays(Mesocycle c, List<Session> history) {
   ];
 }
 
+/// Workouts still due on [day] (default today): the planned one unless it was moved away, missed or done, plus
+/// any moved here. Everything that says "today" must read this, never `schedule[dayInMicro]` directly, which
+/// knows nothing about calendar changes or a cycle that has not started.
+List<String> dueWorkouts(Mesocycle c, List<Session> history, [DateTime? day]) {
+  final at = day ?? DateTime.now();
+  if (!cycleStatus(c, at).running) return const [];
+  final today = calendarDays(c, history).where((d) => dateKey(d.date) == dateKey(at)).firstOrNull;
+  if (today == null) return const [];
+  return [
+    if (today.templateId != null && today.status == 'planned') today.templateId!,
+    for (final (_, id) in today.incoming) id,
+  ];
+}
+
 /// After a session is saved, attach it to the one calendar day it fulfils.
 void linkSession(Mesocycle c, Session s) {
   if (s.templateId == null) return;

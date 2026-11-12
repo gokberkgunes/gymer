@@ -125,6 +125,15 @@ void main() {
     store.startSession(legs);
     expect(store.active!.estimatedSeconds, store.plannedTiming(legs).total);
     expect(store.active!.estimatedSeconds, store.templateTiming(legs).total);
+
+    // A finished deload must never become the next cycle's baseline: calibration reads the last build set.
+    store.activeCycle!.deloadManual = false;
+    store.startSession(legs);
+    logAll(store, 87.5, 8, 4);
+    store.finishSession();
+    store.saveCycle(Mesocycle(id: 'c2', start: DateTime.now()));
+    store.startSession(legs);
+    expect(store.calibrationFor(press.name, 'Straight', store.active!)!.weight, greaterThanOrEqualTo(95));
   });
 
   test('alerts follow the workout and rest timer', () async {

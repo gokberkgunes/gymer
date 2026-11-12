@@ -1,13 +1,102 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../store.dart';
 
-class StoreScope extends InheritedNotifier<AppStore> {
-  const StoreScope({super.key, required AppStore store, required super.child}) : super(notifier: store);
+/// Gives the store to the widgets below and rebuilds those that asked with [of] when it changes.
+class StoreScope extends InheritedNotifier<Listenable> {
+  final AppStore store;
+  const StoreScope({super.key, required this.store, required super.child}) : super(notifier: store);
 
-  static AppStore of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()!.notifier!;
+  /// The same store, but rebuilding on [notifier] instead of on every store change; see [StoreGate].
+  const StoreScope.gated({super.key, required this.store, required Listenable super.notifier, required super.child});
 
-  static AppStore read(BuildContext context) => context.getInheritedWidgetOfExactType<StoreScope>()!.notifier!;
+  static AppStore of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StoreScope>()!.store;
+
+  static AppStore read(BuildContext context) => context.getInheritedWidgetOfExactType<StoreScope>()!.store;
+}
+
+/// Keeps a root page from rebuilding while nobody can see it. The store notifies on every typed digit of a
+/// workout, and each of the five root pages (Train, History, Cycle, Rep Max, Settings) stays alive in the
+/// background; without this gate one keystroke rebuilt all of them, calendars and reviews included.
+/// The page below rebuilds on store changes only while [selected] says it is the shown one and no other page
+/// lies on top of it; changes missed meanwhile are applied in the same frame it becomes visible again.
+/// Only for root pages: anything opened on top of them listens to the store directly.
+class StoreGate extends StatefulWidget {
+  final ValueListenable<bool> selected;
+  final Widget child;
+  const StoreGate({super.key, required this.selected, required this.child});
+
+  @override
+  State<StoreGate> createState() => _StoreGateState();
+}
+
+class _GatePulse extends ChangeNotifier {
+  void fire() => notifyListeners();
+}
+
+class _StoreGateState extends State<StoreGate> {
+  AppStore? _store;
+  var _pulse = _GatePulse();
+  bool _visible = false;
+  bool _missed = false;
+
+  void _onStore() {
+    if (_visible) {
+      _pulse.fire();
+    } else {
+      _missed = true;
+    }
+  }
+
+  void _onSelected() => setState(() {});
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selected.addListener(_onSelected);
+  }
+
+  @override
+  void didUpdateWidget(covariant StoreGate old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected) {
+      old.selected.removeListener(_onSelected);
+      widget.selected.addListener(_onSelected);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final store = StoreScope.read(context);
+    if (store != _store) {
+      _store?.removeListener(_onStore);
+      _store = store..addListener(_onStore);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selected.removeListener(_onSelected);
+    _store?.removeListener(_onStore);
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Depending on the route rebuilds this gate when a page is pushed over it or popped off it.
+    _visible = widget.selected.value && (ModalRoute.of(context)?.isCurrent ?? true);
+    if (_visible && _missed) {
+      // A new notifier makes the scope below rebuild its dependents within this very build.
+      _missed = false;
+      final old = _pulse;
+      _pulse = _GatePulse();
+      WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    }
+    return StoreScope.gated(store: _store!, notifier: _pulse, child: widget.child);
+  }
 }
 
 String fmtNum(double? v) {
