@@ -481,6 +481,7 @@ class _Volume extends StatelessWidget {
               MuscleVolumeRow(
                 muscle: m,
                 sets: volume[m]!.countedSets(includePartialSets: store.settings.includePartialSets),
+                frequency: volume[m]!.directDaysPerWeek,
               ),
             if (protocols) ...[
               Padding(
@@ -582,11 +583,13 @@ Color weeklySetsColor(ColorScheme cs, String muscle, double sets) {
 /// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath and the landmark
 /// boundaries as small muted numbers under it. No names, legends or chevrons: the dialog behind the tap explains
 /// the bar. [delta], when given, is the change from the saved plan (the workout editor's weekly-sets sheet).
+/// [frequency] adds direct training days per week beside the name on the Cycle tab.
 class MuscleVolumeRow extends StatelessWidget {
   final String muscle;
   final double sets;
   final double? delta;
-  const MuscleVolumeRow({super.key, required this.muscle, required this.sets, this.delta});
+  final double? frequency;
+  const MuscleVolumeRow({super.key, required this.muscle, required this.sets, this.delta, this.frequency});
 
   @override
   Widget build(BuildContext context) {
@@ -605,7 +608,31 @@ class MuscleVolumeRow extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(muscle, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          muscle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (frequency case final days?) ...[
+                        const SizedBox(width: 8),
+                        Tooltip(
+                          message:
+                              'Planned direct training days per week. Each scheduled day counts once, including '
+                              'special set methods. Warm-ups and indirect work do not count. Schedules longer or '
+                              'shorter than seven days are averaged per week.',
+                          child: Text(
+                            '${fmtSets(days)}×/week',
+                            style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 if (change != null && change.abs() > 1e-9)
                   Padding(

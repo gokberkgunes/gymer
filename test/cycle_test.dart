@@ -77,6 +77,8 @@ void main() {
     expect(v['Quads']!.sets, closeTo(2 * 7 / 3, 1e-9));
     expect(v['Hamstrings']!.sets, closeTo(0.5 * 2 * 7 / 3, 1e-9));
     expect(v['Hamstrings']!.direct.protocolGroups, closeTo(7 / 3, 1e-9));
+    expect(v['Quads']!.directDaysPerWeek, closeTo(7 / 3, 1e-9));
+    expect(v['Hamstrings']!.directDaysPerWeek, closeTo(7 / 3, 1e-9)); // Protocol work is a training day too.
     expect(v['Quads']!.countedSets(includePartialSets: false), closeTo(2 * 7 / 3, 1e-9));
     expect(v['Hamstrings']!.countedSets(includePartialSets: false), 0);
 
@@ -94,5 +96,37 @@ void main() {
     expect(store.editorWeeklySets(a).after['Hamstrings'], 0);
     expect(store.editorWeeklySets(a).after['Quads'], closeTo(2 * 7 / 3, 1e-9));
     expect(Settings.fromJson(store.settings.toJson()).includePartialSets, isFalse);
+
+    final b = WorkoutTemplate(
+      id: 'B',
+      name: 'B',
+      exercises: [
+        TemplateExercise.typed(name: 'Leg Press', types: ['Normal', 'Normal']),
+        TemplateExercise.typed(name: 'Leg Extension', types: ['Top Set']),
+        TemplateExercise.typed(name: 'Calf Press', types: ['Warm-up']),
+        TemplateExercise(name: 'Lateral Raise', sets: []),
+      ],
+    );
+    final templates = {'A': a, 'B': b};
+    (List<String>, List<String>) muscles(String name) => switch (name) {
+      'Leg Press' || 'Leg Extension' => (['Quads'], ['Hamstrings', 'Glutes']),
+      'Leg Curl' => (['Hamstrings'], []),
+      'Calf Press' => (['Calves'], []),
+      _ => (['Side Delts'], []),
+    };
+    final eightDays = Mesocycle(
+      id: 'eight',
+      start: c.start,
+      microDays: 8,
+      schedule: {1: 'A', 3: 'A', 5: 'B', 8: 'missing'},
+    );
+    final repeated = plannedWeeklyVolume(eightDays, templates, muscles);
+    expect(repeated['Quads']!.directDaysPerWeek, 3 * 7 / 8); // Several sets/exercises still count as one day.
+    expect(repeated['Hamstrings']!.directDaysPerWeek, 2 * 7 / 8); // Secondary work on day 5 adds no day.
+    expect(repeated['Glutes']!.directDaysPerWeek, 0);
+    expect(repeated.containsKey('Calves'), isFalse); // Warm-up-only work does not add a day.
+    expect(repeated.containsKey('Side Delts'), isFalse); // Empty exercises do not add a day.
+    final week = Mesocycle(id: 'week', start: c.start, schedule: {1: 'B', 4: 'B'});
+    expect(plannedWeeklyVolume(week, templates, muscles)['Quads']!.directDaysPerWeek, 2);
   });
 }

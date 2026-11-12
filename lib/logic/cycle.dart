@@ -331,7 +331,10 @@ final volumeLandmarks = <String, (String, String)>{
 class WeeklyVolume {
   final VolumeMetrics direct;
   final VolumeMetrics indirect;
-  WeeklyVolume(this.direct, this.indirect);
+
+  /// Scheduled days with direct working sets, averaged per seven days.
+  final double directDaysPerWeek;
+  WeeklyVolume(this.direct, this.indirect, {this.directDaysPerWeek = 0});
   double get sets => countedSets();
   double countedSets({bool includePartialSets = true}) =>
       direct.conventional + (includePartialSets ? 0.5 * indirect.conventional : 0);
@@ -343,11 +346,14 @@ Map<String, WeeklyVolume> plannedWeeklyVolume(
   (List<String>, List<String>) Function(String exercise) musclesOf,
 ) {
   final rows = <VolumeRow>[];
+  final directDays = <String, int>{};
   for (final MapEntry(key: day, value: id) in c.schedule.entries) {
     final t = templates[id];
     if (t == null) continue;
+    final trained = <String>{};
     for (final (i, e) in t.exercises.indexed) {
       final (primary, secondary) = musclesOf(e.name);
+      if (e.workSets > 0) trained.addAll(primary);
       for (final s in e.sets) {
         rows.add(
           VolumeRow(
@@ -361,6 +367,9 @@ Map<String, WeeklyVolume> plannedWeeklyVolume(
         );
       }
     }
+    for (final muscle in trained) {
+      directDays.update(muscle, (days) => days + 1, ifAbsent: () => 1);
+    }
   }
   final report = summarizeVolume(rows);
   final factor = 7 / math.max(1, c.microDays);
@@ -369,6 +378,7 @@ Map<String, WeeklyVolume> plannedWeeklyVolume(
       m: WeeklyVolume(
         (report.direct[m] ?? VolumeMetrics()).scaled(factor),
         (report.indirect[m] ?? VolumeMetrics()).scaled(factor),
+        directDaysPerWeek: (directDays[m] ?? 0) * factor,
       ),
   };
 }
