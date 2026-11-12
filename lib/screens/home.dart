@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../widgets/common.dart';
@@ -14,6 +15,8 @@ import 'settings.dart';
 import 'train.dart';
 import '../store.dart';
 
+const _workoutRouteName = '/workout';
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -23,6 +26,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
+  final _navigators = List.generate(5, (_) => GlobalKey<NavigatorState>());
+  late final _observers = List.generate(5, (_) => _TabObserver(_navigationChanged));
+  bool _navigationUpdatePending = false;
   Timer? _restWatch;
   late final AppStore _store;
   String? _alerted;
@@ -37,7 +43,7 @@ class _HomeShellState extends State<HomeShell> {
     store.addListener(_syncRestWatch);
     _syncRestWatch();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) reportUnreadableData(context);
+      if (mounted) reportUnreadableData(_navigators[_tab].currentContext!);
     });
   }
 
@@ -55,7 +61,7 @@ class _HomeShellState extends State<HomeShell> {
   String _key(DateTime start, int total) => '${start.microsecondsSinceEpoch}/$total';
 
   void _checkRest() {
-    final store = _store = StoreScope.read(context);
+    final store = _store;
     final r = store.rest;
     if (r == null || !r.overdue) return;
     final key = _key(r.startedAt, r.totalSeconds);
@@ -76,19 +82,79 @@ class _HomeShellState extends State<HomeShell> {
   void _select(int i) {
     final store = StoreScope.read(context);
     if (i != 2 && store.cancelPendingCycle()) {
+      _navigators[2].currentState?.popUntil((route) => route.isFirst);
       notify(context, 'Mesocycle setup canceled before Start was pressed.');
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _tab = i);
+  }
+
+  void _navigationChanged() {
+    if (!mounted) return;
+    // Initial routes are generated during build; subsequent pushes usually happen between frames.
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      if (_navigationUpdatePending) return;
+      _navigationUpdatePending = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigationUpdatePending = false;
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _openWorkout() {
+    if (_store.active == null) return;
+    // Reuse the existing workout even when it was opened from another tab.
+    for (var i = 0; i < _observers.length; i++) {
+      final route = _observers[i].workoutRoute;
+      if (route == null) continue;
+      if (_tab != i) _select(i);
+      _navigators[i].currentState!.popUntil((candidate) => candidate == route);
+      return;
+    }
+    unawaited(
+      _navigators[_tab].currentState!.push(
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: _workoutRouteName),
+          builder: (_) => const SessionScreen(),
+        ),
+      ),
+    );
+  }
+
+  Widget _tabNavigator(int i, Widget tab) {
+    final canPop = _observers[i].canPop;
+    // Capture this stack's state before a Back callback can open the workout on another stack.
+    final selected = i == _tab;
+    return TickerMode(
+      enabled: selected,
+      child: NavigatorPopHandler<Object?>(
+        enabled: selected,
+        onPopWithResult: (result) {
+          if (selected && i == _tab && canPop) unawaited(_navigators[i].currentState!.maybePop(result));
+        },
+        child: HeroControllerScope.none(
+          child: Navigator(
+            key: _navigators[i],
+            observers: [_observers[i]],
+            onGenerateRoute: (_) => MaterialPageRoute<void>(builder: (_) => tab),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final showFloating = store.active != null && store.rest != null && store.settings.floatingTimer;
+    final inWorkout = _observers[_tab].inWorkout;
+    final showFloating = !inWorkout && store.active != null && store.rest != null && store.settings.floatingTimer;
     final bg = Theme.of(context).scaffoldBackgroundColor;
     // From a root tab, Back first returns to the in-progress workout.
-    final backToWorkout = store.active != null && _tab != 0;
+    final backToWorkout = store.active != null && _tab != 0 && !_observers[_tab].canPop;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: bg,
@@ -103,7 +169,7 @@ class _HomeShellState extends State<HomeShell> {
       child: PopScope(
         canPop: !backToWorkout,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && backToWorkout) openSession(context);
+          if (!didPop && backToWorkout) _openWorkout();
         },
         child: Scaffold(
           body: Stack(
@@ -120,48 +186,78 @@ class _HomeShellState extends State<HomeShell> {
                       const RepMaxScreen(asTab: true),
                       const SettingsScreen(),
                     ].indexed)
-                      // Hidden tabs keep their state but not their animations (e.g. Train's rainbow border).
-                      TickerMode(enabled: i == _tab, child: tab),
+                      // Each tab retains its pages and drafts without animating while hidden.
+                      _tabNavigator(i, tab),
                   ],
                 ),
               ),
-              if (showFloating)
-                Positioned(right: 16, bottom: 16, child: FloatingRestTimer(onTap: () => openSession(context))),
+              if (showFloating) Positioned(right: 16, bottom: 16, child: FloatingRestTimer(onTap: _openWorkout)),
             ],
           ),
-          bottomNavigationBar: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (store.active != null && !showFloating) const _ActiveBar(),
-              NavigationBar(
-                selectedIndex: _tab,
-                onDestinationSelected: (i) {
-                  _select(i);
-                  // Selecting Workout while a session runs opens that session.
-                  if (i == 0 && store.active != null) openSession(context);
-                },
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.bolt_outlined),
-                    selectedIcon: Icon(Icons.bolt_rounded),
-                    label: 'Train',
-                  ),
-                  NavigationDestination(icon: Icon(Icons.history_rounded), label: 'History'),
-                  NavigationDestination(
-                    icon: Icon(Icons.calendar_month_outlined),
-                    selectedIcon: Icon(Icons.calendar_month_rounded),
-                    label: 'Cycle',
-                  ),
-                  NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Rep Max'),
-                  NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Settings'),
-                ],
-              ),
-            ],
-          ),
+          bottomNavigationBar: inWorkout
+              ? null
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (store.active != null && !showFloating) const _ActiveBar(),
+                    NavigationBar(
+                      selectedIndex: _tab,
+                      onDestinationSelected: (i) {
+                        _select(i);
+                        if (i == 0 && store.active != null) _openWorkout();
+                      },
+                      destinations: const [
+                        NavigationDestination(
+                          icon: Icon(Icons.bolt_outlined),
+                          selectedIcon: Icon(Icons.bolt_rounded),
+                          label: 'Train',
+                        ),
+                        NavigationDestination(icon: Icon(Icons.history_rounded), label: 'History'),
+                        NavigationDestination(
+                          icon: Icon(Icons.calendar_month_outlined),
+                          selectedIcon: Icon(Icons.calendar_month_rounded),
+                          label: 'Cycle',
+                        ),
+                        NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Rep Max'),
+                        NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Settings'),
+                      ],
+                    ),
+                  ],
+                ),
         ),
       ),
     );
   }
+}
+
+/// Tracks pages independently of popups, so a dialog never reveals the bar over a workout.
+class _TabObserver extends NavigatorObserver {
+  _TabObserver(this.onChanged);
+
+  final VoidCallback onChanged;
+  final _routes = <Route<dynamic>>[];
+
+  bool get canPop => _routes.length > 1;
+  bool get inWorkout => _routes.whereType<PageRoute<dynamic>>().lastOrNull?.settings.name == _workoutRouteName;
+  Route<dynamic>? get workoutRoute => _routes.where((route) => route.settings.name == _workoutRouteName).firstOrNull;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => _routes.add(route);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => _routes.remove(route);
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => _routes.remove(route);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final index = _routes.indexOf(oldRoute!);
+    if (index >= 0 && newRoute != null) _routes[index] = newRoute;
+  }
+
+  @override
+  void didChangeTop(Route<dynamic> topRoute, Route<dynamic>? previousTopRoute) => onChanged();
 }
 
 /// Compact global entry point back into the in-progress workout.
@@ -207,5 +303,10 @@ class _ActiveBar extends StatelessWidget {
 }
 
 void openSession(BuildContext context) {
-  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SessionScreen()));
+  final shell = context.findAncestorStateOfType<_HomeShellState>();
+  if (shell != null) {
+    shell._openWorkout();
+  } else {
+    unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SessionScreen())));
+  }
 }

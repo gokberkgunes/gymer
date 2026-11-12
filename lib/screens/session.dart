@@ -203,7 +203,9 @@ class _SessionScreenState extends State<SessionScreen> {
     }
     final summary = store.finishSession(saveStructure: saveStructure);
     if (summary == null || !mounted) return;
-    unawaited(Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => FinishScreen(summary: summary))));
+    unawaited(
+      Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => FinishScreen(summary: summary))),
+    );
   }
 
   Future<void> _discard(AppStore store) async {
