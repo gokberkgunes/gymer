@@ -359,7 +359,6 @@ LegacyData _convertLegacy(Map<String, String> files) {
     x.trackRir = flag('track_rir', x.trackRir);
     x.haptics = flag('set_haptics', x.haptics);
     x.restHaptics = flag('rest_haptics', x.restHaptics);
-    x.restSound = flag('rest_sound', x.restSound);
     x.keepAwake = flag('keep_screen_awake', x.keepAwake);
     x.showPreviousReps = flag('show_previous_reps', x.showPreviousReps);
     x.dimCompleted = flag('dim_completed_sets', x.dimCompleted);

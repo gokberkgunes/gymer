@@ -36,13 +36,6 @@ class _TimerSettings extends StatelessWidget {
             (x, v) => x.restHaptics = v,
             subtitle: 'Vibrates when rest runs out.',
           ),
-          _switch(
-            context,
-            'Sound when rest ends',
-            s.restSound,
-            (x, v) => x.restSound = v,
-            subtitle: 'A short beep at media volume.',
-          ),
           _stackedChoice(
             context,
             'Planned rest labels',

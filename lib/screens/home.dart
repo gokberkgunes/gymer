@@ -90,7 +90,7 @@ class _HomeShellState extends State<HomeShell> {
     _alerted = key;
     // If Android paused the app, this check runs late on return; a buzz minutes after rest ended is noise.
     if (r.remainingSeconds < -5) return;
-    store.alerts.restDone(haptics: store.settings.restHaptics, sound: store.settings.restSound);
+    store.alerts.restDone(haptics: store.settings.restHaptics);
   }
 
   @override

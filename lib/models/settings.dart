@@ -115,7 +115,6 @@ class Settings {
   bool workoutCelebrations;
   bool haptics;
   bool restHaptics;
-  bool restSound;
   bool keepAwake;
 
   /// How rest is shown outside the app: live (sticky status-bar timer), alarm ("Rest over"
@@ -182,7 +181,6 @@ class Settings {
     this.workoutCelebrations = true,
     this.haptics = true,
     this.restHaptics = true,
-    this.restSound = false,
     this.keepAwake = true,
     this.restNotice = 'live',
     this.customIcons = false,
@@ -279,7 +277,6 @@ class Settings {
     'workoutCelebrations': workoutCelebrations,
     'haptics': haptics,
     'restHaptics': restHaptics,
-    'restSound': restSound,
     'keepAwake': keepAwake,
     'restNotice': restNotice,
     'customIcons': customIcons,
@@ -344,7 +341,6 @@ class Settings {
       workoutCelebrations: b('workoutCelebrations', d.workoutCelebrations),
       haptics: b('haptics', d.haptics),
       restHaptics: b('restHaptics', d.restHaptics),
-      restSound: b('restSound', d.restSound),
       keepAwake: b('keepAwake', d.keepAwake),
       restNotice: s('restNotice', d.restNotice, {'live', 'alarm', 'both', 'off'}),
       customIcons: b('customIcons', d.customIcons),

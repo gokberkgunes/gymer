@@ -28,8 +28,8 @@ abstract class Alerts {
   /// Whether the app is on screen; the live timer is only shown outside the app.
   void setForeground(bool foreground) {}
 
-  /// Foreground rest-over feedback: haptics and optional sound.
-  void restDone({required bool haptics, required bool sound}) {}
+  /// Foreground rest-over haptic feedback.
+  void restDone({required bool haptics}) {}
   void setDone() {}
 }
 
