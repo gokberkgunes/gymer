@@ -2,6 +2,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymer/logic/cycle.dart';
 import 'package:gymer/models.dart';
+import 'package:gymer/store.dart';
 
 Mesocycle cycle() => Mesocycle(id: 'c', start: DateTime(2026, 1, 5), endRir: 0, schedule: {1: 'A', 3: 'B'});
 
@@ -76,5 +77,22 @@ void main() {
     expect(v['Quads']!.sets, closeTo(2 * 7 / 3, 1e-9));
     expect(v['Hamstrings']!.sets, closeTo(0.5 * 2 * 7 / 3, 1e-9));
     expect(v['Hamstrings']!.direct.protocolGroups, closeTo(7 / 3, 1e-9));
+    expect(v['Quads']!.countedSets(includePartialSets: false), closeTo(2 * 7 / 3, 1e-9));
+    expect(v['Hamstrings']!.countedSets(includePartialSets: false), 0);
+
+    final store = AppStore()
+      ..templates = [a]
+      ..cycles = [c]
+      ..exercises = [
+        const Exercise(name: 'Leg Press', primary: ['Quads'], secondary: ['Hamstrings']),
+        const Exercise(name: 'Leg Curl', primary: ['Hamstrings']),
+      ];
+    addTearDown(store.dispose);
+    expect(Settings.fromJson({}).includePartialSets, isTrue);
+    expect(store.editorWeeklySets(a).after['Hamstrings'], closeTo(7 / 3, 1e-9));
+    store.settings.includePartialSets = false;
+    expect(store.editorWeeklySets(a).after['Hamstrings'], 0);
+    expect(store.editorWeeklySets(a).after['Quads'], closeTo(2 * 7 / 3, 1e-9));
+    expect(Settings.fromJson(store.settings.toJson()).includePartialSets, isFalse);
   });
 }

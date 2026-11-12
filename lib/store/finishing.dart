@@ -153,7 +153,8 @@ extension AppStoreFinishing on AppStore {
     final cycle = activeCycle ?? pendingCycle;
     final saved = {for (final t in templates) t.id: t};
     Map<String, double> sets(Mesocycle c, Map<String, WorkoutTemplate> byId) => {
-      for (final MapEntry(key: m, value: v) in plannedWeeklyVolume(c, byId, musclesOf).entries) m: v.sets,
+      for (final MapEntry(key: m, value: v) in plannedWeeklyVolume(c, byId, musclesOf).entries)
+        m: v.countedSets(includePartialSets: settings.includePartialSets),
     };
     final before = cycle == null ? <String, double>{} : sets(cycle, saved);
     if (cycle != null && cycle.schedule.containsValue(draft.id)) {

@@ -163,6 +163,7 @@ void main() {
     store.settings.requirePreviousSet = true;
     store.startSession(template);
     final session = store.active!;
+    expect(session.estimatedSeconds, store.templateTiming(template).total, reason: 'shared rests count only once');
     final bench = session.exercises.first, row = session.exercises.last;
     expect(store.toggleSet(row, 0).ok, isFalse);
     expect(store.toggleSet(bench, 0).ok, isTrue);

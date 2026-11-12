@@ -277,28 +277,44 @@ extension AppStoreCatalog on AppStore {
           sets: [for (final s in e.sets) SetEntry(type: s.type, rest: s.rest, groupStart: s.groupStart)],
         ),
     ], t.circuits);
-    return estimateWorkout(
-      rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
-      circuitIds: [for (final step in steps) circuitFor(t.circuits, step.exercise.name)?.id],
-      setSeconds: (n) => setSecondsFor(n, t.setSeconds),
-      setOverhead: t.setOverhead,
-      transition: t.transition,
-      sessionOverhead: t.sessionOverhead,
-    );
+    return _stepsTiming(t, steps, t.circuits);
   }
 
-  int estimateActiveSeconds() {
-    final s = active;
-    if (s == null) return 0;
-    final t = template(s.templateId) ?? WorkoutTemplate(id: '', name: '', exercises: []);
-    final steps = sessionSteps(s);
-    return estimateWorkout(
-      rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
-      circuitIds: [for (final step in steps) circuitFor(s.circuits, step.exercise.name)?.id],
-      setSeconds: (n) => setSecondsFor(n, t.setSeconds),
-      setOverhead: t.setOverhead,
-      transition: t.transition,
-      sessionOverhead: t.sessionOverhead,
-    ).total;
+  /// Today's plan, including automatic deload volume, without starting or saving a workout.
+  TimingBreakdown plannedTiming(WorkoutTemplate t, {DateTime? at}) {
+    final ctx = cycleContext(at);
+    if (ctx == null || ctx.$2.phase != 'Deload') return templateTiming(t);
+    final preview = Session(
+      id: '',
+      templateId: t.id,
+      name: t.name,
+      unit: settings.unit,
+      startedAt: at ?? DateTime.now(),
+      phase: 'Deload',
+      targetRir: ctx.$2.suggestedRir,
+      exercises: [],
+      circuits: copyCircuits(t.circuits),
+    );
+    preview.exercises = [for (final e in t.exercises) _deloadExercise(e, ctx.$1, preview)];
+    reconcileCircuits(preview.circuits, preview.exercises.map((e) => e.name));
+    return sessionTiming(preview, plan: t);
   }
+
+  TimingBreakdown sessionTiming(Session s, {WorkoutTemplate? plan}) => _stepsTiming(
+    plan ?? template(s.templateId) ?? WorkoutTemplate(id: '', name: '', exercises: []),
+    sessionSteps(s),
+    s.circuits,
+  );
+
+  TimingBreakdown _stepsTiming(WorkoutTemplate t, List<WorkoutStep> steps, List<ExerciseCircuit> circuits) =>
+      estimateWorkout(
+        rows: [for (final step in steps) (step.exercise.name, step.restAfter)],
+        circuitIds: [for (final step in steps) circuitFor(circuits, step.exercise.name)?.id],
+        setSeconds: (n) => setSecondsFor(n, t.setSeconds),
+        setOverhead: t.setOverhead,
+        transition: t.transition,
+        sessionOverhead: t.sessionOverhead,
+      );
+
+  int estimateActiveSeconds() => active == null ? 0 : sessionTiming(active!).total;
 }

@@ -462,7 +462,9 @@ class _Volume extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                'Planned per week from your schedule; indirect sets count half. Tap a muscle for its landmarks.',
+                store.settings.includePartialSets
+                    ? 'Planned per week from your schedule; indirect sets count half. Tap a muscle for its landmarks.'
+                    : 'Planned per week from your schedule; direct sets only. Tap a muscle for its landmarks.',
                 style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
               ),
             ),
@@ -475,7 +477,11 @@ class _Volume extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 4),
-            for (final m in names) MuscleVolumeRow(muscle: m, sets: volume[m]!.sets),
+            for (final m in names)
+              MuscleVolumeRow(
+                muscle: m,
+                sets: volume[m]!.countedSets(includePartialSets: store.settings.includePartialSets),
+              ),
             if (protocols) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
@@ -502,6 +508,7 @@ class _Volume extends StatelessWidget {
 /// The RP landmarks of [muscle] and how to read its weekly-sets bar.
 void showLandmarkInfo(BuildContext context, String muscle) {
   final l = rpLandmarks[muscle];
+  final partialSets = StoreScope.read(context).settings.includePartialSets;
   showDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
@@ -518,9 +525,11 @@ void showLandmarkInfo(BuildContext context, String muscle) {
               'MRV: maximum recoverable volume. Values are hard sets per week.',
             ),
             const SizedBox(height: 8),
-            const Text(
-              'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
-              'set, so it may not be directly comparable to these ranges.',
+            Text(
+              partialSets
+                  ? 'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
+                        'set, so it may not be directly comparable to these ranges.'
+                  : 'These are general references, not personal targets. The weekly estimate counts direct conventional sets only.',
             ),
             const SizedBox(height: 8),
             const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),

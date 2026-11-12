@@ -95,6 +95,9 @@ extension AppStoreSessionStart on AppStore {
     }
     active = session;
     reconcileCircuits(session.circuits, session.exercises.map((e) => e.name));
+    if (t != null && session.exercises.any((e) => e.sets.isNotEmpty)) {
+      session.estimatedSeconds = sessionTiming(session, plan: t).total;
+    }
     rest = null;
     _syncAlerts();
     changed();

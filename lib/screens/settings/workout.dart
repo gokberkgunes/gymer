@@ -344,10 +344,48 @@ class _AdvancedSettings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = StoreScope.of(context).settings;
+    final store = StoreScope.of(context);
+    final s = store.settings;
     return _Page(
       title: 'Advanced',
       children: [
+        const SectionLabel('Weekly sets'),
+        _group([
+          _row(
+            context,
+            'Include partial sets',
+            Switch(
+              value: s.includePartialSets,
+              onChanged: (v) => store.updateSettings((x) => x.includePartialSets = v),
+            ),
+            info: InfoDot(
+              tooltip: 'How partial sets count',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Include partial sets'),
+                  content: const Text(
+                    'Primary muscles count as one set. With this on, secondary muscles also receive half a set. '
+                    'Turn it off to count direct work only. This applies to the Cycle tab and workout editor. '
+                    'Warm-ups and special-method groups remain separate; this does not refer to partial-range reps.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
+        ]),
+        const SectionLabel('Timers'),
+        _group([
+          _row(
+            context,
+            'Workout timing',
+            const Text('View'),
+            subtitle: 'Estimates and actual durations',
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const _WorkoutTimingSettings())),
+          ),
+        ]),
         const SectionLabel('Workout'),
         _group([
           _switch(

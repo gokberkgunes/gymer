@@ -235,6 +235,9 @@ class Session {
   DateTime? clockRunningSince;
   int clockElapsed;
 
+  /// Original plan's duration estimate, captured at start rather than rebuilt from today's template.
+  int? estimatedSeconds;
+
   Session({
     required this.id,
     required this.templateId,
@@ -257,6 +260,7 @@ class Session {
     this.clockStarted = false,
     this.clockRunningSince,
     this.clockElapsed = 0,
+    this.estimatedSeconds,
   }) : circuits = circuits ?? [],
        warmupExercises = warmupExercises ?? [];
 
@@ -319,6 +323,7 @@ class Session {
     if (clockStarted) 'clockStarted': true,
     if (clockRunningSince != null) 'clockSince': clockRunningSince!.toUtc().toIso8601String(),
     if (clockElapsed > 0) 'clockElapsed': clockElapsed,
+    if (estimatedSeconds != null) 'estimatedSeconds': estimatedSeconds,
     'exercises': exercises.map((e) => e.toJson()).toList(),
     if (circuits.isNotEmpty) 'circuits': circuits.map((c) => c.toJson()).toList(),
     if (warmupExercises.isNotEmpty) 'warmupExercises': warmupExercises.map((e) => e.toJson()).toList(),
@@ -343,6 +348,7 @@ class Session {
     clockStarted: j['clockStarted'] as bool? ?? false,
     clockRunningSince: j['clockSince'] == null ? null : DateTime.parse(j['clockSince'] as String).toLocal(),
     clockElapsed: _int(j['clockElapsed']) ?? 0,
+    estimatedSeconds: _int(j['estimatedSeconds']),
     exercises: [for (final e in j['exercises'] as List) SessionExercise.fromJson(e as Map<String, dynamic>)],
     circuits: [for (final c in j['circuits'] as List? ?? []) ExerciseCircuit.fromJson(c as Map<String, dynamic>)],
     warmupExercises: [

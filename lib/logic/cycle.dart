@@ -332,7 +332,9 @@ class WeeklyVolume {
   final VolumeMetrics direct;
   final VolumeMetrics indirect;
   WeeklyVolume(this.direct, this.indirect);
-  double get sets => direct.conventional + 0.5 * indirect.conventional;
+  double get sets => countedSets();
+  double countedSets({bool includePartialSets = true}) =>
+      direct.conventional + (includePartialSets ? 0.5 * indirect.conventional : 0);
 }
 
 Map<String, WeeklyVolume> plannedWeeklyVolume(

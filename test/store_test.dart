@@ -109,13 +109,22 @@ void main() {
     logAll(store, 102.5, 9, 1);
     store.finishSession();
 
+    final saved = jsonEncode(store.toJson());
+    final estimate = store.plannedTiming(legs).total;
+    expect(jsonEncode(store.toJson()), saved, reason: 'previewing must not start a workout or change its plan');
     store.startSession(legs);
     final press = store.active!.exercises.first;
     expect(store.active!.phase, 'Deload');
+    expect(store.active!.estimatedSeconds, estimate);
+    expect(estimate, lessThan(store.templateTiming(legs).total));
     // Half of three working sets rounds to two, rather than flooring to one.
     expect(press.sets, hasLength(2));
     // 90% of 102.5 rounded down on Leg Press's 5 kg plate-loaded lattice.
     expect(press.sets.map((set) => (set.weight, set.targetReps, set.targetRir)), everyElement((87.5, 8, 4)));
+    store.activeCycle!.deloadManual = true;
+    store.startSession(legs);
+    expect(store.active!.estimatedSeconds, store.plannedTiming(legs).total);
+    expect(store.active!.estimatedSeconds, store.templateTiming(legs).total);
   });
 
   test('alerts follow the workout and rest timer', () async {
@@ -153,7 +162,10 @@ void main() {
 
     final a = AppStore(file: file);
     await a.load();
+    a.settings.includePartialSets = false;
+    final originalEstimate = a.templateTiming(a.templates.first).total;
     a.startSession(a.templates.first);
+    expect(a.active!.estimatedSeconds, originalEstimate);
     a.active!.exercises.first.sets.first.weight = 42.5;
     a.saveCycle(Mesocycle(id: 'c', start: DateTime(2026, 1, 5), weekRir: {2: 1}));
     await a.flush();
@@ -162,11 +174,30 @@ void main() {
     await b.load();
     expect(b.active?.exercises.first.sets.first.weight, 42.5);
     expect(b.activeCycle?.weekRir, {2: 1});
+    expect(b.active?.estimatedSeconds, originalEstimate);
+    expect(b.settings.includePartialSets, isFalse);
 
     final c = await seeded();
     await c.importJson(file.readAsStringSync());
     expect(c.active?.exercises.first.sets.first.weight, 42.5);
     await expectLater(c.importJson('{"x":1}'), throwsFormatException);
+
+    // Editing the plan after resume cannot rewrite the original estimate used for comparisons.
+    c.templates.first.setSeconds += 60;
+    c.addSet(c.active!.exercises.first);
+    expect(c.active!.estimatedSeconds, originalEstimate);
+    c.active!
+      ..clockStarted = true
+      ..clockElapsed = originalEstimate + 120;
+    c.active!.exercises.first.sets.first
+      ..done = true
+      ..reps = 8;
+    c.finishSession();
+    final recorded = Session.fromJson(c.history.first.toJson());
+    expect(recorded.estimatedSeconds, originalEstimate);
+    expect(recorded.duration.inSeconds, originalEstimate + 120);
+    final legacy = recorded.toJson()..remove('estimatedSeconds');
+    expect(Session.fromJson(legacy).estimatedSeconds, isNull, reason: 'never invent an estimate for old history');
   });
 
   test('completing sets: fallbacks, validation, rest between sets only, overdue timer', () async {

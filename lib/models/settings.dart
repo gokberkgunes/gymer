@@ -136,6 +136,9 @@ class Settings {
   /// Workout editor: a weekly-sets button in its app bar, and muscle totals on each exercise card.
   bool editorWeeklySets;
   bool editorMuscleTotals;
+
+  /// Include secondary-muscle work as half sets in weekly estimates.
+  bool includePartialSets;
   bool dimCompleted;
   bool collapseCompleted;
   List<String> pinnedExerciseActions;
@@ -190,6 +193,7 @@ class Settings {
     this.showPreviousReps = false,
     this.editorWeeklySets = false,
     this.editorMuscleTotals = false,
+    this.includePartialSets = true,
     this.dimCompleted = true,
     this.collapseCompleted = true,
     List<String>? pinnedExerciseActions,
@@ -286,6 +290,7 @@ class Settings {
     'showPreviousReps': showPreviousReps,
     'editorWeeklySets': editorWeeklySets,
     'editorMuscleTotals': editorMuscleTotals,
+    'includePartialSets': includePartialSets,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
     'pinnedExerciseActions': pinnedExerciseActions,
@@ -350,6 +355,7 @@ class Settings {
       showPreviousReps: b('showPreviousReps', d.showPreviousReps),
       editorWeeklySets: b('editorWeeklySets', d.editorWeeklySets),
       editorMuscleTotals: b('editorMuscleTotals', d.editorMuscleTotals),
+      includePartialSets: b('includePartialSets', d.includePartialSets),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
       pinnedExerciseActions: j['pinnedExerciseActions'] is List

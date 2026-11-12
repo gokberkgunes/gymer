@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../logic/cycle.dart';
+import '../logic/estimate.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -240,7 +241,8 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
 
     final last = widget.last;
     final ago = last == null ? null : _ago(last);
-    final sets = w.exercises.fold(0, (a, e) => a + e.sets.length);
+    final timing = widget.featured && widget.label == 'TODAY' ? store.plannedTiming(w) : null;
+    final sets = timing?.sets ?? w.exercises.fold<int>(0, (a, e) => a + e.sets.length);
 
     final card = Material(
       color: widget.featured ? Color.alphaBlend(cs.primary.withValues(alpha: 0.08), cs.surface) : cs.surface,
@@ -294,10 +296,11 @@ class _WorkoutTileState extends State<_WorkoutTile> with SingleTickerProviderSta
                       overflow: TextOverflow.ellipsis,
                       style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                     ),
-                    if (widget.featured && (orderedMuscles.isNotEmpty || widget.cycleRir != null)) ...[
+                    if (widget.featured) ...[
                       const SizedBox(height: 6),
                       Text(
                         [
+                          if (timing != null && timing.sets > 0) '~${formatTargetDuration(timing.total)}',
                           if (widget.cycleRir != null) '${widget.cycleRir} RIR',
                           '$sets sets',
                           ...orderedMuscles.take(4),

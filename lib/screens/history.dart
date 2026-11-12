@@ -29,15 +29,43 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   int _visible = historyPageSize;
   bool _exercises = false;
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final all = widget.templateId == null
+    final source = widget.templateId == null
         ? store.history
         : store.history.where((s) => s.templateId == widget.templateId).toList();
+    final terms = _search.text.trim().toLowerCase().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    final cycleNames = {for (final c in store.cycles) c.id: c.name};
+    final linkedCycles = <String, Set<String>>{};
+    if (terms.isNotEmpty) {
+      for (final c in store.cycles) {
+        for (final event in c.events.values) {
+          if (event.sessionId case final id?) linkedCycles.putIfAbsent(id, () => <String>{}).add(c.name);
+        }
+      }
+    }
+    final all = terms.isEmpty
+        ? source
+        : source.where((s) {
+            final names = [
+              s.name,
+              for (final e in s.exercises) e.name,
+              ?cycleNames[s.cycleId],
+              ...?linkedCycles[s.id],
+            ].map((name) => name.toLowerCase()).toList();
+            return terms.every((term) => names.any((name) => name.contains(term)));
+          }).toList();
     final sessions = all.take(_visible).toList();
     final hidden = all.length - sessions.length;
     final perDay = <String, int>{};
@@ -66,13 +94,46 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ButtonSegment(value: true, label: Text('Exercises')),
             ],
             selected: {_exercises},
-            onSelectionChanged: (v) => setState(() => _exercises = v.first),
+            onSelectionChanged: (v) {
+              FocusScope.of(context).unfocus();
+              setState(() {
+                _exercises = v.first;
+                _search.clear();
+                _visible = historyPageSize;
+              });
+            },
           ),
         ],
         if (_exercises)
           const ExerciseProgressList()
         else ...[
-          if (widget.templateId == null) ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _search,
+            autofocus: false,
+            style: t.bodyMedium,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Search history',
+              hintStyle: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
+              fillColor: cs.onSurface.withValues(alpha: 0.035),
+              prefixIcon: Icon(Icons.search_rounded, size: 20, color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
+              prefixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              suffixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      icon: const Icon(Icons.clear_rounded, size: 20),
+                      onPressed: () => setState(() {
+                        _search.clear();
+                        _visible = historyPageSize;
+                      }),
+                    ),
+            ),
+            onChanged: (_) => setState(() => _visible = historyPageSize),
+          ),
+          if (root && terms.isEmpty) ...[
             const SizedBox(height: 16),
             Card(
               child: Padding(
@@ -109,7 +170,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 40),
               child: Text(
-                'No completed workouts yet.',
+                terms.isEmpty ? 'No completed workouts yet.' : 'No matching workouts.',
                 textAlign: TextAlign.center,
                 style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
               ),
@@ -176,7 +237,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               onPressed: () => setState(() => _visible += historyPageSize),
               child: Text('Show ${hidden < historyPageSize ? hidden : historyPageSize} more'),
             ),
-          if (widget.templateId == null && past.isNotEmpty) ...[
+          if (root && terms.isEmpty && past.isNotEmpty) ...[
             const SectionLabel('Mesocycles'),
             Card(
               child: Column(

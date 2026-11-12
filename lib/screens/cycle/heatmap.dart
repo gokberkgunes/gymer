@@ -101,6 +101,26 @@ class CycleHeatmap extends StatelessWidget {
       }
     }
 
+    // Calendar days before the start or after the end: quiet diagonal stripes, so the weeks stay whole.
+    Widget outside(double cell) => ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: Container(
+        width: cell,
+        height: cell,
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.onSurface.withValues(alpha: 0.10)),
+          borderRadius: BorderRadius.circular(2),
+        ),
+        child: CustomPaint(
+          painter: DiagonalStripes(
+            cs.onSurface.withValues(alpha: 0.07),
+            width: math.max(2, cell * 0.12),
+            spacing: math.max(5, cell * 0.3),
+          ),
+        ),
+      ),
+    );
+
     List<Widget> rows(double cell) => <Widget>[
       Row(
         children: [
@@ -126,10 +146,7 @@ class CycleHeatmap extends StatelessWidget {
                 child: Text(labels[r], style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
               ),
               for (final d in row)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: d == null ? SizedBox.square(dimension: cell) : tile(d, cell),
-                ),
+                Padding(padding: const EdgeInsets.only(right: 4), child: d == null ? outside(cell) : tile(d, cell)),
             ],
           ),
         ),

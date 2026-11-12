@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../logic/numbers.dart';
+import '../logic/estimate.dart';
 import '../logic/plates.dart';
 import '../logic/status_icons.dart';
 import '../models.dart';
@@ -22,6 +23,7 @@ import 'achievements.dart';
 
 part 'settings/workout.dart';
 part 'settings/timers.dart';
+part 'settings/timing.dart';
 part 'settings/plates.dart';
 part 'settings/data.dart';
 part 'settings/appearance.dart';
@@ -63,7 +65,7 @@ class SettingsScreen extends StatelessWidget {
             'Confetti, personal-best effects and milestones',
             const CelebrationSettings(),
           ),
-          link(Icons.tune_rounded, 'Advanced', 'Set rules and keyboard', const _AdvancedSettings()),
+          link(Icons.tune_rounded, 'Advanced', 'Weekly sets, timing and keyboard', const _AdvancedSettings()),
           link(Icons.storage_outlined, 'Databases', 'Exercises, set types and rep max', const _DatabaseSettings()),
           link(Icons.save_outlined, 'Data', 'Backups, import and export', const _DataSettings()),
         ]),

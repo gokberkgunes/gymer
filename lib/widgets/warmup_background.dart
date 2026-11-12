@@ -53,7 +53,7 @@ class _WarmupBackgroundState extends State<WarmupBackground> with SingleTickerPr
     final CustomPainter? painter = !widget.active || widget.style == 'plain'
         ? null
         : widget.style == 'stripes'
-        ? _WarmupStripes(
+        ? DiagonalStripes(
             cs.brightness == Brightness.light ? cs.surfaceContainerHigh : cs.onSurface.withValues(alpha: 0.03),
           )
         : switch (widget.style) {
@@ -195,22 +195,24 @@ class _WarmupFire extends CustomPainter {
       colors != old.colors || motion != old.motion || reducedMotion != old.reducedMotion;
 }
 
-class _WarmupStripes extends CustomPainter {
+/// Diagonal `////` bands: the Stripes warm-up card, and calendar days outside a cycle at a smaller scale.
+class DiagonalStripes extends CustomPainter {
   final Color color;
-  const _WarmupStripes(this.color);
+  final double width, spacing;
+  const DiagonalStripes(this.color, {this.width = 8, this.spacing = 22});
 
   @override
   void paint(Canvas canvas, Size size) {
     final ink = Paint()
       ..color = color
-      ..strokeWidth = 8;
-    for (double x = -size.height; x < size.width; x += 22) {
+      ..strokeWidth = width;
+    for (double x = -size.height; x < size.width; x += spacing) {
       canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), ink);
     }
   }
 
   @override
-  bool shouldRepaint(_WarmupStripes old) => color != old.color;
+  bool shouldRepaint(DiagonalStripes old) => color != old.color || width != old.width || spacing != old.spacing;
 }
 
 /// Embers: no flames, just a warm glow at the foot of the card and sparks that drift up and flicker out.
