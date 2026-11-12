@@ -455,44 +455,24 @@ class _Volume extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final t = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
     final volume = plannedWeeklyVolume(cycle, {for (final tpl in store.templates) tpl.id: tpl}, store.musclesOf);
     final names = [
-      for (final m in rpLandmarks.keys)
-        if (volume.containsKey(m)) m,
+      ...rpLandmarks.keys,
       for (final m in volume.keys)
         if (!rpLandmarks.containsKey(m)) m,
     ];
     final protocols = volume.values.any((v) => v.direct.hasProtocols || v.indirect.hasProtocols);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(
-                store.settings.includePartialSets
-                    ? 'Planned per week from your schedule; indirect sets count half. Tap a muscle for its landmarks.'
-                    : 'Planned per week from your schedule; direct sets only. Tap a muscle for its landmarks.',
-                style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-              ),
-            ),
-            if (names.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(
-                  'Add workouts and muscle tags to see weekly sets.',
-                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                ),
-              ),
-            const SizedBox(height: 4),
             for (final m in names)
               MuscleVolumeRow(
                 muscle: m,
-                sets: volume[m]!.countedSets(includePartialSets: store.settings.includePartialSets),
-                frequency: volume[m]!.directDaysPerWeek,
+                sets: volume[m]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0,
+                frequency: volume[m]?.directDaysPerWeek ?? 0,
               ),
             if (protocols) ...[
               Padding(
@@ -500,8 +480,8 @@ class _Volume extends StatelessWidget {
                 child: Text('Special set methods are not included in these estimates.', style: t.bodySmall),
               ),
               for (final m in names)
-                for (final (label, metrics) in [('Direct', volume[m]!.direct), ('Indirect', volume[m]!.indirect)])
-                  if (metrics.hasProtocols)
+                for (final (label, metrics) in [('Direct', volume[m]?.direct), ('Indirect', volume[m]?.indirect)])
+                  if (metrics != null && metrics.hasProtocols)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Text(
@@ -517,8 +497,8 @@ class _Volume extends StatelessWidget {
   }
 }
 
-/// The RP landmarks of [muscle] and how to read its weekly-sets bar.
-void showLandmarkInfo(BuildContext context, String muscle) {
+/// The RP landmarks of [muscle], its optional planned [sets], and how to read the weekly-sets bar.
+void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
   final l = rpLandmarks[muscle];
   final partialSets = StoreScope.read(context).settings.includePartialSets;
   showDialog<void>(
@@ -530,6 +510,22 @@ void showLandmarkInfo(BuildContext context, String muscle) {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (sets != null) ...[
+              Row(
+                children: [
+                  const Expanded(child: Text('Planned weekly sets')),
+                  const SizedBox(width: 12),
+                  Text(
+                    fmtSets(sets),
+                    style: Theme.of(c).textTheme.titleLarge?.copyWith(
+                      color: weeklySetsColor(Theme.of(c).colorScheme, muscle, sets),
+                      fontFeatures: tabular,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
             const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text(
@@ -591,11 +587,10 @@ Color weeklySetsColor(ColorScheme cs, String muscle, double sets) {
       : cs.onSurface;
 }
 
-/// One muscle's weekly sets: name and number on one line, with a thin landmark bar beneath and the landmark
-/// boundaries as small muted numbers under it. No names, legends or chevrons: the dialog behind the tap explains
-/// the bar. [delta], when given, is the change from the saved plan (the workout editor's weekly-sets sheet).
-/// [frequency] adds direct training days per week beside the name on the Cycle tab.
-class MuscleVolumeRow extends StatelessWidget {
+/// A full-width landmark bar with a small muscle label at the left and weekly frequency at the right. Tapping
+/// reveals the exact weekly sets. [delta], when given, is the change from the saved plan (the workout editor's
+/// weekly-sets sheet). [frequency] adds direct training days per week on the Cycle tab.
+class MuscleVolumeRow extends StatefulWidget {
   final String muscle;
   final double sets;
   final double? delta;
@@ -603,91 +598,94 @@ class MuscleVolumeRow extends StatelessWidget {
   const MuscleVolumeRow({super.key, required this.muscle, required this.sets, this.delta, this.frequency});
 
   @override
+  State<MuscleVolumeRow> createState() => _MuscleVolumeRowState();
+}
+
+class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final l = rpLandmarks[muscle];
-    final numberColor = weeklySetsColor(cs, muscle, sets);
-    final change = delta;
-    return InkWell(
-      onTap: () => showLandmarkInfo(context, muscle),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: context.style.sp(8)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    final l = rpLandmarks[widget.muscle];
+    final change = widget.delta;
+    final scaler = MediaQuery.textScalerOf(context);
+    final numberStyle = t.labelSmall!.copyWith(fontSize: 9, color: cs.onSurfaceVariant, fontFeatures: tabular);
+    // Keep case intact for real small-cap glyph substitution. Names match the scale's font size; frequency
+    // stays smaller, with both labels kept faint.
+    final labelStyle = t.labelSmall!.copyWith(
+      fontFamily: 'GymerSmallCaps',
+      fontSize: numberStyle.fontSize,
+      fontWeight: FontWeight.w400,
+      color: cs.onSurfaceVariant.withValues(alpha: 0.65),
+      letterSpacing: 0.1,
+      height: 1,
+      fontFeatures: const [FontFeature.enable('smcp'), FontFeature.tabularFigures()],
+    );
+    final frequencyStyle = labelStyle.copyWith(fontSize: 7.5);
+    final numbers = TextPainter(
+      text: TextSpan(text: '0', style: numberStyle),
+      textScaler: scaler,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return Semantics(
+      label: '${widget.muscle}, ${fmtSets(widget.sets)} planned weekly sets',
+      child: InkWell(
+        onTap: () => showLandmarkInfo(context, widget.muscle, sets: widget.sets),
+        onHighlightChanged: (pressed) {
+          if (_pressed != pressed) setState(() => _pressed = pressed);
+        },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: context.style.sp(4)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(widget.muscle, maxLines: 1, overflow: TextOverflow.ellipsis, style: labelStyle),
+                    ),
+                    if (change != null && change.abs() > 1e-9)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: Text(
-                          muscle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                          '${change > 0 ? '+' : '−'}${fmtSets(change.abs())}',
+                          style: labelStyle.copyWith(color: cs.primary),
                         ),
                       ),
-                      if (frequency case final days?) ...[
-                        const SizedBox(width: 8),
-                        Tooltip(
-                          message:
-                              'Planned direct training days per week. Each scheduled day counts once, including '
-                              'special set methods. Warm-ups and indirect work do not count. Schedules longer or '
-                              'shorter than seven days are averaged per week.',
-                          child: Text(
-                            '${fmtSets(days)}×/week',
-                            style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                    if (widget.frequency case final days?)
+                      Tooltip(
+                        message:
+                            'Planned direct training days per week. Each scheduled day counts once, including '
+                            'special set methods. Warm-ups and indirect work do not count. Schedules longer or '
+                            'shorter than seven days are averaged per week.',
+                        child: Text('${fmtSets(days)} ${days == 1 ? 'day' : 'days'}/week', style: frequencyStyle),
+                      ),
+                  ],
                 ),
-                if (change != null && change.abs() > 1e-9)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      '${change > 0 ? '+' : '−'}${fmtSets(change.abs())}',
-                      style: t.labelMedium?.copyWith(color: cs.primary, fontFeatures: tabular),
-                    ),
-                  ),
-                Text(
-                  '${fmtSets(sets)} ${sets == 1 ? 'set' : 'sets'}',
-                  style: t.bodyMedium?.copyWith(color: numberColor, fontFeatures: tabular),
-                ),
-              ],
-            ),
-            if (l != null && l.mavRange != null) ...[
-              const SizedBox(height: 2),
-              Builder(
-                builder: (context) {
-                  final scaler = MediaQuery.textScalerOf(context);
-                  final style = t.labelSmall!.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular);
-                  final numbers = TextPainter(
-                    text: TextSpan(text: '0', style: style),
-                    textScaler: scaler,
-                    textDirection: TextDirection.ltr,
-                  )..layout();
-                  return SizedBox(
-                    // The planned sets above the track, the landmark numbers below it.
-                    height: numbers.height + 2 + _LandmarkBar.trackHeight + 2 + numbers.height,
+                if (l != null && l.mavRange != null) ...[
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: _LandmarkBar.trackHeight + 2 + numbers.height,
                     child: CustomPaint(
                       painter: _LandmarkBar(
-                        sets: sets,
+                        sets: widget.sets,
                         landmark: l,
                         colors: cs,
-                        numberStyle: style,
-                        plannedColor: numberColor,
+                        numberStyle: numberStyle,
                         textScaler: scaler,
+                        pressed: _pressed,
                       ),
                     ),
-                  );
-                },
-              ),
-            ],
-          ],
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -695,24 +693,24 @@ class MuscleVolumeRow extends StatelessWidget {
 }
 
 /// A 4 px track: faint from MEV to MAV, solid across MAV, warning across MRV to the bar's end, and a small mark at
-/// [sets], with the planned sets (rounded) written above the mark. Beneath the track, 0 and each zone boundary
+/// [sets]. Beneath the track, 0 and each zone boundary
 /// (MEV start, MAV start and end, MRV start and end) is a small number centred on its position; a number that
 /// would touch its neighbour is left out.
 class _LandmarkBar extends CustomPainter {
-  static const trackHeight = 10.0;
+  static const trackHeight = 14.0;
   final double sets;
   final Landmark landmark;
   final ColorScheme colors;
   final TextStyle numberStyle;
-  final Color plannedColor;
   final TextScaler textScaler;
+  final bool pressed;
   const _LandmarkBar({
-    required this.plannedColor,
     required this.sets,
     required this.landmark,
     required this.colors,
     required this.numberStyle,
     required this.textScaler,
+    required this.pressed,
   });
 
   @override
@@ -731,11 +729,6 @@ class _LandmarkBar extends CustomPainter {
     double centred(double at, TextPainter tp) =>
         (at - tp.width / 2).clamp(0.0, math.max(0.0, size.width - tp.width)).toDouble();
 
-    final planned = text('${sets.round()}', numberStyle.copyWith(color: plannedColor, fontWeight: FontWeight.w700));
-    planned.paint(canvas, Offset(centred(x(sets), planned), 0));
-    canvas
-      ..save()
-      ..translate(0, planned.height + 2);
     const mid = trackHeight / 2;
     final track = RRect.fromRectAndRadius(Rect.fromLTRB(0, mid - 2, size.width, mid + 2), const Radius.circular(2));
     canvas
@@ -759,15 +752,15 @@ class _LandmarkBar extends CustomPainter {
       lastRight = left + tp.width;
     }
 
-    final mark = x(sets).clamp(1.5, size.width - 1.5);
+    final width = pressed ? 3.0 : 1.0;
+    final mark = x(sets).clamp(width / 2, size.width - width / 2);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(mark, mid), width: 3, height: trackHeight),
-        const Radius.circular(1.5),
+        Rect.fromCenter(center: Offset(mark, mid), width: width, height: trackHeight),
+        Radius.circular(width / 2),
       ),
-      Paint()..color = colors.onSurface,
+      Paint()..color = colors.onSurface.withValues(alpha: pressed ? 1 : 0.4),
     );
-    canvas.restore();
   }
 
   @override
@@ -776,6 +769,6 @@ class _LandmarkBar extends CustomPainter {
       old.landmark != landmark ||
       old.colors != colors ||
       old.numberStyle != numberStyle ||
-      old.plannedColor != plannedColor ||
-      old.textScaler != textScaler;
+      old.textScaler != textScaler ||
+      old.pressed != pressed;
 }

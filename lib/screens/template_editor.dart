@@ -310,9 +310,8 @@ class _TemplateEditorState extends State<TemplateEditor> {
   Future<void> _weeklySets() async {
     final v = _store.editorWeeklySets(_d);
     final muscles = [
-      for (final m in rpLandmarks.keys)
-        if ((v.after[m] ?? 0) > 0 || (v.before[m] ?? 0) > 0) m,
-      for (final m in v.after.keys)
+      ...rpLandmarks.keys,
+      for (final m in {...v.before.keys, ...v.after.keys})
         if (!rpLandmarks.containsKey(m)) m,
     ];
     await showModalBottomSheet<void>(

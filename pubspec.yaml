@@ -66,6 +66,13 @@ flutter:
 
   assets:
     - assets/status_icons/
+    - assets/fonts/Roboto_LICENSE.txt
+
+  # Pin a face with real OpenType small-cap glyphs across Android and Linux.
+  fonts:
+    - family: GymerSmallCaps
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:
