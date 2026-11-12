@@ -109,6 +109,18 @@ void main() {
     final drops = [weightForSet(r, 'Drop Set', 1)!, weightForSet(r, 'Drop Set', 2)!];
     expect(drops[0], lessThan(r.weight));
     expect(drops[1], lessThan(drops[0]));
+
+    // The exercise's own rep range decides, not a fixed 8–12: 13 reps is inside 12–20, so the load holds.
+    final wide = recommend(
+      previous: drop(),
+      method: 'Drop Set',
+      targetRir: 2,
+      unit: 'kg',
+      increment: 2.5,
+      repMin: 12,
+      repMax: 20,
+    )!;
+    expect((wide.action, wide.weight, wide.targetReps), ('hold', 100, 12));
   });
 
   test('deload weights round down, set counts round to nearest, at least one set', () {

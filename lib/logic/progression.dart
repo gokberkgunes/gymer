@@ -142,7 +142,7 @@ Recommendation? recommend({
   if (method == 'Straight' && !auto) return null;
   return method == 'Straight'
       ? _straight(previous, targetRir, unit, increment, repMin, repMax, expectedWorkSets, planned, rirTracked)
-      : _method(previous, method, targetRir, unit, increment, expectedWorkSets, planned, rirTracked);
+      : _method(previous, method, targetRir, unit, increment, repMin, repMax, expectedWorkSets, planned, rirTracked);
 }
 
 /// set_context.comparison_error: recorded and planned logging context must be
@@ -358,12 +358,17 @@ String? _qualityProblem(
   return null;
 }
 
+/// Every method reads the exercise's own rep range ([low]–[high], 8–12 unless changed in exercise details):
+/// the anchor set above it asks for more load, below it for less, and the new load aims for [low] reps. Only
+/// Cluster keeps its fixed window. Never compare against the 8–12 constants here; they are only the defaults.
 Recommendation? _method(
   List<SetEntry> rows,
   String method,
   int? target,
   String unit,
   double? increment,
+  int low,
+  int high,
   int? expected,
   List<SetEntry>? currentPlan,
   bool rirTracked,
@@ -426,20 +431,20 @@ Recommendation? _method(
     reason = 'Hold $method load: $problem.';
   } else if (oneRm == null) {
     reason = "The anchor's actual RIR is unknown; do not infer failure or increase load.";
-  } else if (repsForWindow > highRepLimit) {
-    final raw = oneRm * wathanPercent(targetRepsDefault + (target ?? 0)) / 100;
+  } else if (repsForWindow > high) {
+    final raw = oneRm * wathanPercent(low + (target ?? 0)) / 100;
     suggested = practicalWeight(raw, unit, anchorWeight, step);
     if (raw > anchorWeight && suggested <= current) suggested = current + step;
     intended = 'increase';
-    reason = 'The $method anchor exceeded $highRepLimit reps and continuation quality was maintained.';
-  } else if (anchorReps < lowRepLimit) {
-    final raw = oneRm * wathanPercent(targetRepsDefault + (target ?? 0)) / 100;
+    reason = 'The $method anchor exceeded $high reps and continuation quality was maintained.';
+  } else if (anchorReps < low) {
+    final raw = oneRm * wathanPercent(low + (target ?? 0)) / 100;
     suggested = practicalWeight(raw, unit, anchorWeight, step);
     if (raw < anchorWeight && suggested >= current) suggested = math.max(step, current - step);
     intended = 'decrease';
-    reason = 'The $method anchor fell below $lowRepLimit reps.';
+    reason = 'The $method anchor fell below $low reps.';
   } else {
-    reason = 'The $method anchor remains inside the $lowRepLimit-$highRepLimit rep window.';
+    reason = 'The $method anchor remains inside the $low-$high rep window.';
   }
   final (weight, action, why) = _boundedLoad(current, suggested, intended, step, reason);
 
@@ -461,8 +466,8 @@ Recommendation? _method(
     action: action,
     weight: weight,
     applyWeight: problem == null,
-    setRepTargets: List.filled(work.length, targetRepsDefault),
-    targetReps: targetRepsDefault,
+    setRepTargets: List.filled(work.length, low),
+    targetReps: low,
     targetRir: target,
     reason: why,
     continuationWeights: drops,
@@ -555,7 +560,8 @@ Calibration? calibrationRecommendation({
   if (target == null || target < 0) return null;
   // Straight sets start at the bottom of the rep range: double progression then has the whole range (8 → 12 by
   // default) to add reps before the first load increase, instead of starting mid-range and jumping sooner.
-  final goal = method == 'Straight' ? repMin : calibrationTargetReps;
+  // Other methods aim for about ten reps, kept inside the exercise's own range.
+  final goal = method == 'Straight' ? repMin : calibrationTargetReps.clamp(repMin, math.max(repMin, repMax)).toInt();
   final suggested = practicalWeight(oneRm * wathanPercent(goal + target) / 100, unit, weight, increment);
   return suggested > 0 ? Calibration(suggested, goal, target, true) : null;
 }

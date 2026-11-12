@@ -431,7 +431,9 @@ extension AppStoreSessionStart on AppStore {
           : method == 'Straight'
           ? info?.repMin ??
                 lowRepLimit // bottom of the range, as calibrationRecommendation
-          : calibrationTargetReps;
+          : calibrationTargetReps
+                .clamp(info?.repMin ?? lowRepLimit, math.max(info?.repMin ?? lowRepLimit, info?.repMax ?? highRepLimit))
+                .toInt();
       return Calibration(starting.weight!, reps, session.targetRir, method != 'Cluster');
     }
     SetEntry? latest;

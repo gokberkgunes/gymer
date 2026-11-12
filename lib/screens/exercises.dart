@@ -187,7 +187,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
     final store = StoreScope.read(context);
     final name = _name.text.trim();
     if (name.isEmpty) return notify(context, 'Exercise name cannot be empty.');
-    if (_rangeInvalid) return notify(context, 'Straight minimum reps must not exceed maximum reps.');
+    if (_rangeInvalid) return notify(context, 'Minimum reps must not exceed maximum reps.');
     final error = store.saveExercise(
       _e.copyWith(
         name: name,
@@ -359,7 +359,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
                 child: NumField(
                   value: _repMin?.toDouble(),
                   kind: NumKind.reps,
-                  placeholder: 'Straight minimum reps',
+                  placeholder: 'Minimum reps',
                   dense: false,
                   invalid: _rangeInvalid,
                   onChanged: (v) => setState(() => _repMin = v?.round()),
@@ -370,7 +370,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
                 child: NumField(
                   value: _repMax?.toDouble(),
                   kind: NumKind.reps,
-                  placeholder: 'Straight maximum reps',
+                  placeholder: 'Maximum reps',
                   dense: false,
                   invalid: _rangeInvalid,
                   onChanged: (v) => setState(() => _repMax = v?.round()),
@@ -381,7 +381,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
           const SizedBox(height: 6),
           Text(
             'Straight sets: build reps at the target RIR, then add one increment after every planned set reaches the '
-            'upper limit. Manual mode disables automatic load/calibration hints. Other methods keep their own rules.',
+            'upper limit. Manual mode disables automatic load/calibration hints. Other methods use the same range for their first set: above it the load goes up, below it down.',
             style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SectionLabel('Description'),
