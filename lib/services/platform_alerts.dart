@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -26,7 +25,6 @@ class PlatformAlerts extends Alerts {
 
   Future<void> init() async {
     if (!_mobile) return;
-    tzdata.initializeTimeZones();
     _ready =
         await _plugin.initialize(
           settings: const InitializationSettings(
