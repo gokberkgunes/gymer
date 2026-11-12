@@ -37,6 +37,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.dispose();
   }
 
+  Widget _searchField(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 240),
+      child: SizedBox(
+        height: 44,
+        child: TextField(
+          controller: _search,
+          autofocus: false,
+          style: t.bodyMedium,
+          textAlignVertical: TextAlignVertical.center,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search',
+            hintStyle: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
+            fillColor: cs.onSurface.withValues(alpha: 0.035),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            prefixIcon: Icon(Icons.search_rounded, size: 18, color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
+            prefixIconConstraints: const BoxConstraints.tightFor(width: 36, height: 44),
+            suffixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.clear_rounded, size: 18),
+                    onPressed: () => setState(() {
+                      _search.clear();
+                      _visible = historyPageSize;
+                    }),
+                  ),
+          ),
+          onChanged: (_) => setState(() => _visible = historyPageSize),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
@@ -85,7 +123,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final body = ListView(
       padding: root ? pageInsets : subPageInsets,
       children: [
-        if (root) PageHeader(title),
+        if (root) PageHeader(title, trailing: _exercises ? null : _searchField(context)),
         if (root) ...[
           SegmentedButton<bool>(
             showSelectedIcon: false,
@@ -107,32 +145,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         if (_exercises)
           const ExerciseProgressList()
         else ...[
-          const SizedBox(height: 12),
-          TextField(
-            controller: _search,
-            autofocus: false,
-            style: t.bodyMedium,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Search history',
-              hintStyle: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
-              fillColor: cs.onSurface.withValues(alpha: 0.035),
-              prefixIcon: Icon(Icons.search_rounded, size: 20, color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
-              prefixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
-              suffixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
-              suffixIcon: _search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear search',
-                      icon: const Icon(Icons.clear_rounded, size: 20),
-                      onPressed: () => setState(() {
-                        _search.clear();
-                        _visible = historyPageSize;
-                      }),
-                    ),
-            ),
-            onChanged: (_) => setState(() => _visible = historyPageSize),
-          ),
           if (root && terms.isEmpty) ...[
             const SizedBox(height: 16),
             Card(
@@ -264,7 +276,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return root
         ? body
         : Scaffold(
-            appBar: AppBar(title: Text(title)),
+            appBar: AppBar(
+              title: Row(
+                children: [
+                  Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 12),
+                  Flexible(child: _searchField(context)),
+                ],
+              ),
+            ),
             body: body,
           );
   }

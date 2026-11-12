@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../widgets/common.dart';
@@ -90,18 +89,14 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _navigationChanged() {
-    if (!mounted) return;
-    // Initial routes are generated during build; subsequent pushes usually happen between frames.
-    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
-      if (_navigationUpdatePending) return;
-      _navigationUpdatePending = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _navigationUpdatePending = false;
-        if (mounted) setState(() {});
-      });
-    } else {
-      setState(() {});
-    }
+    if (!mounted || _navigationUpdatePending) return;
+    // Cold-start route creation can build widgets while the scheduler is still idle.
+    // Always defer the shell refresh until the current build has finished.
+    _navigationUpdatePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _navigationUpdatePending = false;
+      if (mounted) setState(() {});
+    });
   }
 
   void _openWorkout() {

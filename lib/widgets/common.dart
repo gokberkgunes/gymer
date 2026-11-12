@@ -91,14 +91,15 @@ const pageInsets = EdgeInsets.fromLTRB(16, 16, 16, 96);
 const subPageInsets = EdgeInsets.fromLTRB(16, 0, 16, 40);
 
 /// The same header on every root tab: an optional small line above, a large
-/// title and up to a few 48 px actions, all at a fixed height so switching
+/// title, an optional inline control and up to a few actions, all at a fixed height so switching
 /// tabs never moves the title.
 class PageHeader extends StatelessWidget {
   final String title;
   final String? overline;
   final List<Widget> actions;
   final InfoDot? info;
-  const PageHeader(this.title, {super.key, this.overline, this.actions = const [], this.info});
+  final Widget? trailing;
+  const PageHeader(this.title, {super.key, this.overline, this.actions = const [], this.info, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +132,15 @@ class PageHeader extends StatelessWidget {
                 ],
               ),
             ),
+            if (trailing != null) ...[
+              const SizedBox(width: 12),
+              Flexible(
+                child: SizedBox(
+                  height: 52,
+                  child: Align(alignment: Alignment.centerRight, child: trailing),
+                ),
+              ),
+            ],
             for (final a in actions) SizedBox(width: 52, height: 52, child: Center(child: a)),
           ],
         ),
