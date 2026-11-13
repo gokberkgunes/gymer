@@ -45,6 +45,47 @@ void logAll(AppStore store, double weight, int reps, int rir) {
   }
 }
 
+AppStore suggestionStore(
+  int reps,
+  int? rir, {
+  int repMin = 8,
+  int repMax = 12,
+  double weight = 100,
+  String unit = 'kg',
+}) {
+  final store = AppStore()
+    ..exercises = [
+      Exercise(name: 'Press', equipment: 'Weight-stack machine', incrementKg: 2.5, repMin: repMin, repMax: repMax),
+    ]
+    ..templates = [
+      WorkoutTemplate(
+        id: 'press',
+        name: 'Press day',
+        exercises: [
+          TemplateExercise(name: 'Press', sets: [for (var i = 0; i < 3; i++) TemplateSet(weight: 100, reps: 14)]),
+        ],
+      ),
+    ]
+    ..history = [
+      Session(
+        id: 'baseline',
+        templateId: 'press',
+        name: 'Press day',
+        unit: unit,
+        startedAt: DateTime(2026, 1, 1),
+        finishedAt: DateTime(2026, 1, 1, 1),
+        exercises: [
+          SessionExercise(
+            name: 'Press',
+            sets: [for (var i = 0; i < 3; i++) SetEntry(weight: weight, reps: reps, rir: rir, done: true)],
+          ),
+        ],
+      ),
+    ];
+  addTearDown(store.dispose);
+  return store;
+}
+
 void main() {
   test('exercise favourites persist and recents contain performed exercises only', () async {
     final store = await seeded();
@@ -64,22 +105,31 @@ void main() {
     expect(store.exercise(name)!.favourite, isFalse);
   });
 
-  test('next session is prescribed from the last one; one tap follows it', () async {
-    final store = await seeded();
-    final legs = store.templates.firstWhere((t) => t.name == 'Legs');
-    store.startSession(legs);
-    logAll(store, 100, 12, 2);
-    store.finishSession();
-    expect(store.history.single.exercises, hasLength(4));
-
-    // Outside a cycle the previous actual RIR supplies the next effort target.
-    store.startSession(legs);
-    final press = store.active!.exercises.first;
-    // Outside a cycle previous weight and reps are placeholders; RIR never is.
-    expect((press.sets.first.hintWeight, press.sets.first.hintReps, press.sets.first.rir), (100, 12, null));
-    store.toggleSet(press, 0);
-    expect((press.sets.first.weight, press.sets.first.reps), (100, 12));
-    expect(store.rest, isNotNull);
+  test('next-session prescriptions preserve effort, manual choices and one-tap completion', () async {
+    // Recorded reps/RIR and automatic mode → next load and rep goal.
+    for (final (reps, rir, automatic, load, goal) in <(int, int?, bool, double?, int?)>[
+      (9, 2, true, 100, 9),
+      (6, 2, true, 92.5, 8),
+      (6, null, true, 100, 6),
+      (6, 2, false, null, null),
+    ]) {
+      final store = suggestionStore(reps, rir);
+      store.exercises = [store.exercises.single.copyWith(autoProgression: automatic)];
+      final history = jsonEncode(store.history.single.toJson());
+      store.startSession(store.templates.single, at: DateTime(2026, 1, 2));
+      final exercise = store.active!.exercises.single;
+      expect((store.active!.cycleId, exercise.calibrate), (null, false));
+      expect(
+        exercise.sets.map((s) => (s.weight, s.targetReps, s.targetRir, s.rir, s.prescribed)),
+        everyElement((load, goal, automatic ? rir : null, null, automatic)),
+        reason: '$reps reps @ $rir, auto=$automatic',
+      );
+      expect(store.fallbackValue(exercise, 0, 'reps'), goal ?? reps);
+      expect(store.toggleSet(exercise, 0).ok, isTrue);
+      expect((exercise.sets.first.weight, exercise.sets.first.reps), (load ?? 100, goal ?? reps));
+      expect(store.rest, isNotNull);
+      expect(jsonEncode(store.history.single.toJson()), history);
+    }
   });
 
   test('inside a cycle sessions carry the week, lock RIR and adjust reps before changing load', () async {
@@ -99,6 +149,61 @@ void main() {
     // The progression load is filled in; actual RIR stays blank (only the target is set).
     expect((set.weight, set.targetReps, set.rir, set.targetRir, set.hintReps), (100, 13, null, 2, null));
     expect(store.fallbackValue(s.exercises.first, 0, 'reps'), 13);
+
+    // Baseline reps/RIR and next effort/range → first-day and later build targets.
+    for (final (reps, rir, target, minimum, maximum, load, goal) in [
+      (9, 1, 3, 14, 18, 100.0, 7),
+      (6, 2, 2, 8, 12, 92.5, 8),
+      (9, 2, 3, 8, 12, 100.0, 8),
+    ]) {
+      final store = suggestionStore(reps, rir, repMin: minimum, repMax: maximum);
+      final baseline = store.history.single;
+      baseline.exercises.single.sets.last.rir = 4; // A stronger position must not inflate calibration.
+      final wrong = Session.fromJson({...baseline.toJson(), 'id': 'wrong'})..startedAt = DateTime(2026, 1, 1, 12);
+      for (final set in wrong.exercises.single.sets) {
+        set
+          ..weight = 300
+          ..context = const SetContext(setup: 'different machine');
+      }
+      store.history = [wrong, baseline];
+      final cycle = Mesocycle(
+        id: 'cycle',
+        start: DateTime(2026, 1, 2),
+        startRir: target,
+        endRir: target,
+        deloadMicro: 0,
+      );
+      store.saveCycle(cycle);
+      store.startSession(store.templates.single, at: cycle.start);
+      final exercise = store.active!.exercises.single;
+      final calibration = store.calibrationFor('Press', 'Straight', store.active!)!;
+      expect(exercise.calibrate, isTrue);
+      expect((calibration.weight, calibration.targetReps, calibration.targetRir), (load, goal, target));
+      expect((exercise.sets.first.hintWeight, store.fallbackValue(exercise, 0, 'reps')), (load, goal));
+      exercise.sets[1]
+        ..weight = 80
+        ..reps = 11
+        ..rir = 2; // Keep manually entered later results.
+      exercise.sets.first
+        ..weight = 100
+        ..reps = reps
+        ..rir = rir;
+      expect(store.toggleSet(exercise, 0).ok, isTrue);
+      expect((exercise.calibrate, exercise.calibrationEntered), (false, true));
+      expect((exercise.sets[1].weight, exercise.sets[1].reps, exercise.sets[1].rir), (80, 11, 2));
+      expect(
+        (exercise.sets.last.hintWeight, store.fallbackValue(exercise, 2, 'reps'), exercise.sets.last.targetRir),
+        (load, goal, target),
+      );
+      logAll(store, 100, reps, rir);
+      store.finishSession();
+      store.startSession(store.templates.single, at: DateTime(2026, 1, 3));
+      expect(store.active!.exercises.single.calibrate, isFalse);
+      expect(
+        store.active!.exercises.single.sets.map((s) => (s.weight, s.targetReps, s.targetRir)),
+        everyElement((load, goal, target)),
+      );
+    }
   });
 
   test('deload weeks prescribe fewer, lighter straight sets', () async {
@@ -163,6 +268,13 @@ void main() {
     store.toggleSet(f, 0);
     store.discardSession();
     expect(alerts.calls, containsAllInOrder(['rest:${f.name}', 'cancel']));
+
+    store.rest = RestTimer(
+      startedAt: DateTime.now().subtract(const Duration(seconds: 70)),
+      totalSeconds: 60,
+      exercise: 'x',
+    );
+    expect((store.rest!.overdue, store.rest!.remainingSeconds <= -10), (true, true));
   });
 
   test('persists, restores and round-trips a JSON backup', () async {
@@ -208,9 +320,26 @@ void main() {
     expect(recorded.duration.inSeconds, originalEstimate + 120);
     final legacy = recorded.toJson()..remove('estimatedSeconds');
     expect(Session.fromJson(legacy).estimatedSeconds, isNull, reason: 'never invent an estimate for old history');
+
+    // Resume a generated prescription with a completed working set as its live baseline.
+    final coached = suggestionStore(6, 2);
+    coached.startSession(coached.templates.single, at: DateTime(2026, 1, 2));
+    coached.active!.exercises.single.sets.first.rir = 2;
+    coached.toggleSet(coached.active!.exercises.single, 0);
+    final resumed = AppStore();
+    addTearDown(resumed.dispose);
+    await resumed.importJson(jsonEncode(coached.toJson()));
+    final restored = resumed.active!.exercises.single;
+    expect(restored.sets.first.done, isTrue);
+    expect(
+      (restored.sets[1].weight, resumed.fallbackValue(restored, 1, 'reps'), restored.sets[1].targetRir),
+      (92.5, 8, 2),
+    );
+    expect(resumed.toggleSet(restored, 1).ok, isTrue);
+    expect((restored.sets[1].weight, restored.sets[1].reps, restored.sets[1].rir), (92.5, 8, null));
   });
 
-  test('completing sets: fallbacks, validation, rest between sets only, overdue timer', () async {
+  test('set completion validates values, bounds defaults and preserves entered results', () async {
     final store = await seeded();
     store.startSession(null);
     expect(store.addSessionExercise('Leg Curl'), isNull);
@@ -234,12 +363,56 @@ void main() {
     expect(store.rest, isNull, reason: 'no rest after the exercise\'s last set');
     expect(store.removeSessionExercise(e), isNotNull, reason: 'completed exercises stay');
 
-    store.rest = RestTimer(
-      startedAt: DateTime.now().subtract(const Duration(seconds: 70)),
-      totalSeconds: 60,
-      exercise: 'x',
+    // Stale 14-rep defaults must yield to a freshly logged 9 reps at 1 RIR.
+    e.sets = [
+      SetEntry(weight: 40, reps: 9, rir: 1),
+      SetEntry(weight: 40, prescribed: true, hintReps: 14),
+      SetEntry(weight: 40, hintReps: 14),
+      SetEntry(reps: 8, hintWeight: 50),
+    ];
+    expect(store.toggleSet(e, 0).ok, isTrue);
+    expect(
+      [
+        for (final i in [1, 2]) store.fallbackValue(e, i, 'reps'),
+      ],
+      [9, 9],
     );
-    expect((store.rest!.overdue, store.rest!.remainingSeconds <= -10), (true, true));
+    store.settings.updateFollowingDefaults = true;
+    store.toggleSet(e, 0);
+    store.toggleSet(e, 0);
+    expect([e.sets[1].hintReps, e.sets[2].hintReps, e.sets[3].hintWeight, e.sets[3].reps], [9, 9, 40, 8]);
+    e.sets[1].reps = 12; // An entered result is an observation, not an automatic default.
+    expect(store.toggleSet(e, 1).ok, isTrue);
+    expect(e.sets[1].reps, 12);
+
+    e.sets = [SetEntry(weight: 100, reps: 9, rir: 1, done: true), SetEntry(hintWeight: 100, hintReps: 14)];
+    final next = e.sets.last;
+    for (final (load, target, reps) in <(double, int, int?)>[
+      (100, 3, 7),
+      (100, 0, 10),
+      (95, 1, 11),
+      (110, 1, 5),
+      (200, 1, null),
+    ]) {
+      next
+        ..weight = load
+        ..targetRir = target;
+      expect(store.fallbackValue(e, 1, 'reps'), reps, reason: '$load kg at $target RIR');
+    }
+    expect(store.toggleSet(e, 1).ok, isFalse);
+    expect(next.invalid, contains('reps'));
+    next.weight = 95;
+    e.sets.first.type = 'Warm-up';
+    expect(store.fallbackValue(e, 1, 'reps'), 14);
+    e.sets.first
+      ..type = 'Normal'
+      ..context = const SetContext(setup: 'different machine');
+    expect(store.fallbackValue(e, 1, 'reps'), 14);
+    e.calibrationEntered = true;
+    e.sets.first
+      ..context = next.context
+      ..done = false;
+    expect(store.fallbackValue(e, 1, 'reps'), 11);
   });
 
   test('require previous set blocks out-of-order completion', () async {
@@ -254,102 +427,7 @@ void main() {
     expect(store.toggleSet(e, 1).message, contains('Complete set 1'));
   });
 
-  test('later rep defaults respect the completed set instead of an old template target', () async {
-    final store = await seeded();
-    addTearDown(store.dispose);
-    final template = WorkoutTemplate(
-      id: 'reps',
-      name: 'Rep defaults',
-      exercises: [
-        TemplateExercise(name: 'Leg Curl', sets: [for (var i = 0; i < 3; i++) TemplateSet(weight: 40, reps: 14)]),
-      ],
-    );
-    store.startSession(template);
-    final e = store.active!.exercises.single;
-    e.sets.first
-      ..weight = 40
-      ..reps = 9
-      ..rir = 1;
-    expect(store.toggleSet(e, 0).ok, isTrue);
-    expect(store.settings.updateFollowingDefaults, isFalse);
-    expect(store.fallbackValue(e, 1, 'reps'), 9);
-    expect(store.fallbackValue(e, 2, 'reps'), 9);
-    expect(template.exercises.single.sets.map((s) => s.reps), everyElement(14));
-
-    final resumed = AppStore();
-    addTearDown(resumed.dispose);
-    await resumed.importJson(jsonEncode(store.toJson()));
-    final restored = resumed.active!.exercises.single;
-    expect(resumed.fallbackValue(restored, 1, 'reps'), 9);
-    expect(resumed.toggleSet(restored, 1).ok, isTrue);
-    expect((restored.sets[1].weight, restored.sets[1].reps), (40, 9));
-
-    // A typed result is an observation, even when it exceeds the old estimate.
-    restored.sets[2].reps = 12;
-    expect(resumed.toggleSet(restored, 2).ok, isTrue);
-    expect(restored.sets[2].reps, 12);
-  });
-
-  test('rep defaults account for load and target effort without using warm-ups or other contexts', () async {
-    final store = await seeded();
-    addTearDown(store.dispose);
-    store.startSession(null);
-    store.addSessionExercise('Leg Curl');
-    final e = store.active!.exercises.single;
-    e.sets = [
-      SetEntry(weight: 100, reps: 9, rir: 1, done: true),
-      SetEntry(hintWeight: 100, hintReps: 14, targetRir: 3),
-    ];
-    final next = e.sets.last;
-    expect(store.fallbackValue(e, 1, 'reps'), 7);
-    next.targetRir = 0;
-    expect(store.fallbackValue(e, 1, 'reps'), 10);
-    next
-      ..targetRir = 1
-      ..hintWeight = 95;
-    expect(store.fallbackValue(e, 1, 'reps'), 11);
-    next.weight = 110; // A typed load wins over its old placeholder.
-    expect(store.fallbackValue(e, 1, 'reps'), 5);
-    next.weight = 200;
-    expect(store.fallbackValue(e, 1, 'reps'), isNull);
-    expect(store.toggleSet(e, 1).ok, isFalse);
-    expect(next.invalid, contains('reps'));
-
-    next.weight = null;
-    e.sets.first.type = 'Warm-up';
-    expect(store.fallbackValue(e, 1, 'reps'), 14);
-    e.sets.first
-      ..type = 'Normal'
-      ..context = const SetContext(setup: 'different machine');
-    expect(store.fallbackValue(e, 1, 'reps'), 14);
-
-    e.sets.first.context = next.context;
-    e.calibrationEntered = true;
-    e.sets.first.done = false; // A calibration entered through the dialog is already a baseline.
-    expect(store.fallbackValue(e, 1, 'reps'), 11);
-  });
-
-  test('following defaults update untouched fields independently of prefilled or typed fields', () async {
-    final store = await seeded();
-    addTearDown(store.dispose);
-    store.startSession(null);
-    store.addSessionExercise('Leg Curl');
-    store.settings.updateFollowingDefaults = true;
-    final e = store.active!.exercises.single;
-    e.sets = [
-      SetEntry(weight: 40, reps: 9, rir: 1),
-      SetEntry(weight: 40, prescribed: true, hintReps: 14),
-      SetEntry(weight: 40, hintReps: 14),
-      SetEntry(reps: 8, hintWeight: 50),
-    ];
-    expect(store.toggleSet(e, 0).ok, isTrue);
-    expect(e.sets[1].hintReps, 9);
-    expect(e.sets[2].hintReps, 9);
-    expect(e.sets[3].reps, 8);
-    expect(e.sets[3].hintWeight, 40);
-  });
-
-  test('finishing saves template defaults and structure; unit switch converts weights', () async {
+  test('finished plans and load suggestions respect units, inventory and recorded history', () async {
     final store = await seeded();
     final legs = store.templates.firstWhere((t) => t.name == 'Legs');
     store.startSession(legs);
@@ -371,6 +449,30 @@ void main() {
     expect(press.sets.first.weight, 220);
     store.updateSettings((s) => s.unit = 'kg');
     expect(press.sets.first.weight, 100);
+
+    // History load/reps/unit and restricted plates → achievable suggested load.
+    for (final (load, reps, unit, limited, expected) in [
+      (220.0, 9, 'lb', false, 97.5),
+      (60.0, 6, 'kg', true, 60.0),
+      (20.0, 2, 'kg', true, 20.0),
+    ]) {
+      final store = suggestionStore(reps, 2, weight: load, unit: unit);
+      if (limited) {
+        store.exercises = [store.exercises.single.copyWith(equipment: 'Barbell')];
+        store.settings.plateProfile
+          ..platesKg = [20]
+          ..limitedPairs = true
+          ..pairsKg = {20: 1};
+      }
+      final history = jsonEncode(store.history.single.toJson());
+      store.startSession(store.templates.single, at: DateTime(2026, 1, 2));
+      expect(
+        store.active!.exercises.single.sets.map((s) => (s.weight, s.targetReps, s.targetRir)),
+        everyElement((expected, reps, 2)),
+      );
+      if (limited) expect(store.plates(expected, name: 'Press').exact, isNotNull);
+      expect(jsonEncode(store.history.single.toJson()), history);
+    }
   });
 
   test('records, last-time values, set undo and exercise moves', () async {

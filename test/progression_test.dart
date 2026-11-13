@@ -43,6 +43,25 @@ void main() {
 
     final down = rec(sets([(100, 6, 1), (100, 6, 1), (100, 5, 1)]), inc: 2.5);
     expect((down.action, down.weight), ('decrease', 90.0));
+
+    // Boundary combinations plus the ordinary working sets above cover the stable window.
+    for (final reps in [7, 13]) {
+      for (final actualRir in [0, 4]) {
+        for (final targetRir in [0, 4]) {
+          final result = recommend(
+            previous: sets([(100, reps, actualRir)]),
+            method: 'Straight',
+            targetRir: targetRir,
+            unit: 'kg',
+          )!;
+          expect(
+            (result.action, result.weight, result.targetReps),
+            ('hold', 100, reps + actualRir - targetRir),
+            reason: '$reps reps @ $actualRir → $targetRir RIR',
+          );
+        }
+      }
+    }
   });
 
   test('light loads stay stable too; reps alone decide without RIR using the same working window', () {
@@ -80,7 +99,7 @@ void main() {
     expect(blank.action, 'hold');
   });
 
-  test('drop set progresses unless a recorded observation contradicts the protocol', () {
+  test('protocol progression respects quality gates and effort targets', () {
     const ctx = SetContext(setup: 'stack');
     List<SetEntry> drop({bool evidence = true}) => [
       SetEntry(
@@ -123,6 +142,32 @@ void main() {
       repMax: 20,
     )!;
     expect((wide.action, wide.weight, wide.targetReps), ('hold', 100, 14));
+
+    for (final (method, anchor, continuation, reps) in [
+      ('AMRAP', 'AMRAP', 'AMRAP', 13),
+      ('Drop Set', 'Activation', 'Drop Set', 3),
+      ('Myo-Reps', 'Activation', 'Myo-set', 3),
+      ('Rest-Pause', 'Activation', 'Rest-Pause', 3),
+      ('Myo-Rep Match', 'Activation', 'Myo-Rep Match', 13),
+    ]) {
+      final result = recommend(
+        previous: [
+          SetEntry(type: anchor, weight: 100, reps: 13, rir: 2, done: true),
+          SetEntry(type: continuation, weight: method == 'Drop Set' ? 75 : 100, reps: reps, rir: 2, done: true),
+        ],
+        method: method,
+        targetRir: 2,
+        unit: 'kg',
+        increment: 2.5,
+      )!;
+      expect((result.weight, result.targetReps), (100, 13), reason: method);
+    }
+    Recommendation amrap(List<SetEntry> rows) =>
+        recommend(previous: rows, method: 'AMRAP', targetRir: 2, unit: 'kg', increment: 2.5)!;
+    final rows = sets([(100, 14, 2), (100, 6, 2)], 'AMRAP');
+    expect((amrap(rows).weight, amrap(rows).setRepTargets.last), (92.5, 8));
+    rows[1] = SetEntry(type: 'AMRAP');
+    expect(amrap(rows).applyWeight, isFalse);
   });
 
   test('deload weights round down, set counts round to nearest, at least one set', () {
@@ -133,7 +178,32 @@ void main() {
     );
   });
 
-  test('Wathan e1RM counts reps in reserve', () {
+  test('Wathan estimates count reserve reps and fit rounded load targets', () {
     expect(estimatedOneRm(100, 8, 2), closeTo(134.7467, 1e-3));
+    // Reps/RIR, increment and rep minimum → rounded load and attainable goal.
+    for (final (reps, rir, step, minimum, load, goal) in [
+      (6, 2, 2.5, 8, 92.5, 8), // Uses the estimate, not a single-increment reduction.
+      (2, 2, 2.5, 14, 90.0, 5), // A capped reduction must lower the rep goal too.
+      (2, 2, 25.0, 14, 100.0, 2), // No available increment fits the 10% limit.
+      (14, 2, 2.5, 8, 110.0, 9), // Increase only outside the working window.
+      (6, 8, 2.5, 8, 100.0, 8), // An inflated RIR counts as at most four.
+    ]) {
+      final source = SetEntry(weight: 100, reps: reps, rir: rir, done: true);
+      final result = recommend(
+        previous: [source],
+        method: 'Straight',
+        targetRir: 2,
+        unit: 'kg',
+        increment: step,
+        repMin: minimum,
+        repMax: minimum == 14 ? 18 : 12,
+      )!;
+      expect(
+        (result.weight, result.targetReps),
+        (load, goal),
+        reason: '$reps reps @ $rir, step $step, minimum $minimum',
+      );
+      expect(setOneRm(result.weight, result.targetReps, result.targetRir)!, lessThanOrEqualTo(source.e1rm! + 1e-6));
+    }
   });
 }
