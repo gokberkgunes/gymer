@@ -352,6 +352,7 @@ extension AppStoreSessionStart on AppStore {
           repMin: info?.repMin ?? lowRepLimit,
           repMax: info?.repMax ?? highRepLimit,
           auto: info?.autoProgression ?? true,
+          perSet: info?.perSet ?? false,
           expectedWorkSets: method == 'Straight'
               ? e.sets.where((s) => isStraightType(s.type)).length
               : e.sets.where((s) => !s.warmup).length,
@@ -415,7 +416,11 @@ extension AppStoreSessionStart on AppStore {
       else if (method == 'Straight' && !allow)
         'Progress loads manually for this exercise; keep individual planned loads and record actual reps and RIR.',
       if (rec != null && !e.calibrate)
-        '${rec.applyWeight ? 'Next load: ${formatNumber(rec.weight, NumKind.weight)} $unit. ' : 'Keep individual loads. '}'
+        '${!rec.applyWeight
+                ? 'Keep individual loads. '
+                : rec.setWeights.isNotEmpty
+                ? 'Next loads: ${rec.setWeights.map((w) => formatNumber(w, NumKind.weight)).join(' / ')} $unit. '
+                : 'Next load: ${formatNumber(rec.weight, NumKind.weight)} $unit. '}'
             '${rec.reason}'
             '${rec.setRepTargets.isEmpty ? '' : ' Rep goals: ${rec.setRepTargets.join(' / ')}.'}',
       if (method == 'Mechanical Drop Set')
@@ -429,6 +434,7 @@ extension AppStoreSessionStart on AppStore {
   bool _straightGuidanceAllowed(SessionExercise e) {
     if (exercise(e.name)?.autoProgression == false) return false;
     if (contextProblem(e.sets) != null) return false;
+    if (exercise(e.name)?.perSet ?? false) return true; // per-set progression expects different loads
     final loads = {
       for (final s in e.sets)
         if (isStraightType(s.type) && (s.weight ?? s.hintWeight ?? 0) > 0) s.weight ?? s.hintWeight,

@@ -33,6 +33,9 @@ class Recommendation {
   final (int, int)? continuationRepRange;
   final double step;
 
+  /// Per-set straight progression: the load of each working set, in order. Empty when all sets share [weight].
+  final List<double> setWeights;
+
   const Recommendation({
     required this.method,
     required this.action,
@@ -45,6 +48,7 @@ class Recommendation {
     this.continuationWeights = const [],
     this.continuationRepRange,
     required this.step,
+    this.setWeights = const [],
   });
 }
 
@@ -181,6 +185,7 @@ Recommendation? recommend({
   List<SetEntry>? planned,
   bool rirTracked = true,
   double Function(double)? loadAtOrBelow,
+  bool perSet = false,
 }) {
   if (phase == 'Deload' || normalizeLoadMode(loadMode) != 'external') return null;
   method = canonicalMethod(method);
@@ -197,6 +202,7 @@ Recommendation? recommend({
           planned,
           rirTracked,
           loadAtOrBelow,
+          perSet: perSet,
         )
       : _method(
           previous,
@@ -243,11 +249,44 @@ Recommendation? _straight(
   int? expected,
   List<SetEntry>? currentPlan,
   bool rirTracked,
-  double Function(double)? loadAtOrBelow,
-) {
+  double Function(double)? loadAtOrBelow, {
+  bool perSet = false,
+}) {
   final planned = rows.where((r) => isStraightType(r.type)).toList();
   final sets = planned.where((r) => r.done && (r.weight ?? 0) > 0 && (r.reps ?? 0) > 0).toList();
   if (sets.isEmpty) return null;
+  // Per-set ("dynamic") double progression: every working set follows the same rules on its own, so the first
+  // set can move up while later ones still build reps, and different loads across sets are expected. A missed
+  // set, a changed set count or mixed logging contexts fall through to the ordinary refusals below.
+  if (perSet &&
+      sets.length == planned.length &&
+      (expected == null || planned.length == expected) &&
+      contextProblem(planned, currentPlan?.where((r) => isStraightType(r.type)).toList()) == null) {
+    final each = [
+      for (final set in planned)
+        _straight([set], target, unit, increment, low, high, null, null, rirTracked, loadAtOrBelow)!,
+    ];
+    final moved = [
+      for (final (i, r) in each.indexed)
+        if (r.action != 'hold') 'Set ${i + 1}: ${r.reason}',
+    ];
+    return Recommendation(
+      method: 'Straight',
+      action: each.any((r) => r.action == 'increase')
+          ? 'increase'
+          : each.any((r) => r.action == 'decrease')
+          ? 'decrease'
+          : 'hold',
+      weight: each.first.weight,
+      applyWeight: each.every((r) => r.applyWeight),
+      setRepTargets: [for (final r in each) r.targetReps],
+      targetReps: each.map((r) => r.targetReps).reduce(math.min),
+      targetRir: each.first.targetRir,
+      reason: 'Each set progresses on its own. ${moved.isEmpty ? each.first.reason : moved.join(' ')}',
+      step: each.first.step,
+      setWeights: [for (final r in each) r.weight],
+    );
+  }
   final current = sets.first.weight!;
   final step = practicalWeightStep(current, unit, increment);
   var targets = [for (final r in planned) r.reps ?? low];
@@ -597,6 +636,7 @@ Recommendation? _method(
 double? weightForSet(Recommendation r, String type, int workIndex) {
   if (!r.applyWeight || isWarmup(type)) return null;
   if (r.method == 'Straight' && !isStraightType(type)) return null;
+  if (r.setWeights.isNotEmpty) return workIndex < r.setWeights.length ? r.setWeights[workIndex] : null;
   if (r.method == 'Drop Set' && workIndex > 0) {
     final i = workIndex - 1;
     if (i < r.continuationWeights.length) return r.continuationWeights[i];

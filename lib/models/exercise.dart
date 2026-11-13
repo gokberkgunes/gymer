@@ -90,6 +90,9 @@ class Exercise {
   final int repMin;
   final int repMax;
   final bool autoProgression;
+
+  /// Straight sets progress one by one instead of together ("dynamic" double progression).
+  final bool perSet;
   final int? setSeconds;
   final SetContext context;
 
@@ -109,6 +112,7 @@ class Exercise {
     this.repMin = 8,
     this.repMax = 12,
     this.autoProgression = true,
+    this.perSet = false,
     this.setSeconds,
     this.context = const SetContext(),
   });
@@ -129,6 +133,7 @@ class Exercise {
     int? repMin,
     int? repMax,
     bool? autoProgression,
+    bool? perSet,
     int? Function()? setSeconds,
     SetContext? context,
   }) => Exercise(
@@ -147,6 +152,7 @@ class Exercise {
     repMin: repMin ?? this.repMin,
     repMax: repMax ?? this.repMax,
     autoProgression: autoProgression ?? this.autoProgression,
+    perSet: perSet ?? this.perSet,
     setSeconds: setSeconds != null ? setSeconds() : this.setSeconds,
     context: context ?? this.context,
   );
@@ -167,6 +173,7 @@ class Exercise {
     'repMin': repMin,
     'repMax': repMax,
     'auto': autoProgression,
+    if (perSet) 'perSet': true,
     if (setSeconds != null) 'setSeconds': setSeconds,
     if (!context.isEmpty) 'context': context.toJson(),
   };
@@ -187,6 +194,7 @@ class Exercise {
     repMin: _int(j['repMin']) ?? 8,
     repMax: _int(j['repMax']) ?? 12,
     autoProgression: j['auto'] as bool? ?? true,
+    perSet: j['perSet'] as bool? ?? false,
     setSeconds: _int(j['setSeconds']),
     context: SetContext.fromJson(j['context'] as Map<String, dynamic>?),
   );

@@ -44,6 +44,32 @@ void main() {
     final down = rec(sets([(100, 6, 1), (100, 6, 1), (100, 5, 1)]), inc: 2.5);
     expect((down.action, down.weight), ('decrease', 90.0));
 
+    // Per-set progression: different loads across sets are expected, and each set follows the rules alone.
+    final mixed = sets([(102.5, 8, 2), (100, 10, 2), (100, 9, 2)]);
+    expect(rec(mixed).applyWeight, isFalse); // together: working loads differ, so no automatic load
+    final own = recommend(previous: mixed, method: 'Straight', targetRir: 2, unit: 'kg', increment: 2.5, perSet: true)!;
+    expect(own.applyWeight, isTrue);
+    expect(own.setWeights, [102.5, 100.0, 100.0]);
+    expect(own.setRepTargets, [8, 10, 9]);
+    expect([for (var i = 0; i < 3; i++) weightForSet(own, 'Normal', i)], [102.5, 100.0, 100.0]);
+    final first = recommend(
+      previous: sets([(100, 15, 2), (100, 9, 2)]),
+      method: 'Straight',
+      targetRir: 2,
+      unit: 'kg',
+      increment: 2.5,
+      perSet: true,
+    )!;
+    expect((first.action, first.setWeights.first > 100, first.setWeights.last), ('increase', true, 100.0));
+    // A missed set still blocks progression in this mode.
+    final missed = [
+      ...sets([(100, 10, 2)]),
+      SetEntry(weight: 100),
+    ];
+    expect(
+      recommend(previous: missed, method: 'Straight', targetRir: 2, unit: 'kg', perSet: true)!.setWeights,
+      isEmpty,
+    );
     // Boundary combinations plus the ordinary working sets above cover the stable window.
     for (final reps in [7, 13]) {
       for (final actualRir in [0, 4]) {

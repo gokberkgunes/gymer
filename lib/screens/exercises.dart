@@ -357,9 +357,17 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
           const SectionLabel('Straight progression'),
           dropdown(
             'Straight progression',
-            _e.autoProgression ? 'double_progression' : 'manual',
-            const {'double_progression': 'Double progression', 'manual': 'Manual'},
-            (v) => setState(() => _e = _e.copyWith(autoProgression: v != 'manual')),
+            !_e.autoProgression
+                ? 'manual'
+                : _e.perSet
+                ? 'per_set'
+                : 'double_progression',
+            const {
+              'double_progression': 'Double progression (all sets together)',
+              'per_set': 'Double progression (each set on its own)',
+              'manual': 'Manual',
+            },
+            (v) => setState(() => _e = _e.copyWith(autoProgression: v != 'manual', perSet: v == 'per_set')),
           ),
           const SizedBox(height: 10),
           Row(
