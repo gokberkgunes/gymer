@@ -166,9 +166,18 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
 
   // Nullable while editing: a default filled in on every keystroke would refill the box the moment it is
   // cleared, so the range could never be retyped. Defaults apply on save.
-  late int? _repMin = _e.repMin;
-  late int? _repMax = _e.repMax;
-  bool get _rangeInvalid => (_repMin ?? 8) > (_repMax ?? 12);
+  // A just-added exercise (no muscles or equipment yet, range untouched) starts with an empty range, filled
+  // on save from the equipment and muscles chosen here.
+  late final bool _isNew =
+      widget.original.primary.isEmpty &&
+      widget.original.equipment.isEmpty &&
+      widget.original.repMin == 8 &&
+      widget.original.repMax == 12;
+  late int? _repMin = _isNew ? null : _e.repMin;
+  late int? _repMax = _isNew ? null : _e.repMax;
+  (int, int) get _defaultRange =>
+      defaultRepRange(equipment: _e.equipment, primary: _e.primary, secondary: _e.secondary);
+  bool get _rangeInvalid => (_repMin ?? _defaultRange.$1) > (_repMax ?? _defaultRange.$2);
   late final _name = TextEditingController(text: _e.name);
   late final _note = TextEditingController(text: _e.note);
   late final _desc = TextEditingController(text: _e.description);
@@ -191,8 +200,8 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
     final error = store.saveExercise(
       _e.copyWith(
         name: name,
-        repMin: _repMin ?? 8,
-        repMax: _repMax ?? 12,
+        repMin: _repMin ?? _defaultRange.$1,
+        repMax: _repMax ?? _defaultRange.$2,
         note: _note.text.trim(),
         description: _desc.text.trim(),
         context: _e.context.copyWith(setup: _setup.text.trim()),
@@ -359,7 +368,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
                 child: NumField(
                   value: _repMin?.toDouble(),
                   kind: NumKind.reps,
-                  placeholder: 'Minimum reps',
+                  placeholder: 'Min ${_defaultRange.$1}',
                   dense: false,
                   invalid: _rangeInvalid,
                   onChanged: (v) => setState(() => _repMin = v?.round()),
@@ -370,7 +379,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
                 child: NumField(
                   value: _repMax?.toDouble(),
                   kind: NumKind.reps,
-                  placeholder: 'Maximum reps',
+                  placeholder: 'Max ${_defaultRange.$2}',
                   dense: false,
                   invalid: _rangeInvalid,
                   onChanged: (v) => setState(() => _repMax = v?.round()),

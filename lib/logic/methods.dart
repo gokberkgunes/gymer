@@ -92,6 +92,20 @@ String setRole(String type) {
   return 'unknown';
 }
 
+/// A starting rep range for a new exercise by its type: 5–8 for barbell compounds (they involve secondary
+/// muscles), 10–20 for isolations and for calves, abs and forearms, 8–12 for everything else (machine,
+/// dumbbell and cable compounds, or an exercise without muscles yet). Saved exercises keep their own range.
+(int, int) defaultRepRange({
+  required String equipment,
+  required List<String> primary,
+  required List<String> secondary,
+}) {
+  const highRep = {'Calves', 'Abs', 'Forearms'};
+  if (primary.isEmpty) return (8, 12);
+  if (secondary.isEmpty || primary.every(highRep.contains)) return (10, 20);
+  return equipment == 'Barbell' ? (5, 8) : (8, 12);
+}
+
 const loadModes = {
   'external': 'External load',
   'bodyweight': 'Bodyweight + added load',

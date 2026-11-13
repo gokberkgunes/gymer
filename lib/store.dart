@@ -87,7 +87,14 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    exercises = List.of(seedExercises);
+    // A fresh install starts each exercise with a range that suits its type; saved data keeps its own.
+    exercises = [
+      for (final e in seedExercises)
+        () {
+          final (low, high) = defaultRepRange(equipment: e.equipment, primary: e.primary, secondary: e.secondary);
+          return e.copyWith(repMin: low, repMax: high);
+        }(),
+    ];
     templates = seedTemplates();
     notifyListeners();
     await _persist();

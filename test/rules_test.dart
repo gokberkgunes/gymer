@@ -38,6 +38,14 @@ void main() {
     expect(setTypeChoices('Straight', [('Normal', false), ('Normal', false)], 1), ['Normal', 'Top Set', 'Back-off']);
     expect(setTypeChoices('Drop Set', [('Activation', false), ('Drop Set', false)], 1), ['Drop Set']);
     expect((methodSetUsesRir('Cluster', 'Cluster Set'), methodSetUsesRir('Myo-Reps', 'Myo-set')), (false, false));
+    // New exercises start with a rep range that suits their type.
+    (int, int) range(String equipment, List<String> primary, [List<String> secondary = const []]) =>
+        defaultRepRange(equipment: equipment, primary: primary, secondary: secondary);
+    expect(range('Barbell', ['Chest'], ['Triceps']), (5, 8));
+    expect(range('Dumbbell', ['Chest'], ['Triceps']), (8, 12));
+    expect(range('Barbell', ['Biceps']), (10, 20)); // an isolation, whatever the implement
+    expect(range('Plate loaded', ['Calves'], ['Quads']), (10, 20));
+    expect(range('', []), (8, 12));
   });
 
   test('fuzzy search, with a leading space for exact text', () {
