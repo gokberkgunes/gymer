@@ -72,7 +72,7 @@ void main() {
     store.finishSession();
     expect(store.history.single.exercises, hasLength(4));
 
-    // Outside a cycle there is no RIR target, so the load holds.
+    // Outside a cycle the previous actual RIR supplies the next effort target.
     store.startSession(legs);
     final press = store.active!.exercises.first;
     // Outside a cycle previous weight and reps are placeholders; RIR never is.
@@ -82,7 +82,7 @@ void main() {
     expect(store.rest, isNotNull);
   });
 
-  test('inside a cycle sessions carry the week, lock RIR and progress load', () async {
+  test('inside a cycle sessions carry the week, lock RIR and adjust reps before changing load', () async {
     final store = await seeded();
     final legs = store.templates.firstWhere((t) => t.name == 'Legs');
     final start = DateTime.now().subtract(const Duration(days: 8));
@@ -97,7 +97,8 @@ void main() {
     expect((s.cycleId, s.microcycle, s.phase, s.targetRir, s.rirLocked), ('c', 2, 'Build', 2, true));
     final set = s.exercises.first.sets.first;
     // The progression load is filled in; actual RIR stays blank (only the target is set).
-    expect((set.weight, set.targetReps, set.rir, set.targetRir, set.hintReps), (105, 8, null, 2, null));
+    expect((set.weight, set.targetReps, set.rir, set.targetRir, set.hintReps), (100, 13, null, 2, null));
+    expect(store.fallbackValue(s.exercises.first, 0, 'reps'), 13);
   });
 
   test('deload weeks prescribe fewer, lighter straight sets', () async {
@@ -251,6 +252,101 @@ void main() {
       ..weight = 40
       ..reps = 10;
     expect(store.toggleSet(e, 1).message, contains('Complete set 1'));
+  });
+
+  test('later rep defaults respect the completed set instead of an old template target', () async {
+    final store = await seeded();
+    addTearDown(store.dispose);
+    final template = WorkoutTemplate(
+      id: 'reps',
+      name: 'Rep defaults',
+      exercises: [
+        TemplateExercise(name: 'Leg Curl', sets: [for (var i = 0; i < 3; i++) TemplateSet(weight: 40, reps: 14)]),
+      ],
+    );
+    store.startSession(template);
+    final e = store.active!.exercises.single;
+    e.sets.first
+      ..weight = 40
+      ..reps = 9
+      ..rir = 1;
+    expect(store.toggleSet(e, 0).ok, isTrue);
+    expect(store.settings.updateFollowingDefaults, isFalse);
+    expect(store.fallbackValue(e, 1, 'reps'), 9);
+    expect(store.fallbackValue(e, 2, 'reps'), 9);
+    expect(template.exercises.single.sets.map((s) => s.reps), everyElement(14));
+
+    final resumed = AppStore();
+    addTearDown(resumed.dispose);
+    await resumed.importJson(jsonEncode(store.toJson()));
+    final restored = resumed.active!.exercises.single;
+    expect(resumed.fallbackValue(restored, 1, 'reps'), 9);
+    expect(resumed.toggleSet(restored, 1).ok, isTrue);
+    expect((restored.sets[1].weight, restored.sets[1].reps), (40, 9));
+
+    // A typed result is an observation, even when it exceeds the old estimate.
+    restored.sets[2].reps = 12;
+    expect(resumed.toggleSet(restored, 2).ok, isTrue);
+    expect(restored.sets[2].reps, 12);
+  });
+
+  test('rep defaults account for load and target effort without using warm-ups or other contexts', () async {
+    final store = await seeded();
+    addTearDown(store.dispose);
+    store.startSession(null);
+    store.addSessionExercise('Leg Curl');
+    final e = store.active!.exercises.single;
+    e.sets = [
+      SetEntry(weight: 100, reps: 9, rir: 1, done: true),
+      SetEntry(hintWeight: 100, hintReps: 14, targetRir: 3),
+    ];
+    final next = e.sets.last;
+    expect(store.fallbackValue(e, 1, 'reps'), 7);
+    next.targetRir = 0;
+    expect(store.fallbackValue(e, 1, 'reps'), 10);
+    next
+      ..targetRir = 1
+      ..hintWeight = 95;
+    expect(store.fallbackValue(e, 1, 'reps'), 11);
+    next.weight = 110; // A typed load wins over its old placeholder.
+    expect(store.fallbackValue(e, 1, 'reps'), 5);
+    next.weight = 200;
+    expect(store.fallbackValue(e, 1, 'reps'), isNull);
+    expect(store.toggleSet(e, 1).ok, isFalse);
+    expect(next.invalid, contains('reps'));
+
+    next.weight = null;
+    e.sets.first.type = 'Warm-up';
+    expect(store.fallbackValue(e, 1, 'reps'), 14);
+    e.sets.first
+      ..type = 'Normal'
+      ..context = const SetContext(setup: 'different machine');
+    expect(store.fallbackValue(e, 1, 'reps'), 14);
+
+    e.sets.first.context = next.context;
+    e.calibrationEntered = true;
+    e.sets.first.done = false; // A calibration entered through the dialog is already a baseline.
+    expect(store.fallbackValue(e, 1, 'reps'), 11);
+  });
+
+  test('following defaults update untouched fields independently of prefilled or typed fields', () async {
+    final store = await seeded();
+    addTearDown(store.dispose);
+    store.startSession(null);
+    store.addSessionExercise('Leg Curl');
+    store.settings.updateFollowingDefaults = true;
+    final e = store.active!.exercises.single;
+    e.sets = [
+      SetEntry(weight: 40, reps: 9, rir: 1),
+      SetEntry(weight: 40, prescribed: true, hintReps: 14),
+      SetEntry(weight: 40, hintReps: 14),
+      SetEntry(reps: 8, hintWeight: 50),
+    ];
+    expect(store.toggleSet(e, 0).ok, isTrue);
+    expect(e.sets[1].hintReps, 9);
+    expect(e.sets[2].hintReps, 9);
+    expect(e.sets[3].reps, 8);
+    expect(e.sets[3].hintWeight, 40);
   });
 
   test('finishing saves template defaults and structure; unit switch converts weights', () async {

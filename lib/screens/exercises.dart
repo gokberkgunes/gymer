@@ -380,8 +380,9 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Straight sets: build reps at the target RIR, then add one increment after every planned set reaches the '
-            'upper limit. Manual mode disables automatic load/calibration hints. Other methods use the same range for their first set: above it the load goes up, below it down.',
+            'Keep the load at 7–13 reps and 0–4 RIR, or within a wider rep range set here. Outside that window, '
+            'load suggestions use your recorded capacity and target RIR. The range guides rep targets after load changes. '
+            'Manual mode disables automatic load/calibration hints. Cluster sets keep their protocol window.',
             style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SectionLabel('Description'),

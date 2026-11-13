@@ -34,26 +34,39 @@ extension AppStoreSessionStart on AppStore {
 
   /// Latest completed session of this exercise and method, preferring the
   /// same workout (latest_completed_*_session).
-  List<SetEntry>? _latestMethodSession(String exercise, String method, String? templateId) {
+  List<SetEntry>? _latestMethodSession(String exercise, String method, Session session) {
     List<SetEntry>? fallback;
     for (final s in history) {
-      if (s.phase == 'Deload') continue;
-      final e = s.exercises.where((e) => sameExercise(e.name, exercise) && e.method == method).firstOrNull;
+      if (s.phase == 'Deload' || !s.startedAt.isBefore(session.startedAt)) continue;
+      final e = s.exercises
+          .where((e) => sameExercise(e.name, exercise) && e.method == method && e.loadMode == 'external')
+          .firstOrNull;
       if (e == null || !e.sets.any((x) => x.done)) continue;
-      final sets = [for (final x in e.sets) _inUnit(x, s.unit, null, exercise)];
-      if (s.templateId == templateId) return sets;
+      final sets = [for (final x in e.sets) _inUnit(x, s.unit, session.unit)];
+      if (s.templateId == session.templateId) return sets;
       fallback ??= sets;
     }
     return fallback;
   }
 
-  bool _calibrated(Mesocycle c, String? templateId, String exercise, String method) {
+  bool _calibrated(Mesocycle c, Session session, SessionExercise planned) {
+    final context = planned.sets.firstWhere((s) => calibrationAnchor(planned.method, s.type)).context;
     for (final s in history) {
-      if (s.cycleId != c.id || s.templateId != templateId || s.phase == 'Deload') continue;
+      if (s.cycleId != c.id ||
+          s.templateId != session.templateId ||
+          s.phase == 'Deload' ||
+          !s.startedAt.isBefore(session.startedAt)) {
+        continue;
+      }
       for (final e in s.exercises) {
-        if (!sameExercise(e.name, exercise) || e.method != method) continue;
+        if (!sameExercise(e.name, planned.name) || e.method != planned.method || e.loadMode != 'external') continue;
         if (e.sets.any(
-          (x) => x.done && calibrationAnchor(method, x.type) && (x.weight ?? 0) > 0 && (x.reps ?? 0) > 0,
+          (x) =>
+              x.done &&
+              x.context == context &&
+              calibrationAnchor(planned.method, x.type) &&
+              (x.weight ?? 0) > 0 &&
+              (x.reps ?? 0) > 0,
         )) {
           return true;
         }
@@ -321,9 +334,9 @@ extension AppStoreSessionStart on AppStore {
     final inBuild = cycle != null && session.phase == 'Build';
     final contextError = contextProblem(e.sets);
     Recommendation? rec;
-    if (inBuild && e.loadMode == 'external') {
+    if (session.phase != 'Deload' && e.loadMode == 'external') {
       final previous = _cycleStartingExercise(e.name, method, session) == null
-          ? _latestMethodSession(e.name, method, session.templateId)
+          ? _latestMethodSession(e.name, method, session)
           : null;
       final straightOk = method != 'Straight' || _straightGuidanceAllowed(e);
       if (previous != null && straightOk) {
@@ -342,6 +355,7 @@ extension AppStoreSessionStart on AppStore {
               : e.sets.where((s) => !s.warmup).length,
           loadMode: e.loadMode,
           rirTracked: settings.trackRir,
+          loadAtOrBelow: (target) => loadableAtOrBelow(e.name, target),
         );
       }
     }
@@ -357,7 +371,7 @@ extension AppStoreSessionStart on AppStore {
         method != 'Mechanical Drop Set' &&
         (method != 'Straight' || _straightGuidanceAllowed(e)) &&
         e.sets.any((s) => calibrationAnchor(method, s.type)) &&
-        !_calibrated(cycle, session.templateId, e.name, method);
+        !_calibrated(cycle, session, e);
 
     var workIndex = 0;
     var firstAnchor = true;
@@ -368,7 +382,10 @@ extension AppStoreSessionStart on AppStore {
       if (e.calibrate && managed) {
         if (calibrationAnchor(method, s.type) && firstAnchor) {
           firstAnchor = false;
-          s.hintWeight = calibrationFor(e.name, method, session)?.weight ?? s.hintWeight;
+          final calibration = calibrationFor(e.name, method, session, context: s.context);
+          s.hintWeight = calibration?.weight ?? s.hintWeight;
+          s.targetReps = calibration?.targetReps;
+          s.targetRir = calibration?.targetRir ?? s.targetRir;
         } else {
           s.hintWeight = null;
         }
@@ -382,9 +399,10 @@ extension AppStoreSessionStart on AppStore {
             ..prescribed = true;
         }
       }
-      if (rec != null && managed) {
+      if (rec != null && allow && managed) {
         final goals = rec.setRepTargets;
         s.targetReps = w < goals.length ? goals[w] : rec.targetReps;
+        if (methodSetUsesRir(method, s.type)) s.targetRir = rec.targetRir;
       }
     }
 
@@ -417,7 +435,7 @@ extension AppStoreSessionStart on AppStore {
   }
 
   /// Method-aware starting load for a first mesocycle session.
-  Calibration? calibrationFor(String name, String method, Session session) {
+  Calibration? calibrationFor(String name, String method, Session session, {SetContext? context}) {
     final info = exercise(name);
     if (info != null && info.loadMode != 'external') return null;
     final starting = _cycleStartingExercise(
@@ -426,6 +444,20 @@ extension AppStoreSessionStart on AppStore {
       session,
     )?.sets.where((s) => calibrationAnchor(method, s.type) && (s.weight ?? 0) > 0).firstOrNull;
     if (starting != null) {
+      if (starting.reps != null && starting.rir != null) {
+        return calibrationRecommendation(
+          weight: starting.weight!,
+          reps: starting.reps!,
+          rir: starting.rir,
+          method: method,
+          targetRir: session.targetRir,
+          unit: session.unit,
+          increment: incrementFor(name, session.unit),
+          repMin: info?.repMin ?? lowRepLimit,
+          repMax: info?.repMax ?? highRepLimit,
+          loadAtOrBelow: (target) => loadableAtOrBelow(name, target),
+        );
+      }
       final reps = method == 'Cluster'
           ? clusterTargetReps
           : method == 'Straight'
@@ -437,22 +469,41 @@ extension AppStoreSessionStart on AppStore {
       return Calibration(starting.weight!, reps, session.targetRir, method != 'Cluster');
     }
     SetEntry? latest;
+    final planned = session.exercises.where((e) => sameExercise(e.name, name)).firstOrNull;
+    final expectedContext =
+        context ??
+        planned?.sets.where((s) => calibrationAnchor(method, s.type)).firstOrNull?.context ??
+        info?.context ??
+        const SetContext();
     search:
     for (final s in history) {
       // A deload set is light and far from failure: as a baseline it would start the new cycle too light.
-      if (s.phase == 'Deload') continue;
-      for (final x in s.exercises.where((x) => sameExercise(x.name, name))) {
-        for (final set in x.sets.reversed) {
-          if (!set.done || (set.weight ?? 0) <= 0 || (set.reps ?? 0) <= 0) continue;
+      if (s.phase == 'Deload' || !s.startedAt.isBefore(session.startedAt)) continue;
+      for (final x in s.exercises.where((x) => sameExercise(x.name, name) && x.loadMode == 'external')) {
+        final candidates = x.sets.where((set) {
+          if (!set.done ||
+              set.context != expectedContext ||
+              (set.weight ?? 0) <= 0 ||
+              (set.reps ?? 0) <= 0 ||
+              (method != 'Cluster' && set.rir == null)) {
+            return false;
+          }
           final sameMethod = x.method == method && calibrationAnchor(method, set.type);
           // Activation/AMRAP methods may inherit a Straight baseline; Cluster never does.
           final straightFallback =
               method != 'Straight' && method != 'Cluster' && x.method == 'Straight' && isStraightType(set.type);
-          if (sameMethod || straightFallback) {
-            latest = _inUnit(set, s.unit, null, name);
-            break search;
-          }
-        }
+          return sameMethod || straightFallback;
+        }).toList();
+        if (candidates.isEmpty) continue;
+        // The starting load must support the weakest comparable working set,
+        // rather than borrowing extra capacity from a stronger set position.
+        final baseline = method == 'Cluster'
+            ? candidates.first
+            : candidates.reduce(
+                (a, b) => setOneRm(a.weight, a.reps, a.rir)! <= setOneRm(b.weight, b.reps, b.rir)! ? a : b,
+              );
+        latest = _inUnit(baseline, s.unit, session.unit);
+        break search;
       }
     }
     if (latest == null) return null;
@@ -466,6 +517,7 @@ extension AppStoreSessionStart on AppStore {
       increment: incrementFor(name, session.unit),
       repMin: info?.repMin ?? lowRepLimit,
       repMax: info?.repMax ?? highRepLimit,
+      loadAtOrBelow: (target) => loadableAtOrBelow(name, target),
     );
   }
 
@@ -478,13 +530,38 @@ extension AppStoreSessionStart on AppStore {
       ..rir = rir
       ..invalid.clear();
     final unit = active?.unit ?? settings.unit;
+    final info = exercise(ex.name);
+    final followup = ex.method == 'Straight'
+        ? calibrationRecommendation(
+            weight: weight,
+            reps: reps,
+            rir: rir,
+            method: ex.method,
+            targetRir: s.targetRir ?? active?.targetRir,
+            unit: unit,
+            increment: incrementFor(ex.name, unit),
+            repMin: info?.repMin ?? lowRepLimit,
+            repMax: info?.repMax ?? highRepLimit,
+            loadAtOrBelow: (target) => loadableAtOrBelow(ex.name, target),
+          )
+        : null;
     var workIndex = 0;
     for (final later in ex.sets.skip(index + 1)) {
       if (later.warmup) continue;
       workIndex++;
       if (later.done || later.context != s.context || !progressionManagedSet(ex.method, later.type)) continue;
-      if (later.weight != null) continue;
-      later.hintWeight = calibratedFollowupWeight(weight, ex.method, workIndex, unit, incrementFor(ex.name, unit));
+      if (later.weight != null && !later.prescribed) continue;
+      later
+        ..weight = null
+        ..prescribed = false
+        ..hintWeight =
+            followup?.weight ??
+            calibratedFollowupWeight(weight, ex.method, workIndex, unit, incrementFor(ex.name, unit));
+      if (ex.method == 'Straight' && later.reps == null) {
+        later
+          ..targetReps = followup?.targetReps ?? reps
+          ..targetRir = followup?.targetRir ?? s.targetRir ?? active?.targetRir;
+      }
     }
     ex
       ..calibrate = false

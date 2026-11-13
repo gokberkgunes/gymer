@@ -119,6 +119,7 @@ class _SetRow extends StatelessWidget {
     final rirVisible =
         methodSetUsesRir(e.method, s.type) &&
         (store.settings.trackRir || (e.calibrate && calibrationAnchor(e.method, s.type)));
+    final repDefault = store.fallbackValue(e, index, 'reps')?.toInt();
     final number = s.warmup ? 'W${position + 1}' : '${e.sets.take(index + 1).where((x) => !x.warmup).length}';
 
     String? warning(NumKind kind, num? v) => v == null
@@ -287,17 +288,17 @@ class _SetRow extends StatelessWidget {
           child: NumField(
             value: s.reps?.toDouble(),
             kind: NumKind.reps,
-            placeholder: s.hintReps?.toString(),
+            placeholder: repDefault?.toString(),
             completed: s.done,
             fill: fieldFill,
             align: TextAlign.center,
             invalid: s.invalid.contains('reps'),
             warning: repsWarn,
-            tooltip: s.targetReps == null
+            tooltip: s.targetReps == null || repDefault == null
                 ? null
                 : (store.active?.phase == 'Deload'
-                      ? 'Recovery goal: ${s.targetReps} reps at ${s.targetRir} RIR. Record actual reps.'
-                      : 'Next goal: ${s.targetReps} reps at target ${s.targetRir} RIR. Record actual reps.'),
+                      ? 'Recovery goal: $repDefault reps${s.targetRir == null ? '' : ' at ${s.targetRir} RIR'}. Record actual reps.'
+                      : 'Next goal: $repDefault reps${s.targetRir == null ? '' : ' at ${s.targetRir} RIR'}. Record actual reps.'),
             focusNode: f.reps,
             onChanged: (v) {
               s

@@ -219,14 +219,58 @@ extension AppStoreSessionEdits on AppStore {
   num? fallbackValue(SessionExercise e, int index, String field) {
     final s = e.sets[index];
     if (field == 'weight' && s.hintWeight != null) return s.hintWeight;
-    if (field == 'reps' && s.hintReps != null) return s.hintReps;
+    if (field == 'reps' && (s.targetReps ?? s.hintReps) != null) {
+      return _supportedRepDefault(e, index, s.targetReps ?? s.hintReps);
+    }
     if (field == 'rir' || index == 0) return null;
     final visible = active?.visibleSetsFor(e) ?? e.sets;
     final position = visible.indexOf(s);
     if (position <= 0) return null;
     final above = visible[position - 1];
     if (above.warmup != s.warmup) return null;
-    return field == 'weight' ? above.weight : above.reps;
+    return field == 'weight' ? above.weight : _supportedRepDefault(e, index, above.reps);
+  }
+
+  /// Old template/history reps must not ask for more capacity than the latest
+  /// comparable working set demonstrated. Resolve on read so resumed workouts
+  /// and the visible placeholder use the same value as one-tap completion.
+  int? _supportedRepDefault(SessionExercise e, int index, int? goal) {
+    final set = e.sets[index];
+    if (goal == null ||
+        goal <= 0 ||
+        !const {'Straight', 'AMRAP'}.contains(e.method) ||
+        e.loadMode != 'external' ||
+        set.warmup) {
+      return goal;
+    }
+    final calibration = e.calibrationEntered
+        ? e.sets.where((s) => calibrationAnchor(e.method, s.type)).firstOrNull
+        : null;
+    final source = e.sets
+        .take(index)
+        .toList()
+        .reversed
+        .where(
+          (s) =>
+              (s.done || identical(s, calibration)) &&
+              methodSetUsesRir(e.method, s.type) &&
+              s.context == set.context &&
+              s.badText.isEmpty &&
+              (s.weight ?? 0) > 0 &&
+              (s.reps ?? 0) > 0,
+        )
+        .firstOrNull;
+    if (source == null) return goal;
+    final weight = set.weight ?? fallbackValue(e, index, 'weight')?.toDouble();
+    if (weight == null || weight <= 0) return goal;
+    // Unknown effort cannot establish a rep-max conversion. At the same load,
+    // repeating the observed reps still avoids copying a higher stale default.
+    if (source.rir == null) {
+      return (weight - source.weight!).abs() < 1e-6 ? math.min(goal, source.reps!) : goal;
+    }
+    final oneRm = setOneRm(source.weight, source.reps, source.rir)!;
+    final targetRir = set.targetRir ?? math.min(source.rir!, maxCountedRir);
+    return supportedReps(oneRm, weight, targetRir, limit: goal);
   }
 
   /// Completing a set: calibration first, optional set order, then blank
@@ -349,17 +393,16 @@ extension AppStoreSessionEdits on AppStore {
     };
     if (fields.isEmpty) return;
     for (final later in e.sets.skip(index + 1)) {
-      if (later.warmup) continue;
+      if (later.done || later.warmup) continue;
       if (later.context != source.context) continue;
-      if ((fields.contains('weight') && later.weight != null) || (fields.contains('reps') && later.reps != null)) {
-        continue;
-      }
       if (fields.contains('weight') &&
+          later.weight == null &&
           source.weight != null &&
           (settings.updateFollowingDefaults || later.hintWeight == null)) {
         later.hintWeight = source.weight;
       }
       if (fields.contains('reps') &&
+          later.reps == null &&
           source.reps != null &&
           (settings.updateFollowingDefaults || later.hintReps == null)) {
         later.hintReps = source.reps;

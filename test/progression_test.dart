@@ -1,4 +1,4 @@
-// Expected values come from running the Flet app's progression.py on the same inputs.
+// Working loads stay stable in the 7–13 rep / 0–4 RIR window.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymer/logic/progression.dart';
 import 'package:gymer/models.dart';
@@ -11,14 +11,14 @@ Recommendation rec(List<SetEntry> s, {double inc = 5}) =>
     recommend(previous: s, method: 'Straight', targetRir: 2, unit: 'kg', increment: inc)!;
 
 void main() {
-  test('straight double progression matches the Flet app', () {
+  test('straight progression preserves the load in the working window and fits reps to effort', () {
     final up = rec(sets([(100, 12, 2), (100, 12, 2), (100, 12, 3)]));
     expect(
       [up.action, up.weight, up.setRepTargets],
       [
-        'increase',
-        105.0,
-        [8, 8, 8],
+        'hold',
+        100.0,
+        [12, 12, 13],
       ],
     );
 
@@ -28,7 +28,7 @@ void main() {
       [
         'hold',
         100.0,
-        [10, 9, 9],
+        [9, 8, 9],
       ],
     );
 
@@ -42,18 +42,18 @@ void main() {
     );
 
     final down = rec(sets([(100, 6, 1), (100, 6, 1), (100, 5, 1)]), inc: 2.5);
-    expect((down.action, down.weight), ('decrease', 97.5));
+    expect((down.action, down.weight), ('decrease', 90.0));
   });
 
-  test('straight sets always take one increment, even above 10% of a light load; reps alone decide without RIR', () {
-    // A 5 kg step is 25% of 20 kg; double progression still takes it (it once held forever at 12 reps).
+  test('light loads stay stable too; reps alone decide without RIR using the same working window', () {
+    // Reaching 12 reps does not force a 25% jump from 20 to 25 kg.
     final light = rec(sets([(20, 12, 2), (20, 12, 2)]));
     expect(
       [light.action, light.weight, light.setRepTargets],
       [
-        'increase',
-        25.0,
-        [8, 8],
+        'hold',
+        20.0,
+        [12, 12],
       ],
     );
     Recommendation repsOnly(List<(double, int)> v) => recommend(
@@ -64,9 +64,11 @@ void main() {
       increment: 5,
       rirTracked: false,
     )!;
-    expect((repsOnly([(100, 12), (100, 12)]).action, repsOnly([(100, 12), (100, 12)]).weight), ('increase', 105.0));
-    expect(repsOnly([(100, 10), (100, 9)]).setRepTargets, [11, 10]);
-    expect(repsOnly([(100, 7), (100, 9)]).weight, 95.0);
+    expect((repsOnly([(100, 12), (100, 12)]).action, repsOnly([(100, 12), (100, 12)]).weight), ('hold', 100.0));
+    expect((repsOnly([(100, 14), (100, 14)]).action, repsOnly([(100, 14), (100, 14)]).weight), ('increase', 105.0));
+    expect(repsOnly([(100, 10), (100, 9)]).setRepTargets, [10, 9]);
+    expect(repsOnly([(100, 7), (100, 9)]).weight, 100.0);
+    expect(repsOnly([(100, 6), (100, 9)]).weight, 95.0);
     // With RIR tracked, a blank RIR still holds.
     final blank = recommend(
       previous: [SetEntry(weight: 100, reps: 12, done: true)],
@@ -83,7 +85,7 @@ void main() {
     List<SetEntry> drop({bool evidence = true}) => [
       SetEntry(
         weight: 100,
-        reps: 13,
+        reps: 14,
         rir: 2,
         done: true,
         type: 'Activation',
@@ -110,7 +112,7 @@ void main() {
     expect(drops[0], lessThan(r.weight));
     expect(drops[1], lessThan(drops[0]));
 
-    // The exercise's own rep range decides, not a fixed 8–12: 13 reps is inside 12–20, so the load holds.
+    // An extended exercise range still holds 14 reps inside 12–20.
     final wide = recommend(
       previous: drop(),
       method: 'Drop Set',
@@ -120,7 +122,7 @@ void main() {
       repMin: 12,
       repMax: 20,
     )!;
-    expect((wide.action, wide.weight, wide.targetReps), ('hold', 100, 12));
+    expect((wide.action, wide.weight, wide.targetReps), ('hold', 100, 14));
   });
 
   test('deload weights round down, set counts round to nearest, at least one set', () {
