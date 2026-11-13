@@ -206,6 +206,7 @@ void main() {
       expect(coach.coachReport().suggestions, isEmpty);
       final early = Mesocycle.fromJson(coach.cycles.single.toJson())..weekRir = {2: 2, 5: 0, 6: 5};
       final real = coach.cycles.single;
+      final lastWeek0 = coach.history.first;
       coach.cycles = [early];
       coach.startDeloadNow(); // week 4 becomes the deload: three build weeks stay, later build overrides go
       expect((early.length, early.deloadMicro, cycleStatus(early).phase), (4, 1, 'Deload'));
@@ -345,6 +346,102 @@ void main() {
       expect(coach.coachReport().suggestions.last.reason, contains('Priority'));
       coach.setMuscleGoal('Chest', '');
       expect(real.muscleGoals, isEmpty);
+      // Bodyweight and assisted exercises are judged without a logged bodyweight: same added load compares reps,
+      // heavier with the same reps is progress, and a mixed change is left alone unless bodyweights are known.
+      SessionExercise body(String mode, double? weight, int reps) => SessionExercise(
+        name: 'Pull-up',
+        loadMode: mode,
+        sets: [SetEntry(weight: weight, reps: reps, rir: 1, done: true)],
+      );
+      Trend? judged(SessionExercise a, SessionExercise b, {double? bw}) =>
+          compareExercise(a, 'kg', b, 'kg', nowBody: bw, beforeBody: bw)?.trend;
+      expect(judged(body('bodyweight', null, 12), body('bodyweight', null, 10)), Trend.progressing);
+      expect(judged(body('bodyweight', 5, 10), body('bodyweight', 0, 10)), Trend.progressing);
+      expect(judged(body('assisted', 20, 10), body('assisted', 30, 10)), Trend.progressing);
+      expect(judged(body('bodyweight', 10, 8), body('bodyweight', 0, 10)), isNull);
+      expect(judged(body('bodyweight', 10, 8), body('bodyweight', 0, 10), bw: 80), isNotNull);
+      expect(judged(body('bodyweight', null, 10), body('external', 50, 10)), isNull);
+      // Unfair pairs are not compared: a long gap, a moved exercise, or a much shorter rest.
+      Session fair(int day, {int place = 0, int rest = 180}) => Session(
+        id: 'f$day',
+        templateId: 'F',
+        name: 'F',
+        unit: 'kg',
+        startedAt: DateTime(2026, 3, day),
+        exercises: [
+          for (var i = 0; i < 3; i++)
+            SessionExercise(
+              name: i == place ? 'Bench' : 'Filler $i',
+              sets: [SetEntry(weight: 100, reps: 10, rir: 2, rest: rest, done: true)],
+            ),
+        ],
+      );
+      int compared(Session now, Session before) => muscleVerdictsBetween(
+        [now],
+        [before],
+        (name) => name == 'Bench' ? (['Chest'], <String>[]) : (<String>[], <String>[]),
+        maxGapDays: 11,
+      ).length;
+      expect(
+        [
+          compared(fair(8), fair(1)),
+          compared(fair(20), fair(1)),
+          compared(fair(8, place: 2), fair(1)),
+          compared(fair(8, rest: 90), fair(1)),
+        ],
+        [1, 0, 0, 0],
+      );
+      // Advice without a set change. Sets that stopped short of the target effort: effort before volume.
+      for (final set in lastWeek0.exercises.first.sets) {
+        set.targetRir = 1;
+      }
+      expect(
+        [for (final s in coach.coachReport().suggestions) (s.muscle, s.delta, s.note)],
+        [('Quads', -1, ''), ('Chest', 0, 'Effort')],
+      );
+      for (final set in lastWeek0.exercises.first.sets) {
+        set.targetRir = null;
+      }
+      // An exercise that hurt never gets the added set (bench is the only chest exercise), and is named.
+      lastWeek0.checkIn = CheckIn(pain: {'Bench', 'Squat'});
+      final hurt = coach.coachReport().suggestions;
+      expect(hurt.map((s) => s.muscle), ['Quads']);
+      expect(hurt.single.reason, contains('painful'));
+      expect(Session.fromJson(lastWeek0.toJson()).checkIn!.pain, {'Bench', 'Squat'});
+      lastWeek0.checkIn = null;
+      // Every workout full: train the muscle on another day. One exercise flat for three weeks while another
+      // progresses: swap it.
+      final full = WorkoutTemplate(
+        id: 'P',
+        name: 'Push',
+        exercises: [
+          TemplateExercise(name: 'Bench', sets: [for (var i = 0; i < 10; i++) TemplateSet()]),
+          TemplateExercise(name: 'Fly'),
+        ],
+      );
+      (List<String>, List<String>) chest(String name) => (['Chest'], <String>[]);
+      expect(everyDayFull(real, {'P': full}, chest, 'Chest'), isTrue);
+      expect(everyDayFull(real, {'P': plan}, coach.musclesOf, 'Chest'), isFalse);
+      MuscleVerdict two(double fly) => MuscleVerdict('Chest', [
+        const ExerciseTrend(name: 'Bench', templateId: 'P', percent: 0, pairs: 3),
+        ExerciseTrend(name: 'Fly', templateId: 'P', percent: fly, pairs: 3),
+      ]);
+      List<(int, String, String)> advised(Map<String, WorkoutTemplate> plans, double fly) => [
+        for (final s in coachSuggestions(
+          cycle: real,
+          micro: 4,
+          templates: plans,
+          musclesOf: chest,
+          verdicts: {'Chest': two(fly)},
+          previous: {'Chest': two(fly)},
+          before: {'Chest': two(fly)},
+          weeklySets: {'Chest': 6},
+          missedWorkout: false,
+        ))
+          (s.delta, s.note, s.exercise),
+      ];
+      expect(advised({'P': full}, 0), [(0, 'Add a day', '')]);
+      expect(advised({'P': full}, 3), [(0, 'Swap', 'Bench')]);
       // Eating phase: while cutting nothing is added, and the next cycle is not started higher either.
       coach.setDiet('cut');
       expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Quads', -1)]);
@@ -404,6 +501,9 @@ void main() {
       }
       report = coach.coachReport();
       expect(report.suggestions.map((s) => s.applied?.delta), [-1, 1]);
+      // The applied changes are logged per muscle with their outcome, and show on the Train card as a net count.
+      expect(report.changeLog['Chest'], ['W4: +1 set Bench, not judged yet']);
+      expect(coach.coachSetDelta(plan), 0);
       expect((report.volume['Chest']!.sets, report.volume['Quads']!.sets), (4, 2));
       expect(report.performed!['Chest'], isNull); // nothing trained yet in the running week
       coach.startSession(plan);
@@ -431,6 +531,7 @@ void main() {
       ]);
       expect(coach.cloneCycle(coach.cycles.single).setAdjustments, isEmpty); // the next cycle starts from the base
       coach.undoSuggestion(report.suggestions.last);
+      expect(coach.coachSetDelta(plan), -1);
       expect(coach.coachReport().volume['Chest']!.sets, 3);
       // A missed workout in the finished week blocks additions, never removals.
       coach.undoSuggestion(report.suggestions.first);

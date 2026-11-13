@@ -139,7 +139,11 @@ class FinishScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 _Muscles(s.report),
                 if (!historical && settings.coachCheckIn && s.sessionId != null && s.report.direct.isNotEmpty)
-                  _CheckInCard(sessionId: s.sessionId!, muscles: s.report.direct.keys.toList()),
+                  _CheckInCard(
+                    sessionId: s.sessionId!,
+                    muscles: s.report.direct.keys.toList(),
+                    exercises: [for (final e in s.exercises) e.name],
+                  ),
                 if (!historical) ...[
                   const SizedBox(height: 24),
                   FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
@@ -172,7 +176,8 @@ class FinishScreen extends StatelessWidget {
 class _CheckInCard extends StatelessWidget {
   final String sessionId;
   final List<String> muscles;
-  const _CheckInCard({required this.sessionId, required this.muscles});
+  final List<String> exercises;
+  const _CheckInCard({required this.sessionId, required this.muscles, required this.exercises});
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +225,8 @@ class _CheckInCard extends StatelessWidget {
                   'Optional. Pump is how the muscle felt today. Recovered is how it felt coming into this workout '
                   'from the last time you trained it. The Coach tab uses the answers: still sore counts as fatigue, '
                   'a low pump with early recovery earns an added set sooner, and poor sleep or a poor day holds '
-                  'additions back. Turn the check-in off in Settings → Advanced.',
+                  'additions back. An exercise marked as hurting never gets an added set and is the first to lose one. '
+                  'Turn the check-in off in Settings → Advanced.',
                 ),
                 actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
               ),
@@ -252,6 +258,26 @@ class _CheckInCard extends StatelessWidget {
                 ),
                 choice('Sleep', const ['Poor', 'Normal', 'Good'], answers?.sleep, (c, v) => c.sleep = v),
                 choice('Overall', const ['Run down', 'Normal', 'Strong'], answers?.overall, (c, v) => c.overall = v),
+                if (exercises.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12, bottom: 4),
+                    child: Text('Anything hurt?', style: t.titleSmall),
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final name in exercises)
+                        FilterChip(
+                          label: Text(name),
+                          showCheckmark: false,
+                          selected: answers?.pain.contains(name) ?? false,
+                          onSelected: (on) =>
+                              store.editCheckIn(sessionId, (c) => on ? c.pain.add(name) : c.pain.remove(name)),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

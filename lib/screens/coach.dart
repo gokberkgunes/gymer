@@ -65,7 +65,7 @@ class CoachScreen extends StatelessWidget {
           ),
         ],
         if (changes.isNotEmpty) ...[
-          const SectionLabel('Biggest changes'),
+          SectionLabel(report.sincePrevious ? 'Since last mesocycle' : 'Biggest changes'),
           Card(
             child: Column(
               children: [
@@ -90,6 +90,8 @@ class CoachScreen extends StatelessWidget {
                     sets: sets(m),
                     goal: report.cycle?.muscleGoals[m],
                     personal: report.personal[m],
+                    feel: report.feel[m],
+                    changes: report.changeLog[m] ?? const [],
                     goalEditable: report.cycle != null && report.cycle == store.activeCycle,
                     performed: report.performed == null
                         ? null
@@ -195,8 +197,12 @@ class _SuggestionRow extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final s = suggestion;
-    final change = '${s.delta > 0 ? '+' : '−'}${s.delta.abs()} set';
-    final color = s.delta > 0 ? cs.success : cs.warning;
+    final change = s.delta == 0 ? s.note : '${s.delta > 0 ? '+' : '−'}${s.delta.abs()} set';
+    final color = s.delta == 0
+        ? cs.info
+        : s.delta > 0
+        ? cs.success
+        : cs.warning;
     final workout = store.template(s.templateId)?.name;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
@@ -214,7 +220,7 @@ class _SuggestionRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  [s.exercise, ?workout, ?zone].join(' · '),
+                  [if (s.exercise.isNotEmpty) s.exercise, ?workout, ?zone].join(' · '),
                   style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -227,8 +233,10 @@ class _SuggestionRow extends StatelessWidget {
             change,
             style: t.titleMedium?.copyWith(color: color, fontFeatures: tabular),
           ),
-          const SizedBox(width: 12),
-          if (s.applied == null)
+          if (s.delta != 0) const SizedBox(width: 12),
+          if (s.delta == 0)
+            const SizedBox.shrink()
+          else if (s.applied == null)
             FilledButton(
               style: FilledButton.styleFrom(minimumSize: compactButton),
               onPressed: () => store.applySuggestion(s),
@@ -409,6 +417,24 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'means its sets are never changed and only a drop in strength is reported, which frees recovery for other '
         'muscles. Priority muscles come first when sets are added. The choice is kept for the mesocycle and '
         'carried into the next one.',
+  ),
+  (
+    'Advice without a set change',
+    'Effort: a flat muscle whose sets stopped further from failure than the target RIR needs harder sets, not '
+        'more of them. Add a day: every workout for the muscle already has ten or more direct sets. Swap: one '
+        'exercise has not progressed for three weeks while others for the muscle have.',
+  ),
+  (
+    'Fair comparisons only',
+    'A workout is not compared when it came more than a week and a half after the one before, when the exercise '
+        'moved two or more places in the workout, or when its planned rest changed by a third or more. Those would '
+        'read as fatigue when they are not. Bodyweight and assisted exercises are compared by reps and added '
+        'load; a logged bodyweight makes that more exact but is never required.',
+  ),
+  (
+    'After a deload',
+    'In the first weeks of a mesocycle the arrows compare with the last build week of the one before, so you '
+        'can see whether strength came back.',
   ),
   (
     'Eating phase',

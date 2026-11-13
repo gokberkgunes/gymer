@@ -224,17 +224,22 @@ class CheckIn {
   int? sleep;
   int? overall;
 
-  CheckIn({Map<String, int>? pump, Map<String, int>? recovered, this.sleep, this.overall})
-    : pump = pump ?? {},
-      recovered = recovered ?? {};
+  /// Exercises that hurt in this workout (joint or sharp pain, not effort).
+  Set<String> pain;
 
-  bool get isEmpty => pump.isEmpty && recovered.isEmpty && sleep == null && overall == null;
+  CheckIn({Map<String, int>? pump, Map<String, int>? recovered, this.sleep, this.overall, Set<String>? pain})
+    : pump = pump ?? {},
+      recovered = recovered ?? {},
+      pain = pain ?? {};
+
+  bool get isEmpty => pump.isEmpty && recovered.isEmpty && sleep == null && overall == null && pain.isEmpty;
 
   Map<String, dynamic> toJson() => {
     if (pump.isNotEmpty) 'pump': pump,
     if (recovered.isNotEmpty) 'recovered': recovered,
     if (sleep != null) 'sleep': sleep,
     if (overall != null) 'overall': overall,
+    if (pain.isNotEmpty) 'pain': pain.toList(),
   };
 
   static CheckIn? tryJson(Object? j) {
@@ -250,6 +255,11 @@ class CheckIn {
       recovered: levels(j['recovered']),
       sleep: level(j['sleep']),
       overall: level(j['overall']),
+      pain: {
+        if (j['pain'] case final List<dynamic> names)
+          for (final name in names)
+            if (name is String) name,
+      },
     );
     return parsed.isEmpty ? null : parsed;
   }

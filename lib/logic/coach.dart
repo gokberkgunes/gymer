@@ -39,6 +39,10 @@ class ExerciseTrend {
   /// The last set fell under 60 % of the first set's reps at the same load: later sets are low quality.
   final bool dropOff;
 
+  /// The sets stopped at least one rep further from failure than their target RIR, on average: effort, not
+  /// volume, is what was missing.
+  final bool easy;
+
   const ExerciseTrend({
     required this.name,
     required this.templateId,
@@ -46,6 +50,7 @@ class ExerciseTrend {
     required this.pairs,
     this.fatigue = const [],
     this.dropOff = false,
+    this.easy = false,
   });
 
   Trend get trend => trendOf(percent);
@@ -73,13 +78,33 @@ List<SetEntry> _straightWork(SessionExercise e) => [
 
 bool _usable(SetEntry s) => s.done && (s.weight ?? 0) > 0 && (s.reps ?? 0) > 0;
 
+/// Change of one bodyweight or assisted set against another, as a ratio, without requiring a logged
+/// bodyweight. With both bodyweights known the total load (bodyweight plus added, or minus assistance) is
+/// compared by estimated 1RM. Without them the rep-max factor alone decides when the added load is the same,
+/// since bodyweight then cancels out; a heavier set with at least the same reps is progress and a lighter one
+/// with no more reps a drop, by the smallest step that counts. Mixed changes cannot be judged and give null.
+double? _bodyRatio(SetEntry x, SetEntry y, bool assisted, double wx, double wy, double? bodyX, double? bodyY) {
+  final fx = setOneRm(1, x.reps, x.rir)!, fy = setOneRm(1, y.reps, y.rir)!;
+  if (bodyX != null && bodyY != null) {
+    final tx = assisted ? bodyX - wx : bodyX + wx, ty = assisted ? bodyY - wy : bodyY + wy;
+    if (tx > 0 && ty > 0) return tx * fx / (ty * fy);
+  }
+  final heavier = (wx - wy) * (assisted ? -1 : 1);
+  if (heavier.abs() < 0.01) return fx / fy;
+  if (heavier > 0 && fx >= fy) return math.max(fx / fy, 1 + trendStep / 100);
+  if (heavier < 0 && fx <= fy) return math.min(fx / fy, 1 - trendStep / 100);
+  return null;
+}
+
 /// Compares two sessions of one exercise in one workout; null when nothing is comparable.
 ///
 /// Straight sets are matched by position with the same logging context. By default each pair is compared by
 /// estimated 1RM, which already counts reps in reserve; with [byVolume] by load × reps instead. Every other set
 /// method is always compared by the total volume of its working sets, because rep-max estimates do not hold
 /// across rest-pause, drop or cluster segments and the number of segments reached is itself the result.
-/// Only external loads logged as totals are comparable, as for records and volume.
+/// External loads must be logged as totals. Bodyweight and assisted straight sets are compared too ([_bodyRatio]);
+/// the sessions' bodyweight snapshots ([nowBody], [beforeBody], in each session's unit) refine that when they
+/// exist and are never needed.
 ExerciseTrend? compareExercise(
   SessionExercise now,
   String nowUnit,
@@ -87,42 +112,66 @@ ExerciseTrend? compareExercise(
   String beforeUnit, {
   String? templateId,
   bool byVolume = false,
+  double? nowBody,
+  double? beforeBody,
 }) {
-  if (now.loadMode != 'external' || before.loadMode != 'external' || now.method != before.method) return null;
+  if (now.loadMode != before.loadMode || now.method != before.method) return null;
   final straight = now.method == 'Straight';
-  double kg(SetEntry s, String unit) => convertWeight(s.weight!, unit, 'kg');
+  final body = now.loadMode != 'external';
+  if (body && !straight) return null;
+  double kg(SetEntry s, String unit) => convertWeight(s.weight ?? 0, unit, 'kg');
+  bool usable(SetEntry s) => body ? s.done && (s.reps ?? 0) > 0 && (s.weight ?? 0) >= 0 : _usable(s);
   bool counted(SessionExercise e, SetEntry s) => _usable(s) && countsAsVolume(e, s);
+  bool sameLoad(double a, double b) => (a - b).abs() <= math.max(b * 0.005, 0.01);
   var percent = 0.0, pairs = 0;
   double? first;
-  var harder = false, dropOff = false;
+  var harder = false, dropOff = false, easy = false;
   final List<SetEntry> work;
   if (straight) {
     final a = work = _straightWork(now), b = _straightWork(before);
     var volumeNow = 0.0, volumeBefore = 0.0, total = 0.0;
     for (var i = 0; i < math.min(a.length, b.length); i++) {
       final x = a[i], y = b[i];
-      if (!_usable(x) || !_usable(y) || x.context != y.context) continue;
-      if (byVolume && !(countsAsVolume(now, x) && countsAsVolume(before, y))) continue;
+      if (!usable(x) || !usable(y) || x.context != y.context) continue;
+      if (byVolume && !body && !(countsAsVolume(now, x) && countsAsVolume(before, y))) continue;
       final wx = kg(x, nowUnit), wy = kg(y, beforeUnit);
-      final change = byVolume
-          ? (wx * x.reps! / (wy * y.reps!) - 1) * 100
-          : (setOneRm(wx, x.reps, x.rir)! / setOneRm(wy, y.reps, y.rir)! - 1) * 100;
-      volumeNow += wx * x.reps!;
-      volumeBefore += wy * y.reps!;
+      final double change;
+      if (body) {
+        final ratio = _bodyRatio(
+          x,
+          y,
+          now.loadMode == 'assisted',
+          wx,
+          wy,
+          nowBody == null ? null : convertWeight(nowBody, nowUnit, 'kg'),
+          beforeBody == null ? null : convertWeight(beforeBody, beforeUnit, 'kg'),
+        );
+        if (ratio == null) continue;
+        change = (ratio - 1) * 100;
+      } else {
+        change = byVolume
+            ? (wx * x.reps! / (wy * y.reps!) - 1) * 100
+            : (setOneRm(wx, x.reps, x.rir)! / setOneRm(wy, y.reps, y.rir)! - 1) * 100;
+        volumeNow += wx * x.reps!;
+        volumeBefore += wy * y.reps!;
+      }
       total += change;
       pairs++;
       if (i == 0) first = change;
-      if ((wx - wy).abs() <= wy * 0.005 && x.reps == y.reps && x.rir != null && y.rir != null && x.rir! < y.rir!) {
-        harder = true;
-      }
+      if (sameLoad(wx, wy) && x.reps == y.reps && x.rir != null && y.rir != null && x.rir! < y.rir!) harder = true;
     }
     if (pairs == 0) return null;
-    percent = byVolume ? (volumeNow / volumeBefore - 1) * 100 : total / pairs;
-    final done = a.where(_usable).toList();
+    percent = byVolume && !body ? (volumeNow / volumeBefore - 1) * 100 : total / pairs;
+    final done = a.where(usable).toList();
     dropOff =
         done.length > 1 &&
-        (done.last.weight! - done.first.weight!).abs() <= done.first.weight! * 0.005 &&
+        sameLoad(kg(done.last, nowUnit), kg(done.first, nowUnit)) &&
         done.last.reps! < done.first.reps! * 0.6;
+    final spare = [
+      for (final s in done)
+        if (s.rir != null && s.targetRir != null) s.rir! - s.targetRir!,
+    ];
+    easy = spare.isNotEmpty && spare.fold(0, (sum, v) => sum + v) >= spare.length;
   } else {
     work = now.work;
     final a = [
@@ -151,6 +200,7 @@ ExerciseTrend? compareExercise(
     percent: percent,
     pairs: pairs,
     dropOff: dropOff,
+    easy: easy,
     fatigue: [
       if (first != null && first <= -trendStep) 'the first set was weaker than the time before',
       if (harder) 'the same reps left fewer in reserve',
@@ -182,31 +232,56 @@ Map<String, MuscleVerdict> muscleVerdicts(
   int period,
   (List<String>, List<String>) Function(String exercise) musclesOf, {
   bool byVolume = false,
+}) => muscleVerdictsBetween(
+  sessions.where((s) => periods.indexOf(s.startedAt) == period),
+  sessions.where((s) => periods.indexOf(s.startedAt) == period - 1),
+  musclesOf,
+  byVolume: byVolume,
+  maxGapDays: (periods.days * 1.5).ceil(),
+);
+
+/// Verdicts from two groups of workouts: the last session of each exercise in [now] against its last in
+/// [before], within the same workout. Pairs that would not be a fair comparison are left out rather than read
+/// as fatigue: more than [maxGapDays] apart (detraining, not recovery), the exercise moved two or more places
+/// in the workout, or its planned rest changed by a third or more.
+Map<String, MuscleVerdict> muscleVerdictsBetween(
+  Iterable<Session> now,
+  Iterable<Session> before,
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  bool byVolume = false,
+  required int maxGapDays,
 }) {
-  final latest = <(String?, String), (Session, SessionExercise)>{};
-  final earlier = <(String?, String), (Session, SessionExercise)>{};
-  for (final session in sessions) {
-    final index = periods.indexOf(session.startedAt);
-    if (index != period && index != period - 1) continue;
-    final target = index == period ? latest : earlier;
-    for (final exercise in session.exercises) {
-      if (!exercise.work.any((s) => s.done)) continue;
-      final key = (session.templateId, exercise.name.toLowerCase());
-      final existing = target[key];
-      if (existing == null || session.startedAt.isAfter(existing.$1.startedAt)) target[key] = (session, exercise);
+  Map<(String?, String), (Session, SessionExercise, int)> lastOf(Iterable<Session> sessions) {
+    final found = <(String?, String), (Session, SessionExercise, int)>{};
+    for (final session in sessions) {
+      for (final (i, exercise) in session.exercises.indexed) {
+        if (!exercise.work.any((s) => s.done)) continue;
+        final key = (session.templateId, exercise.name.toLowerCase());
+        final existing = found[key];
+        if (existing == null || session.startedAt.isAfter(existing.$1.startedAt)) found[key] = (session, exercise, i);
+      }
     }
+    return found;
   }
+
+  final latest = lastOf(now), earlier = lastOf(before);
   final byMuscle = <String, List<ExerciseTrend>>{};
-  for (final MapEntry(:key, value: (session, exercise)) in latest.entries) {
-    final before = earlier[key];
-    if (before == null) continue;
+  for (final MapEntry(:key, value: (session, exercise, place)) in latest.entries) {
+    final old = earlier[key];
+    if (old == null) continue;
+    final (oldSession, oldExercise, oldPlace) = old;
+    if (daysBetween(oldSession.startedAt, session.startedAt) > maxGapDays || (place - oldPlace).abs() >= 2) continue;
+    final rest = exercise.work.firstOrNull?.rest ?? 0, oldRest = oldExercise.work.firstOrNull?.rest ?? 0;
+    if (rest > 0 && oldRest > 0 && (rest < oldRest * 0.67 || rest > oldRest * 1.5)) continue;
     final trend = compareExercise(
       exercise,
       session.unit,
-      before.$2,
-      before.$1.unit,
+      oldExercise,
+      oldSession.unit,
       templateId: session.templateId,
       byVolume: byVolume,
+      nowBody: session.bodyweight,
+      beforeBody: oldSession.bodyweight,
     );
     if (trend == null) continue;
     for (final muscle in musclesOf(exercise.name).$1) {
@@ -320,16 +395,30 @@ class Recovery {
   /// Muscles with a low pump every time that had also recovered days before: more work would be absorbed.
   final Set<String> underworked;
 
-  /// Sleep or overall state was poor in at least half of the answered workouts.
-  final bool runDown;
+  /// Workouts with a sleep or overall answer, and how many of those said poor or run down.
+  final int answered, poor;
 
-  const Recovery({this.sore = const {}, this.underworked = const {}, this.runDown = false});
+  /// Exercises (lower-case names) marked as painful.
+  final Set<String> painful;
+
+  const Recovery({
+    this.sore = const {},
+    this.underworked = const {},
+    this.answered = 0,
+    this.poor = 0,
+    this.painful = const {},
+  });
+
+  /// Sleep or overall state was poor in at least half of the answered workouts.
+  bool get runDown => answered > 0 && poor * 2 >= answered;
 }
 
 Recovery recoveryOf(Iterable<Session> sessions) {
   final pump = <String, List<int>>{}, recovered = <String, List<int>>{};
   var answered = 0, poor = 0;
+  final painful = <String>{};
   for (final c in sessions.map((s) => s.checkIn).nonNulls) {
+    painful.addAll(c.pain.map((name) => name.toLowerCase()));
     for (final e in c.pump.entries) {
       pump.putIfAbsent(e.key, () => []).add(e.value);
     }
@@ -350,14 +439,20 @@ Recovery recoveryOf(Iterable<Session> sessions) {
       for (final e in pump.entries)
         if (e.value.every((v) => v == 0) && (recovered[e.key]?.every((v) => v == 2) ?? false)) e.key,
     },
-    runDown: answered > 0 && poor * 2 >= answered,
+    answered: answered,
+    poor: poor,
+    painful: painful,
   );
 }
 
-/// One line of the weekly suggestions: add a set, remove one, or (after Apply) the change already made.
+/// One line of the weekly suggestions: add a set, remove one, (after Apply) the change already made, or with
+/// [delta] 0 a piece of advice named by [note] that changes no sets.
 class SetSuggestion {
   final String muscle;
   final int delta;
+
+  /// 'Effort', 'Add a day' or 'Swap' for advice rows; empty for set changes.
+  final String note;
   final String reason;
   final String templateId;
   final String exercise;
@@ -372,6 +467,7 @@ class SetSuggestion {
     required this.templateId,
     required this.exercise,
     this.applied,
+    this.note = '',
   });
 }
 
@@ -393,6 +489,7 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
   int delta,
   MuscleVerdict? verdict, {
   Set<String> avoid = const {},
+  Set<String> prefer = const {},
 }) {
   final options = <({String template, int sets, List<TemplateExercise> exercises})>[];
   for (final id in cycle.schedule.values.toSet()) {
@@ -420,7 +517,14 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
     ];
     if (candidates.isEmpty) continue;
     double score(TemplateExercise e) => trend(e)?.percent ?? 0;
-    candidates.sort((a, b) => delta > 0 ? score(b).compareTo(score(a)) : score(a).compareTo(score(b)));
+    int first(TemplateExercise e) => prefer.contains(e.name.toLowerCase()) ? 0 : 1;
+    candidates.sort(
+      (a, b) => first(a) != first(b)
+          ? first(a).compareTo(first(b))
+          : delta > 0
+          ? score(b).compareTo(score(a))
+          : score(a).compareTo(score(b)),
+    );
     return (option.template, candidates.first.name);
   }
   return null;
@@ -439,6 +543,24 @@ Set<String> droppingOff(MuscleVerdict verdict, MuscleVerdict? previous) => {
             true))
       e.name.toLowerCase(),
 };
+
+/// Whether every scheduled workout that trains [muscle] directly is at [sessionSetCeiling] already.
+bool everyDayFull(
+  Mesocycle cycle,
+  Map<String, WorkoutTemplate> templates,
+  (List<String>, List<String>) Function(String exercise) musclesOf,
+  String muscle,
+) {
+  final totals = [
+    for (final id in cycle.schedule.values.toSet())
+      if (templates[id] case final saved?)
+        plannedTemplate(
+          cycle,
+          saved,
+        ).exercises.where((e) => musclesOf(e.name).$1.contains(muscle)).fold(0, (n, e) => n + e.workSets),
+  ].where((n) => n > 0);
+  return totals.isNotEmpty && totals.every((n) => n >= sessionSetCeiling);
+}
 
 /// The most weekly sets the coach will add up to for [muscle]. A personal range that has found where the
 /// muscle falls wins: one set under that level. Otherwise experience decides: beginners stop in the middle of
@@ -482,6 +604,7 @@ List<SetSuggestion> coachSuggestions({
   Recovery recovery = const Recovery(),
   String experience = 'intermediate',
   Map<String, PersonalRange> personal = const {},
+  Map<String, MuscleVerdict> before = const {},
 }) {
   final applied = <SetSuggestion>[
     for (final a in cycle.setAdjustments)
@@ -500,6 +623,7 @@ List<SetSuggestion> coachSuggestions({
       if (a.micro == micro) a.muscle,
   };
   final removals = <(double, SetSuggestion)>[], additions = <(double, SetSuggestion)>[];
+  final advice = <SetSuggestion>[];
   final period = cycle.periodNoun(), periodsWord = cycle.periodNoun(plural: true);
   for (final v in verdicts.values) {
     if (handled.contains(v.muscle) || cycle.muscleGoals[v.muscle] == 'maintain') continue;
@@ -517,7 +641,46 @@ List<SetSuggestion> coachSuggestions({
         fatigue.isEmpty &&
         !recovery.runDown &&
         (stalled || (underworked && cycle.diet != 'maintain'));
+    // An exercise that has held for three periods while another one for the muscle progresses needs
+    // replacing, not more sets.
+    ExerciseTrend? same(MuscleVerdict? other, ExerciseTrend e) =>
+        other?.exercises.where((x) => x.templateId == e.templateId && sameExercise(x.name, e.name)).firstOrNull;
+    if (v.exercises.any((e) => e.trend == Trend.progressing)) {
+      for (final e in v.exercises) {
+        final earlier = [same(previous[v.muscle], e), same(before[v.muscle], e)];
+        if (e.trend != Trend.progressing && earlier.every((x) => x != null && x.trend != Trend.progressing)) {
+          advice.add(
+            SetSuggestion(
+              muscle: v.muscle,
+              delta: 0,
+              note: 'Swap',
+              templateId: e.templateId ?? '',
+              exercise: e.name,
+              reason:
+                  '${e.name} has not progressed for three $periodsWord while other ${v.muscle.toLowerCase()} '
+                  'exercises have. A different exercise for the muscle is more likely to help than more sets.',
+            ),
+          );
+        }
+      }
+    }
     if (!remove && !add) continue;
+    // Sets that stop short of the target effort stall for that reason: more of them would not help.
+    if (add && v.exercises.any((e) => e.easy)) {
+      advice.add(
+        SetSuggestion(
+          muscle: v.muscle,
+          delta: 0,
+          note: 'Effort',
+          templateId: '',
+          exercise: _names(v.exercises.where((e) => e.easy)),
+          reason:
+              '${_names(v.exercises)} did not move, but the sets stopped further from failure than the target '
+              'RIR. Train closer to the target before adding sets.',
+        ),
+      );
+      continue;
+    }
     final delta = remove ? -1 : 1;
     final floor = (keepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
     final top = addCeiling(v.muscle, experience, personal[v.muscle]);
@@ -527,16 +690,43 @@ List<SetSuggestion> coachSuggestions({
     if (add && justAdded) continue;
     if (remove && sets - 1 < floor) continue;
     if (add && (missedWorkout || (top != null && sets + 1 > top))) continue;
-    final avoid = add ? droppingOff(v, previous[v.muscle]) : const <String>{};
-    final target = adjustmentTarget(cycle, templates, musclesOf, v.muscle, delta, v, avoid: avoid);
-    if (target == null) continue;
+    final hurts = {
+      for (final e in v.exercises)
+        if (recovery.painful.contains(e.name.toLowerCase())) e.name.toLowerCase(),
+    };
+    final avoid = add ? {...droppingOff(v, previous[v.muscle]), ...hurts} : const <String>{};
+    final target = adjustmentTarget(cycle, templates, musclesOf, v.muscle, delta, v, avoid: avoid, prefer: hurts);
+    if (target == null) {
+      // Every workout for the muscle is full: a longer session is not the answer.
+      if (add && everyDayFull(cycle, templates, musclesOf, v.muscle)) {
+        advice.add(
+          SetSuggestion(
+            muscle: v.muscle,
+            delta: 0,
+            note: 'Add a day',
+            templateId: '',
+            exercise: '',
+            reason:
+                '${_names(v.exercises)} have not moved, with no signs of fatigue, but every workout that trains '
+                '${v.muscle.toLowerCase()} already has $sessionSetCeiling or more direct sets for it. Train it on '
+                'another day of the schedule rather than making a session longer.',
+          ),
+        );
+      }
+      continue;
+    }
+    final pain = hurts.isEmpty
+        ? ''
+        : ' ${_names(v.exercises.where((e) => hurts.contains(e.name.toLowerCase())))} was marked as painful: '
+              'consider swapping it for another exercise for the muscle.';
     final passedOver = avoid.isEmpty
         ? ''
         : ' ${_names(v.exercises.where((e) => avoid.contains(e.name.toLowerCase())))} gets no added set: its reps '
               'fall off sharply from set to set, so another set there would add little. A longer rest may help.';
     final signs =
         '${fatigue.isEmpty ? '' : ' Signs of fatigue: ${fatigue.join('; ')}.'}'
-        '${recovery.runDown ? ' Sleep or overall state was poor that $period, which may be part of it.' : ''}'
+        '${recovery.runDown ? ' Sleep or overall state was poor in ${recovery.poor} of ${recovery.answered} answered workouts that $period, which may be part of it.' : ''}'
+        '$pain'
         '${cutting ? ' While cutting, recovery is lower, so sets come off sooner and none are added.' : ''}';
     final reason = remove
         ? v.trend == Trend.falling
@@ -561,7 +751,10 @@ List<SetSuggestion> coachSuggestions({
     for (final (_, s) in [...removals, ...additions])
       if (taken.add((s.templateId, s.exercise.toLowerCase()))) s,
   ];
-  return [...applied, ...changes.take(math.max(0, 3 - applied.length))];
+  return [
+    ...applied,
+    ...[...changes, ...advice].take(math.max(0, 3 - applied.length)),
+  ];
 }
 
 /// How one muscle answered one judged build week: the sets it completed and the verdict that week earned.

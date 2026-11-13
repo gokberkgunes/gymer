@@ -303,7 +303,11 @@ class _WorkoutTileState extends State<_WorkoutTile> with TickerProviderStateMixi
                         [
                           if (timing != null && timing.sets > 0) '~${formatTargetDuration(timing.total)}',
                           if (widget.cycleRir != null) '${widget.cycleRir} RIR',
-                          '$sets sets',
+                          // Sets the coach added or removed for this mesocycle are already in the count.
+                          switch (timing == null ? 0 : store.coachSetDelta(w)) {
+                            0 => '$sets sets',
+                            final d => '$sets sets, ${d > 0 ? '+' : '−'}${d.abs()} coach',
+                          },
                           ...orderedMuscles.take(4),
                         ].join(' · '),
                         maxLines: 1,

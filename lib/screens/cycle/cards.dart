@@ -458,6 +458,8 @@ void showLandmarkInfo(
   MuscleVerdict? verdict,
   bool goalEditable = false,
   PersonalRange? personal,
+  String? feel,
+  List<String> changes = const [],
 }) {
   final l = rpLandmarks[muscle];
   final store = StoreScope.read(context);
@@ -539,6 +541,10 @@ void showLandmarkInfo(
                 const SizedBox(height: 4),
                 Text('Signs of fatigue: ${verdict.fatigue.join('; ')}.', style: Theme.of(c).textTheme.bodySmall),
               ],
+              if (feel != null) ...[
+                const SizedBox(height: 4),
+                Text('Check-in: $feel.', style: Theme.of(c).textTheme.bodySmall),
+              ],
               if (sets != null && zoneAdvice(verdict.trend, volumeZone(muscle, sets)).isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -546,6 +552,12 @@ void showLandmarkInfo(
                   style: Theme.of(c).textTheme.bodySmall,
                 ),
               ],
+              const SizedBox(height: 16),
+            ],
+            if (changes.isNotEmpty) ...[
+              const Text('Set changes this mesocycle', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              for (final line in changes) Text(line),
               const SizedBox(height: 16),
             ],
             if (personal != null) ...[
@@ -651,6 +663,10 @@ class MuscleVolumeRow extends StatefulWidget {
 
   /// The muscle's own range from earlier mesocycles, drawn as a thin line under the track.
   final PersonalRange? personal;
+
+  /// Latest check-in answers in words and the cycle's applied set changes, both for the tap dialog.
+  final String? feel;
+  final List<String> changes;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -663,6 +679,8 @@ class MuscleVolumeRow extends StatefulWidget {
     this.goal,
     this.goalEditable = false,
     this.personal,
+    this.feel,
+    this.changes = const [],
   });
 
   @override
@@ -710,6 +728,8 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
           verdict: widget.verdict,
           goalEditable: widget.goalEditable,
           personal: widget.personal,
+          feel: widget.feel,
+          changes: widget.changes,
         ),
         onHighlightChanged: (pressed) {
           if (_pressed != pressed) setState(() => _pressed = pressed);

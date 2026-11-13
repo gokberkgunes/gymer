@@ -147,6 +147,12 @@ extension AppStoreCatalog on AppStore {
         for (final e in [...s.exercises, ...s.warmupExercises]) {
           if (sameExercise(e.name, from)) e.name = updated.name;
         }
+        final pain = s.checkIn?.pain;
+        if (pain != null && pain.any((name) => sameExercise(name, from))) {
+          pain
+            ..removeWhere((name) => sameExercise(name, from))
+            ..add(updated.name);
+        }
       }
       // Everything that stores an exercise by name must follow a rename: cycle starting loads match by name too.
       for (final c in cycles) {

@@ -27,6 +27,16 @@ class CoachReport {
   /// Each muscle's own range from earlier mesocycles, drawn under the bar once two of them have data.
   final Map<String, PersonalRange> personal;
 
+  /// The arrows compare the first weeks of this mesocycle with the last build week of the one before, across
+  /// its deload: whether strength came back.
+  final bool sincePrevious;
+
+  /// The latest pump and recovery answers per muscle, in words, for the details dialog.
+  final Map<String, String> feel;
+
+  /// Applied set changes of this mesocycle per muscle, each with what the muscle did the week after.
+  final Map<String, List<String>> changeLog;
+
   const CoachReport({
     required this.cycle,
     required this.planned,
@@ -39,6 +49,9 @@ class CoachReport {
     required this.declining,
     required this.rising,
     this.personal = const {},
+    this.sincePrevious = false,
+    this.feel = const {},
+    this.changeLog = const {},
   });
 }
 
@@ -60,6 +73,8 @@ extension AppStoreCoach on AppStore {
     var suggestions = <SetSuggestion>[];
     var deload = const <MuscleVerdict>[];
     var deloadAtHigh = false;
+    var sincePrevious = false;
+    final changeLog = <String, List<String>>{};
     Map<String, WeeklyVolume>? performed;
     final Map<String, WeeklyVolume> volume;
     if (cycle != null && status!.running) {
@@ -80,6 +95,37 @@ extension AppStoreCoach on AppStore {
       verdicts = of(micro);
       final finished = of(micro - 1);
       if (verdicts.isEmpty) verdicts = finished;
+      if (verdicts.isEmpty) {
+        // Nothing to compare inside this cycle yet: look back across the deload to the last build week of the
+        // mesocycle before, to see whether strength came back.
+        final earlier = cycles.where((c) => c != cycle && c.setupComplete && c.start.isBefore(cycle.start)).toList()
+          ..sort((a, b) => b.start.compareTo(a.start));
+        final last = earlier.firstOrNull;
+        if (last != null) {
+          final old = _cycleSessions(
+            last,
+          ).where((s) => (s.phase ?? cycleStatus(last, s.startedAt).phase) == 'Build').toList();
+          final oldPeriods = CoachPeriods(dateOnly(last.start), math.max(1, last.microDays));
+          final lastWeek = old.isEmpty ? null : old.map((s) => oldPeriods.indexOf(s.startedAt)).reduce(math.max);
+          verdicts = muscleVerdictsBetween(
+            sessions,
+            old.where((s) => oldPeriods.indexOf(s.startedAt) == lastWeek),
+            musclesOf,
+            byVolume: byVolume,
+            maxGapDays: 42,
+          );
+          sincePrevious = verdicts.isNotEmpty;
+        }
+      }
+      for (final a in cycle.setAdjustments.where((a) => a.delta != 0)) {
+        final after = a.micro + 1 <= micro ? of(a.micro + 1)[a.muscle]?.trend.name : null;
+        changeLog
+            .putIfAbsent(a.muscle, () => [])
+            .add(
+              '${a.micro == 0 ? 'Start' : '${cycle.periodShort}${a.micro}'}: ${a.delta > 0 ? '+' : '−'}${a.delta.abs()} set '
+              '${a.exercise}, ${after == null ? 'not judged yet' : '$after the ${cycle.periodNoun()} after'}',
+            );
+      }
       if (status.phase == 'Build' && status.deloadMicro > 0 && cycle.deloadHintDismissed != micro) {
         // Every hard set of the finished period, per seven days, against all weeks before it.
         final own = _cycleSessions(cycle).where((s) => periods.indexOf(s.startedAt) == micro - 2).toList();
@@ -104,6 +150,7 @@ extension AppStoreCoach on AppStore {
           keepMev: settings.coachKeepMev,
           experience: settings.experience,
           personal: personal,
+          before: of(micro - 3),
           recovery: recoveryOf(sessions.where((s) => periods.indexOf(s.startedAt) == micro - 2)),
           missedWorkout: calendarDays(
             cycle,
@@ -139,8 +186,33 @@ extension AppStoreCoach on AppStore {
       declining: declining.take(2).toList(),
       rising: rising.take(2).toList(),
       personal: personal,
+      sincePrevious: sincePrevious,
+      changeLog: changeLog,
+      feel: _latestFeel(now),
     );
   }
+
+  /// The newest pump and recovery answer per muscle from the last three weeks.
+  Map<String, String> _latestFeel(DateTime now) {
+    const pump = ['low', 'good', 'great'], recovered = ['still sore', 'in time', 'days ago'];
+    final words = <String, List<String>>{};
+    final seenPump = <String>{}, seenRecovered = <String>{};
+    for (final s in history) {
+      final c = s.checkIn;
+      if (c == null || daysBetween(s.startedAt, now) > 21) continue;
+      for (final e in c.pump.entries) {
+        if (seenPump.add(e.key)) words.putIfAbsent(e.key, () => []).add('pump ${pump[e.value]}');
+      }
+      for (final e in c.recovered.entries) {
+        if (seenRecovered.add(e.key)) words.putIfAbsent(e.key, () => []).add('recovered ${recovered[e.value]}');
+      }
+    }
+    return {for (final e in words.entries) e.key: e.value.join(', ')};
+  }
+
+  /// Net coach change to the working sets of [template] in the running mesocycle, for the Train card.
+  int coachSetDelta(WorkoutTemplate template) =>
+      activeCycle?.setAdjustments.where((a) => a.templateId == template.id).fold<int>(0, (n, a) => n + a.delta) ?? 0;
 
   /// How each muscle answered the build weeks of [cycle], in landmark order.
   Map<String, MuscleResponse> cycleResponses(Mesocycle cycle) {
@@ -190,7 +262,7 @@ extension AppStoreCoach on AppStore {
   /// Stores the change on the cycle: one per muscle per microcycle. Saved workouts stay as they are.
   void applySuggestion(SetSuggestion s) {
     final cycle = activeCycle;
-    if (cycle == null || s.applied != null) return;
+    if (cycle == null || s.applied != null || s.delta == 0) return;
     final micro = cycleStatus(cycle).currentMicro;
     if (cycle.setAdjustments.any((a) => a.micro == micro && a.muscle == s.muscle)) return;
     cycle.setAdjustments.add(
