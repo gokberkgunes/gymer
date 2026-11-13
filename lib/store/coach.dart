@@ -10,6 +10,10 @@ class CoachReport {
   final Map<String, MuscleVerdict> verdicts;
   final List<SetSuggestion> suggestions;
 
+  /// Set when most judged muscles fell last period: the muscles behind an early deload, worst first. New set
+  /// changes are held back while it shows.
+  final List<MuscleVerdict> deload;
+
   /// The muscles losing the most, and those gaining the most, each with its volume zone on the tab.
   final List<MuscleVerdict> declining;
   final List<MuscleVerdict> rising;
@@ -20,6 +24,7 @@ class CoachReport {
     required this.volume,
     required this.verdicts,
     required this.suggestions,
+    this.deload = const [],
     required this.declining,
     required this.rising,
   });
@@ -36,6 +41,7 @@ extension AppStoreCoach on AppStore {
 
     var verdicts = <String, MuscleVerdict>{};
     var suggestions = <SetSuggestion>[];
+    var deload = const <MuscleVerdict>[];
     final Map<String, WeeklyVolume> volume;
     if (cycle != null && status!.running) {
       volume = plannedWeeklyVolume(cycle, byId, musclesOf);
@@ -49,6 +55,9 @@ extension AppStoreCoach on AppStore {
       verdicts = of(micro);
       final finished = of(micro - 1);
       if (verdicts.isEmpty) verdicts = finished;
+      if (status.phase == 'Build' && status.deloadMicro > 0 && cycle.deloadHintDismissed != micro) {
+        deload = wholeBodyDecline(finished);
+      }
       if (status.phase == 'Build') {
         suggestions = coachSuggestions(
           cycle: cycle,
@@ -88,7 +97,9 @@ extension AppStoreCoach on AppStore {
       planned: cycle != null,
       volume: volume,
       verdicts: verdicts,
-      suggestions: suggestions,
+      // A deload answers whole-body fatigue; set-by-set changes wait until it is taken or dismissed.
+      suggestions: deload.isEmpty ? suggestions : suggestions.where((s) => s.applied != null).toList(),
+      deload: deload,
       declining: declining.take(2).toList(),
       rising: rising.take(2).toList(),
     );
@@ -103,6 +114,31 @@ extension AppStoreCoach on AppStore {
     cycle.setAdjustments.add(
       SetAdjustment(muscle: s.muscle, templateId: s.templateId, exercise: s.exercise, delta: s.delta, micro: micro),
     );
+    changed();
+  }
+
+  /// Starts the deload in the running microcycle: the build phase ends with the last finished one and the
+  /// mesocycle becomes that much shorter. Weekly RIR overrides of dropped build weeks go; deload ones move up.
+  void startDeloadNow() {
+    final cycle = activeCycle;
+    if (cycle == null) return;
+    final status = cycleStatus(cycle);
+    if (status.phase != 'Build' || status.deloadMicro == 0 || status.currentMicro < 2) return;
+    final build = status.currentMicro - 1, dropped = status.buildMicro - build;
+    cycle
+      ..weekRir = {
+        for (final e in cycle.weekRir.entries)
+          if (e.key <= build) e.key: e.value else if (e.key > status.buildMicro) e.key - dropped: e.value,
+      }
+      ..length = build + status.deloadMicro
+      ..deloadMicro = status.deloadMicro;
+    changed();
+  }
+
+  void dismissDeloadHint() {
+    final cycle = activeCycle;
+    if (cycle == null) return;
+    cycle.deloadHintDismissed = cycleStatus(cycle).currentMicro;
     changed();
   }
 

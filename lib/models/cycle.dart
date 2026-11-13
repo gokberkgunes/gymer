@@ -87,6 +87,9 @@ class Mesocycle {
   String startingLoadUnit;
   Map<String, List<SessionExercise>> startingLoads;
   List<SetAdjustment> setAdjustments;
+
+  /// The microcycle in which the coach's early-deload hint was dismissed; it stays hidden for that one.
+  int? deloadHintDismissed;
   Map<int, String> schedule;
   Map<String, DayEvent> events;
 
@@ -113,6 +116,7 @@ class Mesocycle {
     this.startingLoadUnit = 'kg',
     Map<String, List<SessionExercise>>? startingLoads,
     List<SetAdjustment>? setAdjustments,
+    this.deloadHintDismissed,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
   }) : startingLoads = startingLoads ?? {},
@@ -150,6 +154,7 @@ class Mesocycle {
       'startingLoadUnit': startingLoadUnit,
       'startingLoads': {for (final e in startingLoads.entries) e.key: e.value.map((x) => x.toJson()).toList()},
     },
+    if (deloadHintDismissed != null) 'deloadHintDismissed': deloadHintDismissed,
     if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
@@ -183,6 +188,7 @@ class Mesocycle {
       for (final e in (j['startingLoads'] as Map? ?? {}).entries)
         e.key as String: [for (final x in e.value as List) SessionExercise.fromJson(x as Map<String, dynamic>)],
     },
+    deloadHintDismissed: _int(j['deloadHintDismissed']),
     setAdjustments: [for (final x in j['setAdjustments'] as List? ?? []) ?SetAdjustment.tryJson(x)],
     schedule: {for (final e in (j['schedule'] as Map? ?? {}).entries) int.parse('${e.key}'): e.value as String},
     events: {

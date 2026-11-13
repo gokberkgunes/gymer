@@ -292,6 +292,14 @@ Map<String, WeeklyVolume> performedVolume(
   };
 }
 
+/// Whole-body fatigue: at least two muscles fell and they are at least half of the muscles that could be
+/// judged. Removing a set here and there does not answer that; a deload does. Worst first, empty otherwise.
+List<MuscleVerdict> wholeBodyDecline(Map<String, MuscleVerdict> verdicts) {
+  final falling = verdicts.values.where((v) => v.trend == Trend.falling).toList()
+    ..sort((a, b) => a.percent.compareTo(b.percent));
+  return falling.length >= 2 && falling.length * 2 >= verdicts.length ? falling : const [];
+}
+
 /// What the recovery check-ins of one period say, beyond the logged numbers.
 class Recovery {
   /// Muscles that were still sore when trained again.

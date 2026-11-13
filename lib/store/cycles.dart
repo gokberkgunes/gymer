@@ -128,6 +128,7 @@ extension AppStoreCycles on AppStore {
       ..['events'] = <String, dynamic>{}
       ..remove('endedAt')
       ..remove('setAdjustments')
+      ..remove('deloadHintDismissed')
       ..remove('startingLoads');
     final draft = Mesocycle.fromJson(json);
     draft.schedule.removeWhere((_, id) => template(id) == null);

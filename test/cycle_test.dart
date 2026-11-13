@@ -173,6 +173,21 @@ void main() {
         logged(0, {'Bench': (10, 2), 'Squat': (10, 2), 'Curl': (10, 2), 'Row': (10, 2)}),
       ];
     addTearDown(coach.dispose);
+    // Quads and biceps fell, half of the four judged muscles: whole-body fatigue. The coach offers the deload
+    // early and holds set changes back until that is taken or dismissed.
+    expect(coach.coachReport().deload.map((v) => v.muscle), ['Quads', 'Biceps']);
+    expect(coach.coachReport().suggestions, isEmpty);
+    final early = Mesocycle.fromJson(coach.cycles.single.toJson())..weekRir = {2: 2, 5: 0, 6: 5};
+    final real = coach.cycles.single;
+    coach.cycles = [early];
+    coach.startDeloadNow(); // week 4 becomes the deload: three build weeks stay, later build overrides go
+    expect((early.length, early.deloadMicro, cycleStatus(early).phase), (4, 1, 'Deload'));
+    expect(early.weekRir, {2: 2, 4: 5});
+    expect(coach.coachReport().suggestions, isEmpty);
+    coach.cycles = [real];
+    coach.dismissDeloadHint();
+    expect(coach.coachReport().deload, isEmpty);
+    expect(Mesocycle.fromJson(real.toJson()).deloadHintDismissed, 4);
     // Three weekly quad sets are under MEV: by default the coach removes nothing there.
     expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Chest', 1)]);
     expect(Settings.fromJson((coach.settings..coachKeepMev = false).toJson()).coachKeepMev, isFalse);

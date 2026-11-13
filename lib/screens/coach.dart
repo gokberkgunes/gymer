@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../logic/coach.dart';
 import '../logic/cycle.dart';
+import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -41,13 +42,14 @@ class CoachScreen extends StatelessWidget {
           'Coach',
           info: InfoDot(tooltip: 'How the coach reads your log', onTap: () => _coachInfo(context)),
         ),
-        if (report.suggestions.isNotEmpty) ...[
+        if (report.suggestions.isNotEmpty || report.deload.isNotEmpty) ...[
           SectionLabel('This ${report.cycle?.periodNoun() ?? 'week'}'),
           Card(
             child: Column(
               children: [
+                if (report.deload.isNotEmpty) _DeloadRow(falling: report.deload, cycle: report.cycle!),
                 for (final (i, s) in report.suggestions.indexed) ...[
-                  if (i > 0) const Divider(indent: 16, endIndent: 16),
+                  if (i > 0 || report.deload.isNotEmpty) const Divider(indent: 16, endIndent: 16),
                   _SuggestionRow(suggestion: s, zone: volumeZone(s.muscle, sets(s.muscle))),
                 ],
               ],
@@ -103,6 +105,81 @@ class CoachScreen extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The early-deload hint: most judged muscles fell, so the answer is a deload, not fewer sets one by one.
+class _DeloadRow extends StatelessWidget {
+  final List<MuscleVerdict> falling;
+  final Mesocycle cycle;
+  const _DeloadRow({required this.falling, required this.cycle});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final period = cycle.periodNoun();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LabelWithInfo(
+                  Text('Deload now', style: t.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  InfoDot(
+                    tooltip: 'Why',
+                    onTap: () => showInfoSections(context, 'Deload now', [
+                      (
+                        '',
+                        'Last $period ${falling.map((v) => '${v.muscle} (${fmtTrend(v.percent)})').join(', ')} fell. '
+                            'That is at least half of the muscles that could be compared, which points to fatigue '
+                            'across the whole body rather than too many sets for one muscle.',
+                      ),
+                      (
+                        'Start',
+                        'The deload begins in this $period and the mesocycle ends that much earlier. Workouts '
+                            'already done this $period stay as they are. Dismiss hides this for the $period and '
+                            'brings back the set changes.',
+                      ),
+                    ]),
+                  ),
+                ),
+                Text(
+                  '${falling.length} muscles falling',
+                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(minimumSize: compactButton),
+            onPressed: store.dismissDeloadHint,
+            child: const Text('Dismiss'),
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: compactButton),
+            onPressed: () async {
+              final ok = await confirm(
+                context,
+                'Start the deload now?',
+                'The deload begins in this $period and the mesocycle ends earlier. You can change the length again '
+                    'in the cycle settings.',
+                action: 'Start deload',
+              );
+              if (ok) store.startDeloadNow();
+            },
+            child: const Text('Start'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -243,6 +320,12 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
     'One change per muscle per week, never above the top of MRV or below MEV (below MV if you turn that off in '
         'Settings → Advanced), nothing in the first two weeks or '
         'during a deload, and no added sets after a week with a missed workout.',
+  ),
+  (
+    'Deload now',
+    'When at least two muscles fell last week and they are at least half of those that could be compared, the '
+        'coach offers to start the planned deload now instead of removing sets muscle by muscle. Dismiss hides it '
+        'for the week.',
   ),
   (
     'Apply',
