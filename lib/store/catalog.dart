@@ -310,7 +310,7 @@ extension AppStoreCatalog on AppStore {
   /// Today's plan, including automatic deload volume, without starting or saving a workout.
   TimingBreakdown plannedTiming(WorkoutTemplate t, {DateTime? at}) {
     final ctx = cycleContext(at);
-    if (ctx != null) t = plannedTemplate(ctx.$1, t);
+    if (ctx != null) t = plannedTemplate(ctx.$1, t, micro: ctx.$2.currentMicro);
     if (ctx == null || ctx.$2.phase != 'Deload') return templateTiming(t);
     final preview = Session(
       id: '',

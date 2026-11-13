@@ -12,8 +12,34 @@ extension AppStoreCycles on AppStore {
     return st.running ? (c, st) : null;
   }
 
+  /// Plans (or re-plans) the cycle's set ramp for the microcycles still ahead; past and running weeks keep
+  /// what they had. Called whenever the cycle's settings are saved.
+  void _planRamp(Mesocycle c) {
+    final status = cycleStatus(c);
+    final from = status.phase == 'Upcoming' ? 2 : status.currentMicro + 1;
+    c.setAdjustments.removeWhere((a) => a.ramp && a.micro >= from);
+    c.setAdjustments.addAll(
+      rampAdjustments(
+        c,
+        {for (final t in templates) t.id: t},
+        musclesOf,
+        fromMicro: from,
+        buildMicro: status.buildMicro,
+        experience: settings.experience,
+        includePartialSets: settings.includePartialSets,
+      ),
+    );
+  }
+
+  /// After the cycle editor changed an existing cycle in place.
+  void cycleEdited(Mesocycle c) {
+    _planRamp(c);
+    changed();
+  }
+
   /// Saving or continuing a cycle makes it the single active one.
   void saveCycle(Mesocycle c) {
+    _planRamp(c);
     if (!cycles.any((x) => x.id == c.id)) cycles = [...cycles, c];
     for (final x in cycles) {
       if (x.active && x.id != c.id) x.endedAt ??= dateOnly(DateTime.now());

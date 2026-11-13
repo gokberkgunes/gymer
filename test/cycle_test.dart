@@ -476,6 +476,39 @@ void main() {
       coach.settings.coachSensitivity = 'normal';
       coach.coachReport();
       expect(trendOf(1.2), Trend.progressing);
+      // Set ramp: planned ahead as +1 set per muscle in every (or every second) build week, shown only from its
+      // week on, never while cutting.
+      final ramped = Mesocycle.fromJson(real.toJson())..setRamp = 1;
+      List<SetAdjustment> ramp(Mesocycle c) =>
+          rampAdjustments(c, {'P': plan}, coach.musclesOf, fromMicro: 2, buildMicro: 5);
+      final steps = ramp(ramped);
+      expect({for (final a in steps) a.micro}, {2, 3, 4, 5});
+      expect(steps.where((a) => a.micro == 2).map((a) => (a.muscle, a.exercise, a.ramp)), [
+        ('Back', 'Row', true),
+        ('Quads', 'Squat', true),
+        ('Chest', 'Bench', true),
+        ('Biceps', 'Curl', true),
+      ]);
+      ramped.setAdjustments.addAll(steps);
+      double chestSets(int micro) =>
+          plannedWeeklyVolume(ramped, {'P': plan}, coach.musclesOf, micro: micro)['Chest']!.sets;
+      expect(
+        [
+          for (final micro in [1, 2, 5]) chestSets(micro),
+        ],
+        [3, 4, 7],
+      );
+      expect(Mesocycle.fromJson(ramped.toJson()).setAdjustments.every((a) => a.ramp), isTrue);
+      expect({for (final a in ramp(Mesocycle.fromJson(real.toJson())..setRamp = 2)) a.micro}, {3, 5});
+      expect(
+        ramp(
+          Mesocycle.fromJson(real.toJson())
+            ..setRamp = 1
+            ..diet = 'cut',
+        ),
+        isEmpty,
+      );
+      expect(ramp(real), isEmpty);
       // Eating phase: while cutting nothing is added, and the next cycle is not started higher either.
       coach.setDiet('cut');
       expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Quads', -1)]);

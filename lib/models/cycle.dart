@@ -33,12 +33,16 @@ class SetAdjustment {
   int delta;
   int micro;
 
+  /// Planned ahead by the cycle's set ramp rather than applied from a coach suggestion.
+  bool ramp;
+
   SetAdjustment({
     required this.muscle,
     required this.templateId,
     required this.exercise,
     required this.delta,
     required this.micro,
+    this.ramp = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -47,6 +51,7 @@ class SetAdjustment {
     'exercise': exercise,
     'delta': delta,
     'micro': micro,
+    if (ramp) 'ramp': true,
   };
 
   static SetAdjustment? tryJson(Object? j) {
@@ -60,6 +65,7 @@ class SetAdjustment {
       exercise: exercise,
       delta: delta.clamp(-20, 20),
       micro: micro,
+      ramp: j['ramp'] == true,
     );
   }
 }
@@ -95,6 +101,9 @@ class Mesocycle {
   /// Eating phase the coach is told about: '' gaining, 'maintain' or 'cut'. Recovery is lower in a deficit.
   String diet;
 
+  /// Planned set ramp: 0 off, 1 adds a set per muscle every microcycle of the build, 2 every second one.
+  int setRamp;
+
   /// The microcycle in which the coach's early-deload hint was dismissed; it stays hidden for that one.
   int? deloadHintDismissed;
   Map<int, String> schedule;
@@ -125,6 +134,7 @@ class Mesocycle {
     List<SetAdjustment>? setAdjustments,
     Map<String, String>? muscleGoals,
     this.diet = '',
+    this.setRamp = 0,
     this.deloadHintDismissed,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
@@ -167,6 +177,7 @@ class Mesocycle {
     if (deloadHintDismissed != null) 'deloadHintDismissed': deloadHintDismissed,
     if (muscleGoals.isNotEmpty) 'muscleGoals': muscleGoals,
     if (diet.isNotEmpty) 'diet': diet,
+    if (setRamp != 0) 'setRamp': setRamp,
     if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
@@ -202,6 +213,7 @@ class Mesocycle {
     },
     deloadHintDismissed: _int(j['deloadHintDismissed']),
     diet: const {'maintain', 'cut'}.contains(j['diet']) ? j['diet'] as String : '',
+    setRamp: (_int(j['setRamp']) ?? 0).clamp(0, 2),
     muscleGoals: {
       for (final e in (j['muscleGoals'] as Map? ?? {}).entries)
         if (e.key is String && (e.value == 'maintain' || e.value == 'priority')) e.key as String: e.value as String,

@@ -341,13 +341,18 @@ final volumeLandmarks = <String, (String, String)>{
 };
 
 /// Net coaching change to one exercise's working sets in one workout of this cycle.
-int setAdjustmentFor(Mesocycle c, String templateId, String exercise) => c.setAdjustments
-    .where((a) => a.templateId == templateId && sameExercise(a.exercise, exercise))
-    .fold(0, (n, a) => n + a.delta);
+/// Only changes of microcycle [micro] (default: the running one) and earlier count, so a set ramp planned for
+/// later weeks does not show before its week.
+int setAdjustmentFor(Mesocycle c, String templateId, String exercise, {int? micro}) {
+  final upTo = micro ?? cycleStatus(c).currentMicro;
+  return c.setAdjustments
+      .where((a) => a.templateId == templateId && a.micro <= upTo && sameExercise(a.exercise, exercise))
+      .fold(0, (n, a) => n + a.delta);
+}
 
 /// The saved workout with this cycle's set adjustments applied: added sets copy the last working set, removed
 /// ones come off the end, and one working set always remains. The saved workout itself is never changed.
-WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t) {
+WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t, {int? micro}) {
   if (!c.setAdjustments.any((a) => a.templateId == t.id && a.delta != 0)) return t;
   final used = <String>{};
   return WorkoutTemplate(
@@ -362,7 +367,7 @@ WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t) {
     exercises: [
       for (final e in t.exercises)
         () {
-          final delta = used.add(e.name.toLowerCase()) ? setAdjustmentFor(c, t.id, e.name) : 0;
+          final delta = used.add(e.name.toLowerCase()) ? setAdjustmentFor(c, t.id, e.name, micro: micro) : 0;
           if (delta == 0 || e.workSets == 0) return e;
           final sets = [for (final s in e.sets) s.copy()];
           for (var i = 0; i < delta; i++) {
@@ -393,14 +398,15 @@ class WeeklyVolume {
 Map<String, WeeklyVolume> plannedWeeklyVolume(
   Mesocycle c,
   Map<String, WorkoutTemplate> templates,
-  (List<String>, List<String>) Function(String exercise) musclesOf,
-) {
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  int? micro,
+}) {
   final rows = <VolumeRow>[];
   final directDays = <String, int>{};
   for (final MapEntry(key: day, value: id) in c.schedule.entries) {
     final saved = templates[id];
     if (saved == null) continue;
-    final t = plannedTemplate(c, saved);
+    final t = plannedTemplate(c, saved, micro: micro);
     final trained = <String>{};
     for (final (i, e) in t.exercises.indexed) {
       final (primary, secondary) = musclesOf(e.name);

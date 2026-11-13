@@ -509,12 +509,13 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
   MuscleVerdict? verdict, {
   Set<String> avoid = const {},
   Set<String> prefer = const {},
+  int? micro,
 }) {
   final options = <({String template, int sets, List<TemplateExercise> exercises})>[];
   for (final id in cycle.schedule.values.toSet()) {
     final base = templates[id];
     if (base == null) continue;
-    final plan = plannedTemplate(cycle, base);
+    final plan = plannedTemplate(cycle, base, micro: micro);
     final direct = [
       for (final e in plan.exercises)
         if (musclesOf(e.name).$1.contains(muscle) && e.workSets > 0) e,
@@ -631,7 +632,9 @@ List<SetSuggestion> coachSuggestions({
         SetSuggestion(
           muscle: a.muscle,
           delta: a.delta,
-          reason: 'Applied this ${cycle.periodNoun()}. It stays for the rest of the mesocycle.',
+          reason: a.ramp
+              ? 'Planned by this mesocycle\'s set ramp for this ${cycle.periodNoun()}. Undo removes it.'
+              : 'Applied this ${cycle.periodNoun()}. It stays for the rest of the mesocycle.',
           templateId: a.templateId,
           exercise: a.exercise,
           applied: a,
@@ -885,4 +888,46 @@ int sessionsWithoutGain(List<double> values) {
     count++;
   }
   return count;
+}
+
+/// The set ramp of a mesocycle, planned ahead: in every [Mesocycle.setRamp]-th build microcycle from
+/// [fromMicro] on, each coached muscle gets one more set where the coach would place it, up to [addCeiling]
+/// and one change per exercise per microcycle. Nothing is planned while cutting or for maintained muscles.
+/// [cycle] is read with the changes it already has; the result holds only the new ones.
+List<SetAdjustment> rampAdjustments(
+  Mesocycle cycle,
+  Map<String, WorkoutTemplate> templates,
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  required int fromMicro,
+  required int buildMicro,
+  String experience = 'intermediate',
+  bool includePartialSets = true,
+}) {
+  if (cycle.setRamp <= 0 || cycle.diet == 'cut') return const [];
+  final plan = Mesocycle.fromJson(cycle.toJson());
+  final added = <SetAdjustment>[];
+  for (var micro = math.max(2, fromMicro); micro <= buildMicro; micro++) {
+    if ((micro - 1) % cycle.setRamp != 0) continue;
+    final weekly = plannedWeeklyVolume(plan, templates, musclesOf, micro: micro);
+    final taken = <(String, String)>{};
+    for (final muscle in [...rpLandmarks.keys, ...weekly.keys.where((m) => !rpLandmarks.containsKey(m))]) {
+      final volume = weekly[muscle];
+      if (volume == null || volume.direct.sets <= 0 || plan.muscleGoals[muscle] == 'maintain') continue;
+      final top = addCeiling(muscle, experience, null);
+      if (top != null && volume.countedSets(includePartialSets: includePartialSets) + 1 > top) continue;
+      final target = adjustmentTarget(plan, templates, musclesOf, muscle, 1, null, micro: micro);
+      if (target == null || !taken.add((target.$1, target.$2.toLowerCase()))) continue;
+      final step = SetAdjustment(
+        muscle: muscle,
+        templateId: target.$1,
+        exercise: target.$2,
+        delta: 1,
+        micro: micro,
+        ramp: true,
+      );
+      plan.setAdjustments.add(step);
+      added.add(step);
+    }
+  }
+  return added;
 }

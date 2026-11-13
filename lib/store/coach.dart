@@ -328,7 +328,7 @@ extension AppStoreCoach on AppStore {
     final cycle = activeCycle;
     if (cycle == null) return;
     cycle.diet = diet == 'maintain' || diet == 'cut' ? diet : '';
-    changed();
+    cycleEdited(cycle); // a cut plans no ramp
   }
 
   void dismissDeloadHint() {

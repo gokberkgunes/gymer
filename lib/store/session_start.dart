@@ -100,7 +100,7 @@ extension AppStoreSessionStart on AppStore {
       restLocked: cycle?.restLock ?? false,
     );
     // Coaching set changes live on the cycle; the saved workout stays the base plan.
-    final plan = t == null || cycle == null ? t : plannedTemplate(cycle, t);
+    final plan = t == null || cycle == null ? t : plannedTemplate(cycle, t, micro: status?.currentMicro);
     for (final te in plan?.exercises ?? <TemplateExercise>[]) {
       session.exercises.add(
         status?.phase == 'Deload' ? _deloadExercise(te, cycle!, session) : _buildExercise(te, session, cycle),

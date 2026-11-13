@@ -109,6 +109,7 @@ class _CycleEditorState extends State<CycleEditor> {
       ..deloadVolumePct = _d.deloadVolumePct
       ..rirLock = _d.rirLock
       ..restLock = _d.restLock
+      ..setRamp = _d.setRamp
       ..weekRir = Map.of(_d.weekRir);
     target.schedule.removeWhere((day, _) => day > target.microDays);
   }
@@ -132,7 +133,7 @@ class _CycleEditorState extends State<CycleEditor> {
       widget.onCreated?.call(_d);
     } else {
       _apply(widget.cycle);
-      store.changed();
+      store.cycleEdited(widget.cycle);
       if (widget.past) notify(context, 'Previous mesocycle saved.');
     }
     Navigator.pop(context);
@@ -343,6 +344,18 @@ class _CycleEditorState extends State<CycleEditor> {
               8,
               (v) => _restructure(() => _d.deloadMicro = v),
               subtitle: _d.periodNoun(plural: true),
+            ),
+            stepper(
+              'Set ramp',
+              _d.setRamp,
+              0,
+              2,
+              (v) => _d.setRamp = v,
+              subtitle: switch (_d.setRamp) {
+                1 => '+1 set per muscle every ${_d.periodNoun()}',
+                2 => '+1 set per muscle every second ${_d.periodNoun()}',
+                _ => 'Off: sets change only when you apply a coach suggestion',
+              },
             ),
           ]),
           const SectionLabel('Effort'),
