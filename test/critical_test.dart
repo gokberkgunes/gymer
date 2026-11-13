@@ -51,14 +51,58 @@ void main() {
     expect(planPlates(310, 20, [20, 10, 5, 2.5, 1.25]).exact!.perSide, [...List.filled(7, 20.0), 5.0]);
   });
 
-  test('one damaged bodyweight entry or plate profile never makes a backup unreadable', () async {
+  test('damaged optional entries and numeric settings never make a backup unreadable', () async {
     final store = AppStore();
     addTearDown(store.dispose);
     final data = store.toJson();
+    final defaults = store.settings.toJson();
+    const limits = {
+      'defaultRest': (0, 86400),
+      'defaultSets': (1, 9999),
+      'repMaxTargetReps': (1, 999),
+      'rounding': (0, 24),
+      'setSpacing': (0, 18),
+      'fontScale': (0.8, 1.4),
+      'uiScale': (0.7, 1.2),
+    };
+    for (final MapEntry(key: field, value: (low, high)) in limits.entries) {
+      for (final (value, expected) in <(Object?, num)>[
+        (low - 1, low),
+        (low, low),
+        (high, high),
+        (high + 1, high),
+        (defaults[field], defaults[field] as num),
+        for (final bad in [
+          null,
+          'bad',
+          true,
+          <Object>[],
+          <String, Object>{},
+          double.nan,
+          double.infinity,
+          -double.infinity,
+        ])
+          (bad, defaults[field] as num),
+      ]) {
+        final parsed = Settings.fromJson({...defaults, field: value});
+        expect(parsed.toJson()[field], expected, reason: '$field: $value');
+      }
+    }
     final settings = {
-      ...data['settings'] as Map<String, dynamic>,
+      ...defaults,
+      'defaultRest': -30,
+      'defaultSets': 0,
+      'repMaxTargetReps': 1000,
+      'rounding': 99,
+      'setSpacing': -3,
+      'fontScale': 'bad',
+      'uiScale': 2,
       'plateProfiles': [
-        {'id': 'bad', 'name': 'Broken', 'platesKg': ['x']},
+        {
+          'id': 'bad',
+          'name': 'Broken',
+          'platesKg': ['x'],
+        },
         {'id': 'gym', 'name': 'Gym'},
       ],
       'selectedPlateProfile': 'gym',
@@ -75,6 +119,8 @@ void main() {
     );
     expect(store.bodyweights.map((e) => e.kg), [80]);
     expect(store.settings.plateProfiles.map((p) => p.id), ['gym']);
+    final restored = store.settings.toJson();
+    expect([for (final field in limits.keys) restored[field]], [0, 1, 999, 24, 0, 1.0, 1.2]);
   });
 
   test('resumed warm-ups never change working loads, volume or the next workout', () async {

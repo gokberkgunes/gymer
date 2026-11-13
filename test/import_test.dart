@@ -6,7 +6,7 @@ import 'package:gymer/logic/legacy_import.dart';
 import 'package:gymer/store.dart';
 
 /// A trimmed export in the Flet app's "gymer-backup" ZIP layout.
-List<int> fletBackup() {
+List<int> fletBackup([Map<String, String> settings = const {}]) {
   final files = {
     'manifest.json': jsonEncode({'format': 'gymer-backup', 'version': 1, 'files': <String, Object>{}}),
     'workouts.csv': 'workout_id,name\nA,Legs\n',
@@ -32,7 +32,17 @@ List<int> fletBackup() {
     'mesocycle_schedule.csv': 'cycle_id,day_number,workout_id\nc1,1,A\n',
     'cycle_day_events.csv':
         'cycle_id,planned_date,workout_id,workout_name,moved_to,status,session_id\nc1,2026-09-08,A,Legs,,missed,\n',
-    'settings.csv': 'key,value\nunit,kg\nrounding,8\naccent_color,teal\nweight_increment_barbell_kg,2.5\n',
+    'settings.csv': [
+      'key,value',
+      for (final e in {
+        'unit': 'kg',
+        'rounding': '8',
+        'accent_color': 'teal',
+        'weight_increment_barbell_kg': '2.5',
+        ...settings,
+      }.entries)
+        '${e.key},${e.value}',
+    ].join('\n'),
   };
   final archive = Archive();
   files.forEach((name, text) => archive.addFile(ArchiveFile.string(name, text)));
@@ -43,6 +53,7 @@ void main() {
   test('imports a Flet backup ZIP faithfully', () async {
     final data = convertLegacy(readBackupZip(fletBackup()));
     final store = AppStore();
+    addTearDown(store.dispose);
     await store.load();
     await store.importLegacy(data);
 
@@ -88,6 +99,36 @@ void main() {
     );
     // Modern keeps its own rounding; the backup's 8 is ignored.
     expect((store.settings.rounding, store.settings.accent, store.settings.increments['Barbell']!.$1), (18, 4, 2.5));
+
+    // ZIP settings follow the same bounds as JSON; valid values and recorded sets stay intact.
+    final history = jsonEncode(store.history.single.toJson());
+    for (final (rest, sets, reps, spacing, font, ui, expected)
+        in <(String, String, String, String, String, String, List<num>)>[
+          ('-1', '0', '0', '-1', '0.1', '0.1', [0, 1, 1, 0, 0.8, 0.7]),
+          ('86401', '10000', '1000', '19', '2', '2', [86400, 9999, 999, 18, 1.4, 1.2]),
+          ('1:30', '4', '10', '6', '1.1', '0.9', [90, 4, 10, 6, 1.1, 0.9]),
+          ('bad', 'NaN', 'Infinity', 'bad', 'NaN', 'Infinity', [180, 3, 8, 3, 1.0, 1.0]),
+        ]) {
+      final imported = AppStore();
+      addTearDown(imported.dispose);
+      await imported.importLegacy(
+        convertLegacy(
+          readBackupZip(
+            fletBackup({
+              'default_rest_seconds': rest,
+              'default_sets': sets,
+              'rep_max_target_reps': reps,
+              'set_spacing': spacing,
+              'font_scale': font,
+              'ui_scale': ui,
+            }),
+          ),
+        ),
+      );
+      final s = imported.settings;
+      expect([s.defaultRest, s.defaultSets, s.repMaxTargetReps, s.setSpacing, s.fontScale, s.uiScale], expected);
+      expect(jsonEncode(imported.history.single.toJson()), history);
+    }
   });
 
   test('rejects ZIPs that are not Gymer backups', () {

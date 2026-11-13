@@ -249,6 +249,17 @@ class Settings {
   bool get floatingTimer => timerMode == 'both' || timerMode == 'floating';
   bool get nearSetTimer => timerMode == 'both' || timerMode == 'nearset';
 
+  /// Saved and legacy-imported values must fit the same limits as the settings controls.
+  void normalizeNumeric() {
+    defaultRest = defaultRest.clamp(0, 86400);
+    defaultSets = defaultSets.clamp(1, 9999);
+    repMaxTargetReps = repMaxTargetReps.clamp(1, 999);
+    rounding = rounding.clamp(0, 24);
+    setSpacing = setSpacing.clamp(0, 18);
+    fontScale = fontScale.isFinite ? fontScale.clamp(0.8, 1.4) : 1.0;
+    uiScale = uiScale.isFinite ? uiScale.clamp(0.7, 1.2) : 1.0;
+  }
+
   void resetAppearance() {
     final d = Settings();
     accent = d.accent;
@@ -325,12 +336,17 @@ class Settings {
 
   factory Settings.fromJson(Map<String, dynamic> j) {
     final d = Settings();
+    num? n(String key) {
+      final value = j[key];
+      return value is num && value.isFinite ? value : null;
+    }
+
     bool b(String k, bool fallback) => j[k] as bool? ?? fallback;
     String s(String k, String fallback, Set<String> allowed) => allowed.contains(j[k]) ? j[k] as String : fallback;
     return Settings(
       unit: s('unit', 'kg', {'kg', 'lb'}),
-      defaultRest: _int(j['defaultRest']) ?? d.defaultRest,
-      defaultSets: _int(j['defaultSets']) ?? d.defaultSets,
+      defaultRest: n('defaultRest')?.round() ?? d.defaultRest,
+      defaultSets: n('defaultSets')?.round() ?? d.defaultSets,
       warmupSets: j['warmupSets'] == 2 ? 2 : 3,
       trackRir: b('trackRir', d.trackRir),
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
@@ -366,7 +382,7 @@ class Settings {
       timerMode: s('timerMode', d.timerMode, {'both', 'floating', 'nearset', 'off'}),
       plannedRestDisplay: s('plannedRestDisplay', d.plannedRestDisplay, {'hide', 'smart', 'always'}),
       defaultTimerDisplay: s('defaultTimerDisplay', d.defaultTimerDisplay, {'elapsed', 'countdown'}),
-      repMaxTargetReps: _int(j['repMaxTargetReps']) ?? d.repMaxTargetReps,
+      repMaxTargetReps: n('repMaxTargetReps')?.round() ?? d.repMaxTargetReps,
       setTypes: j['setTypes'] is List ? List<String>.from(j['setTypes'] as List) : null,
       // A damaged entry is skipped (its equipment falls back to the default) rather than making the file unreadable.
       increments: j['increments'] is Map
@@ -391,12 +407,12 @@ class Settings {
       accent: _int(j['accent']) ?? d.accent,
       themeMode: s('themeMode', d.themeMode, {'system', 'light', 'dark'}),
       background: _str(j['background']).isEmpty ? d.background : j['background'] as String,
-      rounding: _int(j['rounding']) ?? d.rounding,
+      rounding: n('rounding')?.round() ?? d.rounding,
       density: s('density', d.density, {'compact', 'normal', 'roomy'}),
-      setSpacing: _int(j['setSpacing']) ?? d.setSpacing,
+      setSpacing: n('setSpacing')?.round() ?? d.setSpacing,
       warmupAppearance: s('warmupAppearance', d.warmupAppearance, {'fire', 'embers', 'heat', 'stripes', 'plain'}),
-      fontScale: _dbl(j['fontScale']) ?? d.fontScale,
-      uiScale: _dbl(j['uiScale']) ?? d.uiScale,
-    );
+      fontScale: n('fontScale')?.toDouble() ?? d.fontScale,
+      uiScale: n('uiScale')?.toDouble() ?? d.uiScale,
+    )..normalizeNumeric();
   }
 }

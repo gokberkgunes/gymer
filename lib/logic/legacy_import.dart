@@ -378,9 +378,9 @@ LegacyData _convertLegacy(Map<String, String> files) {
     x.accent = _accentNames[s['accent_color']] ?? x.accent;
     x.themeMode = pick('theme_mode', x.themeMode, {'system', 'light', 'dark'});
     x.density = pick('density', x.density, {'compact', 'normal', 'roomy'});
-    x.setSpacing = (_int(s['set_spacing']) ?? x.setSpacing).clamp(0, 18);
-    x.fontScale = (_num(s['font_scale']) ?? x.fontScale).clamp(0.8, 1.4);
-    x.uiScale = (_num(s['ui_scale']) ?? x.uiScale).clamp(0.7, 1.2);
+    x.setSpacing = _int(s['set_spacing']) ?? x.setSpacing;
+    x.fontScale = _num(s['font_scale']) ?? x.fontScale;
+    x.uiScale = _num(s['ui_scale']) ?? x.uiScale;
     const equipment = {
       'barbell': 'Barbell',
       'dumbbell': 'Dumbbell',
@@ -394,6 +394,7 @@ LegacyData _convertLegacy(Map<String, String> files) {
         _num(s['weight_increment_${k}_lb']) ?? current.$2,
       );
     }
+    x.normalizeNumeric();
   }
 
   if (files.containsKey('active_workout.csv') && csv('active_workout.csv').isNotEmpty) {
