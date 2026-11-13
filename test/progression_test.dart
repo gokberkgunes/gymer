@@ -75,6 +75,28 @@ void main() {
         [12, 12],
       ],
     );
+    expect(light.reason, contains('goes up once every set reaches'));
+    // A 1.25 kg step on a 5 kg raise is 25 %: the range widens, and the load moves exactly one step once every
+    // set has out-repped that jump, instead of never (the 10 % limit) or at the top of the normal range.
+    final earn = repsToEarnStep(5, 6.25, 7, 2);
+    expect(earn, inInclusiveRange(15, 22));
+    final building = rec(sets([(5, earn - 1, 2), (5, earn - 1, 2)]), inc: 1.25);
+    expect((building.action, building.weight), ('hold', 5.0));
+    final earned = rec(sets([(5, earn, 2), (5, earn, 2)]), inc: 1.25);
+    expect((earned.action, earned.weight, earned.setRepTargets.every((reps) => reps >= 7)), ('increase', 6.25, true));
+    Recommendation lightRepsOnly(int reps) => recommend(
+      previous: [for (var i = 0; i < 2; i++) SetEntry(weight: 5, reps: reps, done: true)],
+      method: 'Straight',
+      targetRir: null,
+      unit: 'kg',
+      increment: 1.25,
+      rirTracked: false,
+    )!;
+    final lightEarn = repsToEarnStep(5, 6.25, 7, 0);
+    expect(
+      (lightRepsOnly(14).action, lightRepsOnly(lightEarn - 1).action, lightRepsOnly(lightEarn).action),
+      ('hold', 'hold', 'increase'),
+    );
     Recommendation repsOnly(List<(double, int)> v) => recommend(
       previous: [for (final (w, r) in v) SetEntry(weight: w, reps: r, done: true)],
       method: 'Straight',

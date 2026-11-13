@@ -153,6 +153,16 @@ List<double?> _descendingDropWeights(double anchor, List<double> ratios, String 
   return values;
 }
 
+/// Reps needed at [current] before one increment up to [next] still leaves [low] reps at the same effort.
+/// This is the top of the widened range for an exercise whose single increment is a big jump: a 1.25 kg step
+/// on a 5 kg raise is 25 %, so the load waits until the lifter has out-repped that jump.
+int repsToEarnStep(double current, double next, int low, int rir) {
+  for (var reps = low; reps < 60; reps++) {
+    if ((supportedReps(setOneRm(current, reps, rir)!, next, rir) ?? 0) >= low) return reps;
+  }
+  return 60;
+}
+
 String _fmt(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
 /// [previous] is the last session's sets for this exercise (all types).
@@ -246,8 +256,17 @@ Recommendation? _straight(
   var apply = true;
   target ??= rirTracked && sets.first.rir != null ? sets.first.rir!.clamp(0, maxCountedRir) : null;
   final holdLow = math.min(low, stableRepMin);
-  final holdHigh = math.max(high, stableRepMax);
+  var holdHigh = math.max(high, stableRepMax);
   String reason;
+  // A single increment above the automatic-change limit: widen the range instead of never (or wildly)
+  // stepping. The load goes up by exactly that increment once every set has earned it.
+  final next = loadAtOrBelow?.call(current + step) ?? current + step;
+  final bigStep = next > current + 1e-6 && next - current > current * maxAutomaticChange + 1e-6;
+  final earnReps = bigStep ? repsToEarnStep(current, next, holdLow, rirTracked ? (target ?? 0) : 0) : 0;
+  final widened = bigStep
+      ? ' One increment is more than 10 % of this load, so it goes up once every set reaches $earnReps reps.'
+      : '';
+  if (bigStep && !rirTracked) holdHigh = math.max(holdHigh, earnReps - 1);
 
   final contextError = contextProblem(planned, currentPlan?.where((r) => isStraightType(r.type)).toList());
   if (contextError != null) {
@@ -277,7 +296,7 @@ Recommendation? _straight(
       }
       reason = 'A working set fell below $holdLow reps; repeat the observed reps at a lighter load.';
     } else {
-      reason = 'Keep the load while working reps remain within $holdLow–$holdHigh.';
+      reason = 'Keep the load while working reps remain within $holdLow–$holdHigh.$widened';
     }
   } else if (target == null) {
     reason = 'Target RIR is unknown; choose an effort target before automatic progression.';
@@ -299,6 +318,17 @@ Recommendation? _straight(
         'Load estimated from your recorded capacity at $target RIR.',
         loadAtOrBelow,
       );
+    }
+    if (bigStep && action == 'hold') {
+      if (estimates.every((oneRm) => (supportedReps(oneRm, next, target!) ?? 0) >= holdLow)) {
+        weight = next;
+        action = 'increase';
+        reason =
+            'One increment is more than 10 % of this load; every set can now reach $holdLow reps at the heavier '
+            'load, so it goes up one step.';
+      } else {
+        reason = '$reason$widened';
+      }
     }
     final fitted = [for (final oneRm in estimates) supportedReps(oneRm, weight, target)];
     apply = fitted.every((reps) => reps != null);
