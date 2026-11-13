@@ -358,7 +358,8 @@ void _dietDialog(BuildContext context) {
 void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coach reads your log', const [
   (
     'Arrows',
-    'Each exercise is compared with the same exercise in the same workout one week (or microcycle) earlier. '
+    'The size of change that counts (1 % by default) follows Coach sensitivity in Settings → Advanced. '
+        'Each exercise is compared with the same exercise in the same workout one week (or microcycle) earlier. '
         'Straight sets are compared set by set, by estimated 1RM so reps in reserve count, or by load × reps if '
         'you choose that in Settings → Advanced. Other set methods are always compared by total volume. Up means '
         'progressing, flat holding, down falling. Only external loads with the same logging context are compared; '

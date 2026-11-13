@@ -410,6 +410,29 @@ class _AdvancedSettings extends StatelessWidget {
           ),
           _stackedChoice(
             context,
+            'Coach sensitivity',
+            s.coachSensitivity,
+            const {'cautious': 'Cautious', 'normal': 'Normal', 'eager': 'Eager'},
+            (v) => store.updateSettings((x) => x.coachSensitivity = v),
+            info: InfoDot(
+              tooltip: 'What this changes',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Coach sensitivity'),
+                  content: const Text(
+                    'How big a change must be before the coach reacts. Normal reads 1 % as progress or decline and '
+                    'offers a deload when half of the judged muscles fall. Cautious waits for 1.5 % and two thirds: '
+                    'fewer, surer suggestions, which suits you if your RIR or reps vary a lot from day to day. Eager '
+                    'reacts to 0.75 % and one third: more suggestions, some of them from noise.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
+          _stackedChoice(
+            context,
             'Training experience',
             s.experience,
             const {'beginner': 'Under 1 year', 'intermediate': '1–3 years', 'advanced': 'Longer'},

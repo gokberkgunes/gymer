@@ -152,6 +152,9 @@ class Settings {
   /// Training experience: 'beginner' (under a year), 'intermediate' (one to three) or 'advanced'. Sets how
   /// high and how fast the coach adds sets.
   String experience;
+
+  /// How readily the coach reads a change: 'cautious', 'normal' or 'eager'.
+  String coachSensitivity;
   bool dimCompleted;
   bool collapseCompleted;
   List<String> pinnedExerciseActions;
@@ -210,6 +213,7 @@ class Settings {
     this.coachKeepMev = true,
     this.coachCheckIn = false,
     this.experience = 'intermediate',
+    this.coachSensitivity = 'normal',
     this.dimCompleted = true,
     this.collapseCompleted = true,
     List<String>? pinnedExerciseActions,
@@ -321,6 +325,7 @@ class Settings {
     if (!coachKeepMev) 'coachKeepMev': false,
     if (coachCheckIn) 'coachCheckIn': true,
     if (experience != 'intermediate') 'experience': experience,
+    if (coachSensitivity != 'normal') 'coachSensitivity': coachSensitivity,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
     'pinnedExerciseActions': pinnedExerciseActions,
@@ -394,6 +399,7 @@ class Settings {
       coachKeepMev: b('coachKeepMev', d.coachKeepMev),
       coachCheckIn: b('coachCheckIn', d.coachCheckIn),
       experience: s('experience', d.experience, {'beginner', 'intermediate', 'advanced'}),
+      coachSensitivity: s('coachSensitivity', d.coachSensitivity, {'cautious', 'normal', 'eager'}),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
       pinnedExerciseActions: j['pinnedExerciseActions'] is List

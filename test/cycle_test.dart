@@ -442,6 +442,19 @@ void main() {
       ];
       expect(advised({'P': full}, 0), [(0, 'Add a day', '')]);
       expect(advised({'P': full}, 3), [(0, 'Swap', 'Bench')]);
+      // Sensitivity moves the thresholds together: a 1.2 % change is progress normally, not when cautious, and
+      // the deload needs two thirds of the muscles instead of half.
+      expect(trendOf(1.2), Trend.progressing);
+      coach.settings.coachSensitivity = 'cautious';
+      expect(coach.coachReport().deload, isEmpty);
+      expect((trendOf(1.2), trendOf(-1.6)), (Trend.holding, Trend.falling));
+      expect(wholeBodyDecline({...some, 'Calves': some['Quads']!}), isEmpty); // three falling of five
+      useSensitivity('eager');
+      expect(wholeBodyDecline(some).length, 2); // two falling of five is over a third
+      expect(Settings.fromJson({'coachSensitivity': 'wild'}).coachSensitivity, 'normal');
+      coach.settings.coachSensitivity = 'normal';
+      coach.coachReport();
+      expect(trendOf(1.2), Trend.progressing);
       // Eating phase: while cutting nothing is added, and the next cycle is not started higher either.
       coach.setDiet('cut');
       expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Quads', -1)]);

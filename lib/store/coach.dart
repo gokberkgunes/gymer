@@ -57,6 +57,7 @@ class CoachReport {
 
 extension AppStoreCoach on AppStore {
   CoachReport coachReport([DateTime? at]) {
+    useSensitivity(settings.coachSensitivity);
     final now = at ?? DateTime.now();
     final active = activeCycle;
     final status = active == null ? null : cycleStatus(active, now);
@@ -216,6 +217,7 @@ extension AppStoreCoach on AppStore {
 
   /// How each muscle answered the build weeks of [cycle], in landmark order.
   Map<String, MuscleResponse> cycleResponses(Mesocycle cycle) {
+    useSensitivity(settings.coachSensitivity);
     final status = cycleStatus(cycle, cycle.start);
     final sessions = _cycleSessions(
       cycle,

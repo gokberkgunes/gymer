@@ -12,8 +12,25 @@ import 'volume.dart';
 enum Trend { progressing, holding, falling }
 
 /// Estimated-1RM change (percent) below which a comparison counts as unchanged. One more rep at the same load
-/// and effort is roughly 2.5 %, so this separates a real change from rounding.
-const trendStep = 1.0;
+/// and effort is roughly 2.5 %, so this separates a real change from rounding. Set by [useSensitivity].
+double trendStep = 1.0;
+
+/// The share of judged muscles that must be falling before a deload is offered. Set by [useSensitivity].
+double deloadShare = 0.5;
+
+/// How readily the coach reads a change, chosen in Settings: 'cautious' wants a clearer change (1.5 %) and two
+/// thirds of the muscles falling before a deload; 'eager' reacts to 0.75 % and to one third; anything else is
+/// the normal 1 % and one half. The store applies the setting before it asks for a report, so every verdict
+/// in that report and on screen uses the same thresholds.
+void useSensitivity(String sensitivity) {
+  final (step, share) = switch (sensitivity) {
+    'cautious' => (1.5, 2 / 3),
+    'eager' => (0.75, 1 / 3),
+    _ => (1.0, 0.5),
+  };
+  trendStep = step;
+  deloadShare = share;
+}
 
 /// Direct working sets for one muscle in one workout past which another set adds little.
 const sessionSetCeiling = 10;
@@ -367,13 +384,15 @@ Map<String, WeeklyVolume> performedVolume(
   };
 }
 
-/// Whole-body fatigue: at least two muscles fell, and either they are at least half of the muscles that could
-/// be judged or the week's total hard sets were a personal high ([atPersonalHigh]). Removing a set here and
+/// Whole-body fatigue: at least two muscles fell, and either they are at least [deloadShare] (half by default)
+/// of the muscles that could be judged or the week's total hard sets were a personal high ([atPersonalHigh]). Removing a set here and
 /// there does not answer that; a deload does. Worst first, empty otherwise.
 List<MuscleVerdict> wholeBodyDecline(Map<String, MuscleVerdict> verdicts, {bool atPersonalHigh = false}) {
   final falling = verdicts.values.where((v) => v.trend == Trend.falling).toList()
     ..sort((a, b) => a.percent.compareTo(b.percent));
-  return falling.length >= 2 && (atPersonalHigh || falling.length * 2 >= verdicts.length) ? falling : const [];
+  return falling.length >= 2 && (atPersonalHigh || falling.length >= verdicts.length * deloadShare - 1e-9)
+      ? falling
+      : const [];
 }
 
 /// Whether [total] hard sets in one week match or beat every earlier Monday-to-Sunday week of [earlier]
