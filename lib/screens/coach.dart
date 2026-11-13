@@ -234,7 +234,9 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
   (
     'Signs of fatigue',
     'A weaker first set, the same reps leaving fewer in reserve, reps dropping sharply from set to set, skipped '
-        'sets, and sets stopped at a safety limit or discomfort.',
+        'sets, and sets stopped at a safety limit or discomfort. With the recovery check-in on (Settings → '
+        'Advanced), still being sore at the next workout counts too; a low pump with early recovery earns an added '
+        'set after one flat week, and a week of poor sleep or feeling run down adds nothing.',
   ),
   (
     'Limits',

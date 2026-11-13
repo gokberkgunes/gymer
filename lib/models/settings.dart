@@ -145,6 +145,9 @@ class Settings {
 
   /// The coach never removes a set that would take a muscle under its MEV; off lowers the floor to MV.
   bool coachKeepMev;
+
+  /// Ask about pump, soreness, sleep and overall state on the finish screen.
+  bool coachCheckIn;
   bool dimCompleted;
   bool collapseCompleted;
   List<String> pinnedExerciseActions;
@@ -201,6 +204,7 @@ class Settings {
     this.includePartialSets = true,
     this.coachCompare = 'strength',
     this.coachKeepMev = true,
+    this.coachCheckIn = false,
     this.dimCompleted = true,
     this.collapseCompleted = true,
     List<String>? pinnedExerciseActions,
@@ -310,6 +314,7 @@ class Settings {
     'includePartialSets': includePartialSets,
     if (coachCompare != 'strength') 'coachCompare': coachCompare,
     if (!coachKeepMev) 'coachKeepMev': false,
+    if (coachCheckIn) 'coachCheckIn': true,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
     'pinnedExerciseActions': pinnedExerciseActions,
@@ -381,6 +386,7 @@ class Settings {
       includePartialSets: b('includePartialSets', d.includePartialSets),
       coachCompare: s('coachCompare', d.coachCompare, {'strength', 'volume'}),
       coachKeepMev: b('coachKeepMev', d.coachKeepMev),
+      coachCheckIn: b('coachCheckIn', d.coachCheckIn),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
       pinnedExerciseActions: j['pinnedExerciseActions'] is List

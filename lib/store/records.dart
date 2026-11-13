@@ -158,6 +158,7 @@ extension AppStoreRecords on AppStore {
       ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
     final (bests, results) = _sessionHighlights(session, earlier);
     return FinishSummary(
+      sessionId: session.id,
       name: session.name,
       unit: session.unit,
       date: session.startedAt,

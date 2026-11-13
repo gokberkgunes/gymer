@@ -215,6 +215,46 @@ class SessionExercise {
   }
 }
 
+/// The optional recovery check-in answered on the finish screen. Every answer is 0, 1 or 2, low to high:
+/// pump low / good / great; recovered still sore / just in time / days ago; sleep and overall poor / normal /
+/// good. Unanswered questions are absent.
+class CheckIn {
+  Map<String, int> pump;
+  Map<String, int> recovered;
+  int? sleep;
+  int? overall;
+
+  CheckIn({Map<String, int>? pump, Map<String, int>? recovered, this.sleep, this.overall})
+    : pump = pump ?? {},
+      recovered = recovered ?? {};
+
+  bool get isEmpty => pump.isEmpty && recovered.isEmpty && sleep == null && overall == null;
+
+  Map<String, dynamic> toJson() => {
+    if (pump.isNotEmpty) 'pump': pump,
+    if (recovered.isNotEmpty) 'recovered': recovered,
+    if (sleep != null) 'sleep': sleep,
+    if (overall != null) 'overall': overall,
+  };
+
+  static CheckIn? tryJson(Object? j) {
+    if (j is! Map) return null;
+    int? level(Object? v) => v is num && v >= 0 && v <= 2 ? v.round() : null;
+    Map<String, int> levels(Object? m) => {
+      if (m is Map)
+        for (final e in m.entries)
+          if ((e.key, level(e.value)) case (final String muscle, final value?)) muscle: value,
+    };
+    final parsed = CheckIn(
+      pump: levels(j['pump']),
+      recovered: levels(j['recovered']),
+      sleep: level(j['sleep']),
+      overall: level(j['overall']),
+    );
+    return parsed.isEmpty ? null : parsed;
+  }
+}
+
 class Session {
   final String id;
   final String? templateId;
@@ -243,6 +283,9 @@ class Session {
   /// Original plan's duration estimate, captured at start rather than rebuilt from today's template.
   int? estimatedSeconds;
 
+  /// Recovery check-in from the finish screen, when the user answered it.
+  CheckIn? checkIn;
+
   Session({
     required this.id,
     required this.templateId,
@@ -266,6 +309,7 @@ class Session {
     this.clockRunningSince,
     this.clockElapsed = 0,
     this.estimatedSeconds,
+    this.checkIn,
   }) : circuits = circuits ?? [],
        warmupExercises = warmupExercises ?? [];
 
@@ -329,6 +373,7 @@ class Session {
     if (clockRunningSince != null) 'clockSince': clockRunningSince!.toUtc().toIso8601String(),
     if (clockElapsed > 0) 'clockElapsed': clockElapsed,
     if (estimatedSeconds != null) 'estimatedSeconds': estimatedSeconds,
+    if (checkIn != null && !checkIn!.isEmpty) 'checkIn': checkIn!.toJson(),
     'exercises': exercises.map((e) => e.toJson()).toList(),
     if (circuits.isNotEmpty) 'circuits': circuits.map((c) => c.toJson()).toList(),
     if (warmupExercises.isNotEmpty) 'warmupExercises': warmupExercises.map((e) => e.toJson()).toList(),
@@ -354,6 +399,7 @@ class Session {
     clockRunningSince: j['clockSince'] == null ? null : DateTime.parse(j['clockSince'] as String).toLocal(),
     clockElapsed: _int(j['clockElapsed']) ?? 0,
     estimatedSeconds: _int(j['estimatedSeconds']),
+    checkIn: CheckIn.tryJson(j['checkIn']),
     exercises: [for (final e in j['exercises'] as List) SessionExercise.fromJson(e as Map<String, dynamic>)],
     circuits: [for (final c in j['circuits'] as List? ?? []) ExerciseCircuit.fromJson(c as Map<String, dynamic>)],
     warmupExercises: [

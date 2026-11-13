@@ -75,6 +75,8 @@ class ExerciseResult {
 }
 
 class FinishSummary {
+  /// The saved session this summarises, for the recovery check-in.
+  final String? sessionId;
   final String name;
   final String unit;
   final DateTime date;
@@ -88,6 +90,7 @@ class FinishSummary {
   final List<ExerciseResult> exercises;
   final List<AchievementProgress> achievements;
   const FinishSummary({
+    this.sessionId,
     required this.name,
     required this.unit,
     required this.date,

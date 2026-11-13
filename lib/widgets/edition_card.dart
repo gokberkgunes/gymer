@@ -44,6 +44,14 @@ class _TiltCardState extends State<TiltCard> with SingleTickerProviderStateMixin
   Offset _tilt = Offset.zero;
   Offset _from = Offset.zero;
 
+  @override
+  void initState() {
+    super.initState();
+    // Created now, not on first use: a card that was never touched would otherwise build its ticker inside
+    // dispose, after the widget has left the tree.
+    _back.value = 0;
+  }
+
   void _move(PointerEvent e) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize || box.size.isEmpty || MediaQuery.disableAnimationsOf(context)) return;

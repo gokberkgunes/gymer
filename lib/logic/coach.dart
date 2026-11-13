@@ -292,6 +292,48 @@ Map<String, WeeklyVolume> performedVolume(
   };
 }
 
+/// What the recovery check-ins of one period say, beyond the logged numbers.
+class Recovery {
+  /// Muscles that were still sore when trained again.
+  final Set<String> sore;
+
+  /// Muscles with a low pump every time that had also recovered days before: more work would be absorbed.
+  final Set<String> underworked;
+
+  /// Sleep or overall state was poor in at least half of the answered workouts.
+  final bool runDown;
+
+  const Recovery({this.sore = const {}, this.underworked = const {}, this.runDown = false});
+}
+
+Recovery recoveryOf(Iterable<Session> sessions) {
+  final pump = <String, List<int>>{}, recovered = <String, List<int>>{};
+  var answered = 0, poor = 0;
+  for (final c in sessions.map((s) => s.checkIn).nonNulls) {
+    for (final e in c.pump.entries) {
+      pump.putIfAbsent(e.key, () => []).add(e.value);
+    }
+    for (final e in c.recovered.entries) {
+      recovered.putIfAbsent(e.key, () => []).add(e.value);
+    }
+    if (c.sleep != null || c.overall != null) {
+      answered++;
+      if (c.sleep == 0 || c.overall == 0) poor++;
+    }
+  }
+  return Recovery(
+    sore: {
+      for (final e in recovered.entries)
+        if (e.value.contains(0)) e.key,
+    },
+    underworked: {
+      for (final e in pump.entries)
+        if (e.value.every((v) => v == 0) && (recovered[e.key]?.every((v) => v == 2) ?? false)) e.key,
+    },
+    runDown: answered > 0 && poor * 2 >= answered,
+  );
+}
+
 /// One line of the weekly suggestions: add a set, remove one, or (after Apply) the change already made.
 class SetSuggestion {
   final String muscle;
@@ -365,7 +407,8 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
 
 /// The coach's rule for one finished build period, most important first, at most three:
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
-/// fatigue loses one. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
+/// fatigue loses one. The optional check-ins ([recovery]) sharpen this: still sore counts as fatigue, a low
+/// pump with early recovery earns the added set after one flat period, and a run-down period adds nothing. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
 /// [keepMev] off), and no
 /// additions after a missed workout. [verdicts] is the finished period, [previous] the one before it,
 /// [weeklySets] the current plan per muscle and [micro] the running microcycle (1-based).
@@ -379,6 +422,7 @@ List<SetSuggestion> coachSuggestions({
   required Map<String, double> weeklySets,
   required bool missedWorkout,
   bool keepMev = true,
+  Recovery recovery = const Recovery(),
 }) {
   final applied = <SetSuggestion>[
     for (final a in cycle.setAdjustments)
@@ -402,12 +446,11 @@ List<SetSuggestion> coachSuggestions({
     if (handled.contains(v.muscle)) continue;
     final landmark = rpLandmarks[v.muscle];
     final sets = weeklySets[v.muscle] ?? 0;
-    final remove = v.trend == Trend.falling || (v.trend == Trend.holding && v.fatigued);
-    final add =
-        v.trend == Trend.holding &&
-        !v.fatigued &&
-        previous[v.muscle] != null &&
-        previous[v.muscle]!.trend != Trend.progressing;
+    final sore = recovery.sore.contains(v.muscle), underworked = recovery.underworked.contains(v.muscle);
+    final fatigue = [...v.fatigue, if (sore) 'it was still sore at the next workout'];
+    final remove = v.trend == Trend.falling || (v.trend == Trend.holding && fatigue.isNotEmpty);
+    final stalled = previous[v.muscle] != null && previous[v.muscle]!.trend != Trend.progressing;
+    final add = v.trend == Trend.holding && fatigue.isEmpty && !recovery.runDown && (stalled || underworked);
     if (!remove && !add) continue;
     final delta = remove ? -1 : 1;
     final floor = (keepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
@@ -416,12 +459,17 @@ List<SetSuggestion> coachSuggestions({
     if (add && (missedWorkout || (top != null && sets + 1 > top))) continue;
     final target = adjustmentTarget(cycle, templates, musclesOf, v.muscle, delta, v);
     if (target == null) continue;
-    final signs = v.fatigue.isEmpty ? '' : ' Signs of fatigue: ${v.fatigue.join('; ')}.';
+    final signs =
+        '${fatigue.isEmpty ? '' : ' Signs of fatigue: ${fatigue.join('; ')}.'}'
+        '${recovery.runDown ? ' Sleep or overall state was poor that $period, which may be part of it.' : ''}';
     final reason = remove
         ? v.trend == Trend.falling
               ? '${_names(v.exercises)} fell ${_percent(v.percent)} from the $period before.$signs'
               : '${_names(v.exercises)} did not move from the $period before.$signs'
-        : '${_names(v.exercises)} have not moved for two $periodsWord, with no signs of fatigue.';
+        : stalled
+        ? '${_names(v.exercises)} have not moved for two $periodsWord, with no signs of fatigue.'
+        : '${_names(v.exercises)} did not move from the $period before; the pump was low and it had recovered '
+              'days earlier.';
     (remove ? removals : additions).add((
       v.percent,
       SetSuggestion(muscle: v.muscle, delta: delta, reason: reason, templateId: target.$1, exercise: target.$2),

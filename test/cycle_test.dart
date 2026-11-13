@@ -222,6 +222,30 @@ void main() {
     expect(Settings.fromJson(coach.settings.toJson()).coachCompare, 'volume');
     expect(Settings.fromJson({'coachCompare': 'x'}).coachCompare, 'strength');
     coach.settings.coachCompare = 'strength';
+    // Recovery check-ins of the finished week: soreness turns a flat muscle into a removal, a run-down week
+    // blocks additions, and a low pump with early recovery earns a set after a single flat week.
+    final lastWeek = coach.history.first;
+    List<(String, int)> suggested() => [for (final s in coach.coachReport().suggestions) (s.muscle, s.delta)];
+    coach.editCheckIn(lastWeek.id, (c) => c.recovered['Chest'] = 0);
+    expect(suggested(), [('Quads', -1), ('Chest', -1)]);
+    lastWeek.checkIn = CheckIn(sleep: 0);
+    expect(suggested(), [('Quads', -1)]);
+    lastWeek.checkIn = CheckIn(pump: {'Chest': 0}, recovered: {'Chest': 2}, overall: 2);
+    final earlier = coach.history.removeLast();
+    expect(coach.coachReport().suggestions.last.reason, contains('the pump was low'));
+    expect(Session.fromJson(lastWeek.toJson()).checkIn!.toJson(), lastWeek.checkIn!.toJson());
+    expect(
+      Session.fromJson({
+        ...lastWeek.toJson(),
+        'checkIn': {
+          'pump': {'Chest': 9},
+          'sleep': 'x',
+        },
+      }).checkIn,
+      isNull,
+    );
+    coach.history.add(earlier);
+    lastWeek.checkIn = null;
     for (final s in report.suggestions) {
       coach.applySuggestion(s);
       coach.applySuggestion(s); // one change per muscle per week

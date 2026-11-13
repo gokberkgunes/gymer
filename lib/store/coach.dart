@@ -61,6 +61,7 @@ extension AppStoreCoach on AppStore {
             for (final e in volume.entries) e.key: e.value.countedSets(includePartialSets: settings.includePartialSets),
           },
           keepMev: settings.coachKeepMev,
+          recovery: recoveryOf(sessions.where((s) => periods.indexOf(s.startedAt) == micro - 2)),
           missedWorkout: calendarDays(
             cycle,
             history,
@@ -102,6 +103,14 @@ extension AppStoreCoach on AppStore {
     cycle.setAdjustments.add(
       SetAdjustment(muscle: s.muscle, templateId: s.templateId, exercise: s.exercise, delta: s.delta, micro: micro),
     );
+    changed();
+  }
+
+  /// Saves answers of the finish screen's recovery check-in on the finished workout.
+  void editCheckIn(String sessionId, void Function(CheckIn checkIn) edit) {
+    final session = history.where((s) => s.id == sessionId).firstOrNull;
+    if (session == null) return;
+    edit(session.checkIn ??= CheckIn());
     changed();
   }
 

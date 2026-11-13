@@ -428,6 +428,27 @@ class _AdvancedSettings extends StatelessWidget {
               ),
             ),
           ),
+          _row(
+            context,
+            'Recovery check-in',
+            Switch(value: s.coachCheckIn, onChanged: (v) => store.updateSettings((x) => x.coachCheckIn = v)),
+            info: InfoDot(
+              tooltip: 'What is asked',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Recovery check-in'),
+                  content: const Text(
+                    'With this on, the summary after a workout asks two things per trained muscle (pump, and whether '
+                    'it had recovered from last time) and two about the day (sleep and overall state). Every answer '
+                    'is optional. The coach treats soreness as fatigue, adds a set sooner after a low pump with '
+                    'early recovery, and adds nothing after a run-down week. Nothing is ever asked during a workout.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
         ]),
         const SectionLabel('Timers'),
         _group([

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../logic/numbers.dart';
 import '../logic/volume.dart';
+import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/celebration.dart';
@@ -137,6 +138,8 @@ class FinishScreen extends StatelessWidget {
                 ],
                 const SizedBox(height: 12),
                 _Muscles(s.report),
+                if (!historical && settings.coachCheckIn && s.sessionId != null && s.report.direct.isNotEmpty)
+                  _CheckInCard(sessionId: s.sessionId!, muscles: s.report.direct.keys.toList()),
                 if (!historical) ...[
                   const SizedBox(height: 24),
                   FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
@@ -161,6 +164,100 @@ class FinishScreen extends StatelessWidget {
     final m = d.inMinutes;
     if (m < 60) return '$m min';
     return '${m ~/ 60} h ${(m % 60).toString().padLeft(2, '0')}';
+  }
+}
+
+/// The optional recovery check-in: two taps per trained muscle and two for the day. Answers are saved as they
+/// are tapped and read by the Coach tab; nothing is required and unanswered rows stay empty.
+class _CheckInCard extends StatelessWidget {
+  final String sessionId;
+  final List<String> muscles;
+  const _CheckInCard({required this.sessionId, required this.muscles});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final answers = store.history.where((s) => s.id == sessionId).firstOrNull?.checkIn;
+    Widget choice(String label, List<String> options, int? value, void Function(CheckIn, int?) set) => Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(label, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              emptySelectionAllowed: true,
+              style: const ButtonStyle(
+                padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+                textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+              ),
+              segments: [for (final (i, o) in options.indexed) ButtonSegment(value: i, label: Text(o))],
+              selected: {?value},
+              onSelectionChanged: (v) => store.editCheckIn(sessionId, (c) => set(c, v.firstOrNull)),
+            ),
+          ),
+        ],
+      ),
+    );
+    void put(Map<String, int> map, String key, int? value) => value == null ? map.remove(key) : map[key] = value;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionLabel(
+          'Check-in',
+          trailing: InfoDot(
+            tooltip: 'What the check-in is for',
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Text('Recovery check-in'),
+                content: const Text(
+                  'Optional. Pump is how the muscle felt today. Recovered is how it felt coming into this workout '
+                  'from the last time you trained it. The Coach tab uses the answers: still sore counts as fatigue, '
+                  'a low pump with early recovery earns an added set sooner, and poor sleep or a poor day holds '
+                  'additions back. Turn the check-in off in Settings → Advanced.',
+                ),
+                actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+              ),
+            ),
+          ),
+        ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final m in muscles) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(m, style: t.titleSmall),
+                  ),
+                  choice('Pump', const ['Low', 'Good', 'Great'], answers?.pump[m], (c, v) => put(c.pump, m, v)),
+                  choice(
+                    'Recovered',
+                    const ['Still sore', 'In time', 'Days ago'],
+                    answers?.recovered[m],
+                    (c, v) => put(c.recovered, m, v),
+                  ),
+                ],
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text('Today', style: t.titleSmall),
+                ),
+                choice('Sleep', const ['Poor', 'Normal', 'Good'], answers?.sleep, (c, v) => c.sleep = v),
+                choice('Overall', const ['Run down', 'Normal', 'Strong'], answers?.overall, (c, v) => c.overall = v),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
