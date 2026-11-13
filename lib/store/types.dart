@@ -111,6 +111,9 @@ class CycleSummary {
   final Duration duration;
   final List<PersonalBest> bests;
   final List<CycleStrengthChange> strength;
+
+  /// Per muscle: average weekly sets, strength change and where to start next cycle.
+  final List<MuscleResponse> response;
   const CycleSummary({
     required this.unit,
     required this.start,
@@ -123,6 +126,7 @@ class CycleSummary {
     required this.duration,
     required this.bests,
     required this.strength,
+    this.response = const [],
   });
 }
 

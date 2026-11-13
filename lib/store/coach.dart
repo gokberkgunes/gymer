@@ -21,6 +21,9 @@ class CoachReport {
   final List<MuscleVerdict> declining;
   final List<MuscleVerdict> rising;
 
+  /// Each muscle's own range from earlier mesocycles, drawn under the bar once two of them have data.
+  final Map<String, PersonalRange> personal;
+
   const CoachReport({
     required this.cycle,
     required this.planned,
@@ -31,6 +34,7 @@ class CoachReport {
     this.deload = const [],
     required this.declining,
     required this.rising,
+    this.personal = const {},
   });
 }
 
@@ -114,7 +118,56 @@ extension AppStoreCoach on AppStore {
       deload: deload,
       declining: declining.take(2).toList(),
       rising: rising.take(2).toList(),
+      personal: personalRanges([
+        for (final c in cycles)
+          if (c.setupComplete && c != cycle) cycleResponses(c),
+      ]),
     );
+  }
+
+  /// How each muscle answered the build weeks of [cycle], in landmark order.
+  Map<String, MuscleResponse> cycleResponses(Mesocycle cycle) {
+    final status = cycleStatus(cycle, cycle.start);
+    final sessions = _cycleSessions(
+      cycle,
+    ).where((s) => (s.phase ?? cycleStatus(cycle, s.startedAt).phase) == 'Build').toList();
+    if (sessions.isEmpty) return const {};
+    final response = cycleResponse(
+      sessions,
+      CoachPeriods(dateOnly(cycle.start), math.max(1, cycle.microDays)),
+      status.buildMicro,
+      musclesOf,
+      byVolume: settings.coachCompare == 'volume',
+      includePartialSets: settings.includePartialSets,
+    );
+    final order = [...rpLandmarks.keys, ...response.keys.where((m) => !rpLandmarks.containsKey(m))];
+    return {for (final m in order) m: ?response[m]};
+  }
+
+  /// Starting volumes for [draft], the next cycle after [source]: one set fewer where a muscle ended [source]
+  /// falling, one more where it never left holding. Same limits as weekly suggestions; maintained muscles and
+  /// exercises already changed are left alone. Stored as adjustments of microcycle 0.
+  List<SetAdjustment> startingVolumes(Mesocycle source, Mesocycle draft) {
+    final byId = {for (final t in templates) t.id: t};
+    final plan = Mesocycle.fromJson(draft.toJson())..setAdjustments = [];
+    final weekly = plannedWeeklyVolume(plan, byId, musclesOf);
+    final taken = <(String, String)>{};
+    for (final r in cycleResponses(source).values) {
+      final delta = r.nextStart;
+      if (delta == 0 || plan.muscleGoals[r.muscle] == 'maintain') continue;
+      final landmark = rpLandmarks[r.muscle];
+      final sets = weekly[r.muscle]?.countedSets(includePartialSets: settings.includePartialSets) ?? 0;
+      final floor =
+          (settings.coachKeepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
+      final top = landmark?.mrvRange?.$2 ?? landmark?.mavRange?.$2;
+      if (delta < 0 ? sets - 1 < floor : top != null && sets + 1 > top) continue;
+      final target = adjustmentTarget(plan, byId, musclesOf, r.muscle, delta, null);
+      if (target == null || !taken.add((target.$1, target.$2.toLowerCase()))) continue;
+      plan.setAdjustments.add(
+        SetAdjustment(muscle: r.muscle, templateId: target.$1, exercise: target.$2, delta: delta, micro: 0),
+      );
+    }
+    return plan.setAdjustments;
   }
 
   /// Stores the change on the cycle: one per muscle per microcycle. Saved workouts stay as they are.

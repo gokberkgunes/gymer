@@ -367,7 +367,8 @@ class _AdvancedSettings extends StatelessWidget {
                   content: const Text(
                     'Primary muscles count as one set. With this on, secondary muscles also receive half a set. '
                     'Turn it off to count direct work only. This applies to the Coach tab and workout editor. '
-                    'Warm-ups and special-method groups remain separate; this does not refer to partial-range reps.',
+                    'Warm-ups never count, and special set methods are estimated in straight-set equivalents. This does not '
+                    'refer to partial-range reps.',
                   ),
                   actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
                 ),

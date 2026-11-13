@@ -371,16 +371,17 @@ String _names(Iterable<ExerciseTrend> exercises) {
 String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
 
 /// Where a set is added or removed for [muscle]. Added sets go to the workout where the muscle has the fewest
-/// direct sets (and room under [sessionSetCeiling]), on its best-progressing exercise that is not dropping
-/// off; removed sets come from the workout with the most, off the exercise that has moved least.
+/// direct sets (and room under [sessionSetCeiling]), on its best-progressing exercise outside [avoid] (see
+/// [droppingOff]); removed sets come from the workout with the most, off the exercise that has moved least.
 (String templateId, String exercise)? adjustmentTarget(
   Mesocycle cycle,
   Map<String, WorkoutTemplate> templates,
   (List<String>, List<String>) Function(String exercise) musclesOf,
   String muscle,
   int delta,
-  MuscleVerdict? verdict,
-) {
+  MuscleVerdict? verdict, {
+  Set<String> avoid = const {},
+}) {
   final options = <({String template, int sets, List<TemplateExercise> exercises})>[];
   for (final id in cycle.schedule.values.toSet()) {
     final base = templates[id];
@@ -402,7 +403,7 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
       for (final e in option.exercises)
         if (canonicalMethod(e.method) == 'Straight' &&
             isStraightType(e.sets.last.type) &&
-            (delta > 0 ? trend(e)?.dropOff != true : e.workSets > 1))
+            (delta > 0 ? !avoid.contains(e.name.toLowerCase()) : e.workSets > 1))
           e,
     ];
     if (candidates.isEmpty) continue;
@@ -412,6 +413,20 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
   }
   return null;
 }
+
+/// Exercises (lower-case names) whose reps regularly fall off across sets: the last set under 60 % of the
+/// first at the same load in the finished period, and in the one before when it was trained then. Their later
+/// sets are already low quality, so they never receive an added set.
+Set<String> droppingOff(MuscleVerdict verdict, MuscleVerdict? previous) => {
+  for (final e in verdict.exercises)
+    if (e.dropOff &&
+        (previous?.exercises
+                .where((x) => x.templateId == e.templateId && sameExercise(x.name, e.name))
+                .firstOrNull
+                ?.dropOff ??
+            true))
+      e.name.toLowerCase(),
+};
 
 /// The coach's rule for one finished build period, most important first, at most three:
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
@@ -467,8 +482,13 @@ List<SetSuggestion> coachSuggestions({
     final top = landmark?.mrvRange?.$2 ?? landmark?.mavRange?.$2;
     if (remove && sets - 1 < floor) continue;
     if (add && (missedWorkout || (top != null && sets + 1 > top))) continue;
-    final target = adjustmentTarget(cycle, templates, musclesOf, v.muscle, delta, v);
+    final avoid = add ? droppingOff(v, previous[v.muscle]) : const <String>{};
+    final target = adjustmentTarget(cycle, templates, musclesOf, v.muscle, delta, v, avoid: avoid);
     if (target == null) continue;
+    final passedOver = avoid.isEmpty
+        ? ''
+        : ' ${_names(v.exercises.where((e) => avoid.contains(e.name.toLowerCase())))} gets no added set: its reps '
+              'fall off sharply from set to set, so another set there would add little. A longer rest may help.';
     final signs =
         '${fatigue.isEmpty ? '' : ' Signs of fatigue: ${fatigue.join('; ')}.'}'
         '${recovery.runDown ? ' Sleep or overall state was poor that $period, which may be part of it.' : ''}';
@@ -478,9 +498,9 @@ List<SetSuggestion> coachSuggestions({
               : '${_names(v.exercises)} did not move from the $period before.$signs'
         : stalled
         ? '${_names(v.exercises)} have not moved for two $periodsWord, with no signs of fatigue.'
-              '${cycle.muscleGoals[v.muscle] == 'priority' ? ' Priority muscles are added to first.' : ''}'
+              '${cycle.muscleGoals[v.muscle] == 'priority' ? ' Priority muscles are added to first.' : ''}$passedOver'
         : '${_names(v.exercises)} did not move from the $period before; the pump was low and it had recovered '
-              'days earlier.';
+              'days earlier.$passedOver';
     (remove ? removals : additions).add((
       v.percent,
       SetSuggestion(muscle: v.muscle, delta: delta, reason: reason, templateId: target.$1, exercise: target.$2),
@@ -496,4 +516,85 @@ List<SetSuggestion> coachSuggestions({
       if (taken.add((s.templateId, s.exercise.toLowerCase()))) s,
   ];
   return [...applied, ...changes.take(math.max(0, 3 - applied.length))];
+}
+
+/// How one muscle answered one judged build week: the sets it completed and the verdict that week earned.
+typedef WeekResponse = ({int micro, double sets, Trend trend, double percent});
+
+/// A muscle's volume response over one mesocycle, for the cycle review and for personal landmarks.
+class MuscleResponse {
+  final String muscle;
+  final List<WeekResponse> weeks;
+  const MuscleResponse(this.muscle, this.weeks);
+
+  /// Average weekly sets completed in the judged weeks.
+  double get sets => weeks.fold(0.0, (sum, w) => sum + w.sets) / weeks.length;
+
+  /// The weekly changes compounded: where the muscle ended relative to its first compared week.
+  double get percent => (weeks.fold(1.0, (product, w) => product * (1 + w.percent / 100)) - 1) * 100;
+
+  /// Where to start next time: lower when the cycle ended falling, higher when two or more judged weeks never
+  /// progressed and never fell (it stayed under-stimulated), otherwise the same.
+  int get nextStart => weeks.last.trend == Trend.falling
+      ? -1
+      : weeks.length > 1 && weeks.every((w) => w.trend == Trend.holding)
+      ? 1
+      : 0;
+}
+
+/// Every muscle's response in the build weeks of one cycle. [sessions] are that cycle's build workouts and
+/// [buildWeeks] its number of build microcycles; the first one has nothing to be compared with.
+Map<String, MuscleResponse> cycleResponse(
+  List<Session> sessions,
+  CoachPeriods periods,
+  int buildWeeks,
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  bool byVolume = false,
+  bool includePartialSets = true,
+}) {
+  final weeks = <String, List<WeekResponse>>{};
+  for (var p = 1; p < buildWeeks; p++) {
+    final verdicts = muscleVerdicts(sessions, periods, p, musclesOf, byVolume: byVolume);
+    if (verdicts.isEmpty) continue;
+    final done = performedVolume(
+      sessions.where((s) => periods.indexOf(s.startedAt) == p),
+      musclesOf,
+      weeks: periods.days / 7,
+    );
+    for (final v in verdicts.values) {
+      weeks.putIfAbsent(v.muscle, () => []).add((
+        micro: p + 1,
+        sets: done[v.muscle]?.countedSets(includePartialSets: includePartialSets) ?? 0,
+        trend: v.trend,
+        percent: v.percent,
+      ));
+    }
+  }
+  return {for (final e in weeks.entries) e.key: MuscleResponse(e.key, e.value)};
+}
+
+/// A muscle's own working range, learned from finished mesocycles: the fewest weekly sets at which it
+/// progressed, and the fewest above that at which it fell (null while that has not happened).
+typedef PersonalRange = ({double low, double? high, int cycles});
+
+/// Needs the muscle in at least two cycles and one progressing week; RP's landmarks stay the reference until
+/// then, and beside it afterwards.
+Map<String, PersonalRange> personalRanges(Iterable<Map<String, MuscleResponse>> cycles) {
+  final byMuscle = <String, List<MuscleResponse>>{};
+  for (final cycle in cycles) {
+    for (final r in cycle.values) {
+      byMuscle.putIfAbsent(r.muscle, () => []).add(r);
+    }
+  }
+  final ranges = <String, PersonalRange>{};
+  for (final MapEntry(key: muscle, value: responses) in byMuscle.entries) {
+    if (responses.length < 2) continue;
+    final weeks = responses.expand((r) => r.weeks).where((w) => w.sets > 0).toList();
+    final progressed = weeks.where((w) => w.trend == Trend.progressing).map((w) => w.sets);
+    if (progressed.isEmpty) continue;
+    final low = progressed.reduce(math.min);
+    final fell = weeks.where((w) => w.trend == Trend.falling && w.sets > low).map((w) => w.sets);
+    ranges[muscle] = (low: low, high: fell.isEmpty ? null : fell.reduce(math.min), cycles: responses.length);
+  }
+  return ranges;
 }

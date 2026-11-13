@@ -112,6 +112,7 @@ extension AppStoreCycles on AppStore {
       duration: sessions.fold(Duration.zero, (total, s) => total + s.duration),
       bests: bests.values.toList(),
       strength: cycleStrengthChanges(cycle, sessions, settings.unit),
+      response: cycleResponses(cycle).values.toList(),
     );
   }
 

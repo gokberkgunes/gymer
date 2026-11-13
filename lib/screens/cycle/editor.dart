@@ -66,6 +66,7 @@ class _CycleEditorState extends State<CycleEditor> {
   late final Mesocycle _d = Mesocycle.fromJson(widget.cycle.toJson());
   late final _name = TextEditingController(text: _d.name);
   int _loadPercent = 100;
+  bool _coachVolumes = false;
 
   @override
   void dispose() {
@@ -262,10 +263,30 @@ class _CycleEditorState extends State<CycleEditor> {
                   );
               }),
             ),
+            if (store.startingVolumes(widget.cloneSource!, _d) case final changes when changes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: SwitchListTile(
+                  title: const Text('Coach starting volumes'),
+                  subtitle: Text(
+                    [for (final a in changes) '${a.muscle} ${a.delta > 0 ? '+' : '−'}${a.delta.abs()}'].join(' · '),
+                  ),
+                  value: _coachVolumes,
+                  onChanged: (v) => setState(() {
+                    _coachVolumes = v;
+                    _d.setAdjustments = v ? changes : [];
+                  }),
+                ),
+              ),
+            ],
             SectionLabel('Repeating ${_d.microDays}-day schedule'),
             _Schedule(
               cycle: _d,
               onChanged: () => setState(() {
+                // The schedule decides where a changed set can go.
+                if (_coachVolumes) {
+                  _d.setAdjustments = store.startingVolumes(widget.cloneSource!, _d);
+                }
                 // A workout assigned to a day after the draft was made needs its own starting loads.
                 _d
                   ..startingLoadUnit = store.settings.unit

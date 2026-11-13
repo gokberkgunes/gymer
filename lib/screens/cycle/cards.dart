@@ -457,6 +457,7 @@ void showLandmarkInfo(
   double? performed,
   MuscleVerdict? verdict,
   bool goalEditable = false,
+  PersonalRange? personal,
 }) {
   final l = rpLandmarks[muscle];
   final store = StoreScope.read(context);
@@ -547,6 +548,16 @@ void showLandmarkInfo(
               ],
               const SizedBox(height: 16),
             ],
+            if (personal != null) ...[
+              const Text('Your range', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(
+                'From ${personal.cycles} earlier mesocycles: it progressed from ${fmtSets(personal.low)} weekly sets'
+                '${personal.high == null ? ' and has not yet fallen at a higher volume.' : ', and first fell at ${fmtSets(personal.high!)}.'}'
+                ' The thin line under the bar shows it.',
+              ),
+              const SizedBox(height: 16),
+            ],
             const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text(
@@ -557,8 +568,10 @@ void showLandmarkInfo(
             Text(
               partialSets
                   ? 'These are general references, not personal targets. The weekly estimate counts indirect sets as half a '
-                        'set, so it may not be directly comparable to these ranges.'
-                  : 'These are general references, not personal targets. The weekly estimate counts direct conventional sets only.',
+                        'set, so it may not be directly comparable to these ranges. Special set methods are estimated in '
+                        'straight-set equivalents.'
+                  : 'These are general references, not personal targets. The weekly estimate counts direct sets only, '
+                        'with special set methods estimated in straight-set equivalents.',
             ),
             const SizedBox(height: 8),
             const Text('Reading the bar', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -635,6 +648,9 @@ class MuscleVolumeRow extends StatefulWidget {
   /// muscle; [goalEditable] lets the tap dialog change it.
   final String? goal;
   final bool goalEditable;
+
+  /// The muscle's own range from earlier mesocycles, drawn as a thin line under the track.
+  final PersonalRange? personal;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -646,6 +662,7 @@ class MuscleVolumeRow extends StatefulWidget {
     this.performed,
     this.goal,
     this.goalEditable = false,
+    this.personal,
   });
 
   @override
@@ -692,6 +709,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
           performed: widget.performed,
           verdict: widget.verdict,
           goalEditable: widget.goalEditable,
+          personal: widget.personal,
         ),
         onHighlightChanged: (pressed) {
           if (_pressed != pressed) setState(() => _pressed = pressed);
@@ -754,6 +772,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                       painter: _LandmarkBar(
                         sets: widget.sets,
                         performed: widget.performed,
+                        personal: widget.personal,
                         landmark: l,
                         colors: cs,
                         numberStyle: numberStyle,
@@ -780,6 +799,7 @@ class _LandmarkBar extends CustomPainter {
   static const trackHeight = 14.0;
   final double sets;
   final double? performed;
+  final PersonalRange? personal;
   final Landmark landmark;
   final ColorScheme colors;
   final TextStyle numberStyle;
@@ -788,6 +808,7 @@ class _LandmarkBar extends CustomPainter {
   const _LandmarkBar({
     required this.sets,
     this.performed,
+    this.personal,
     required this.landmark,
     required this.colors,
     required this.numberStyle,
@@ -801,7 +822,7 @@ class _LandmarkBar extends CustomPainter {
     // The scale ends exactly at the top of MRV, so its number sits at the bar's right end. Planned sets beyond it
     // stretch the scale a little past the mark; without an MRV, the track runs a quarter past MAV.
     final end = mrv?.$2 ?? mav.$2 * 1.25;
-    final most = math.max(sets, performed ?? 0);
+    final most = math.max(math.max(sets, performed ?? 0), personal?.low ?? 0);
     final top = most > end ? most * 1.04 : end;
     double x(double v) => (v / top).clamp(0.0, 1.0) * size.width;
     TextPainter text(String s, TextStyle style) => TextPainter(
@@ -835,6 +856,21 @@ class _LandmarkBar extends CustomPainter {
       lastRight = left + tp.width;
     }
 
+    // The muscle's own range: a thin line between the track and its numbers, open-ended until it has fallen.
+    if (personal case final own?) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(
+            x(own.low),
+            mid + 4,
+            own.high == null ? size.width : math.max(x(own.high!), x(own.low) + 2),
+            mid + 6,
+          ),
+          const Radius.circular(1),
+        ),
+        Paint()..color = colors.info,
+      );
+    }
     // Completed sets: a short solid mark inside the track, under the longer faint planned tick.
     if (performed case final done?) {
       canvas.drawRRect(
@@ -860,6 +896,7 @@ class _LandmarkBar extends CustomPainter {
   bool shouldRepaint(_LandmarkBar old) =>
       old.sets != sets ||
       old.performed != performed ||
+      old.personal != personal ||
       old.landmark != landmark ||
       old.colors != colors ||
       old.numberStyle != numberStyle ||

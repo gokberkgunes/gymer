@@ -16,7 +16,6 @@ class CoachScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final t = Theme.of(context).textTheme;
     final report = store.coachReport();
     final volume = report.volume;
     final setsLabel = report.planned ? 'Planned weekly sets' : 'Weekly sets, last 4 weeks';
@@ -34,7 +33,6 @@ class CoachScreen extends StatelessWidget {
         if (!suggested.contains(v.muscle)) v,
       ...report.rising,
     ];
-    final protocols = volume.values.any((v) => v.direct.hasProtocols || v.indirect.hasProtocols);
     return ListView(
       padding: pageInsets,
       children: [
@@ -81,6 +79,7 @@ class CoachScreen extends StatelessWidget {
                     muscle: m,
                     sets: sets(m),
                     goal: report.cycle?.muscleGoals[m],
+                    personal: report.personal[m],
                     goalEditable: report.cycle != null && report.cycle == store.activeCycle,
                     performed: report.performed == null
                         ? null
@@ -89,22 +88,6 @@ class CoachScreen extends StatelessWidget {
                     verdict: report.verdicts[m],
                     setsLabel: setsLabel,
                   ),
-                if (protocols) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-                    child: Text('Special set methods are not included in these estimates.', style: t.bodySmall),
-                  ),
-                  for (final m in names)
-                    for (final (label, metrics) in [('Direct', volume[m]?.direct), ('Indirect', volume[m]?.indirect)])
-                      if (metrics != null && metrics.hasProtocols)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            '$m · $label: ${(metrics.scaled(1)..conventional = 0).describe()} / week',
-                            style: t.bodySmall,
-                          ),
-                        ),
-                ],
               ],
             ),
           ),
@@ -306,6 +289,26 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'progressing, flat holding, down falling. Only external loads with the same logging context are compared; '
         'deloads and warm-ups never are. A muscle needs two comparable workouts before it gets an arrow. Tap a '
         'muscle for the exercises.',
+  ),
+  (
+    'Your own range',
+    'Once a muscle has been judged in two finished mesocycles, a thin line under its bar runs from the fewest '
+        'weekly sets at which it progressed to the fewest at which it then fell. It stays open to the right until '
+        'that has happened. The landmark zones above it are general references; the line is yours.',
+  ),
+  (
+    'Rep drop-off',
+    'When the last set of an exercise gets under 60 % of the first set\'s reps at the same load, two weeks '
+        'running, its later sets are low quality. The coach never adds a set there and says so in the reason; a '
+        'longer rest usually helps more.',
+  ),
+  (
+    'Special set methods',
+    'Drop sets, myo-reps, rest-pause and clusters are counted in straight-set equivalents so every muscle sits '
+        'on the same scale. The activation set counts as one set and each myo-set, rest-pause segment or drop '
+        'after it as half a set, up to three sets per group. A cluster group counts as one set. In trials, one '
+        'drop-set group of an opening set and three or four drops grew muscle like three straight sets, and '
+        'cluster sets matched straight sets one for one. These are estimates from small studies.',
   ),
   (
     'Planned and done',

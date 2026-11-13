@@ -1,5 +1,17 @@
 /// Port of volume_accounting.py: conventional sets and protocol groups are
 /// separate units; primary tags are direct work, secondary tags indirect.
+///
+/// Special methods are also given an estimate in straight-set equivalents ([VolumeMetrics.equivalent]) so they
+/// can sit on the same weekly scale:
+/// - Activation set: 1. It is an ordinary set taken close to failure.
+/// - Each myo-set, rest-pause segment or drop after it: [continuationSets] (0.5). Trials that matched one
+///   drop-set group of an opening set plus three or four drops against three straight sets found similar
+///   growth, and the usual rule for myo-reps (an activation set plus four or five mini-sets for about three
+///   straight sets) gives the same half set per segment.
+/// - One whole group counts at most [groupSetCap] (3): nothing shows that piling on more segments keeps adding.
+/// - A cluster group (all its fragments): 1, scaled by the fragments completed. With sets, reps and effort
+///   matched, cluster sets grew muscle like straight sets, set for set.
+/// These are estimates from small studies, not measurements.
 library;
 
 import 'methods.dart';
@@ -14,6 +26,12 @@ class VolumeMetrics {
   double clusterFragments = 0;
   double unclassified = 0;
 
+  /// Special-method work in straight-set equivalents; see the library comment.
+  double equivalent = 0;
+
+  /// Everything on one scale: straight sets plus the estimate for special methods.
+  double get sets => conventional + equivalent;
+
   VolumeMetrics scaled(double factor) => VolumeMetrics()
     ..conventional = conventional * factor
     ..protocolGroups = protocolGroups * factor
@@ -22,7 +40,8 @@ class VolumeMetrics {
     ..activations = activations * factor
     ..continuations = continuations * factor
     ..clusterFragments = clusterFragments * factor
-    ..unclassified = unclassified * factor;
+    ..unclassified = unclassified * factor
+    ..equivalent = equivalent * factor;
 
   bool get hasProtocols => protocolGroups + activations + continuations + clusterFragments + unclassified > 0;
 
@@ -42,6 +61,10 @@ class VolumeMetrics {
     return parts.isEmpty ? '0 conventional sets' : parts.join(' · ');
   }
 }
+
+/// Straight-set equivalents of one continuation segment, and the most one protocol group can count.
+const continuationSets = 0.5;
+const groupSetCap = 3.0;
 
 class VolumeRow {
   final String scope;
@@ -124,6 +147,17 @@ VolumeReport summarizeVolume(List<VolumeRow> rows) {
     final complete = structured && performed.length == group.length;
     add((m) => m.protocolGroups++, performed);
     add((m) => complete ? m.completeGroups++ : m.partialGroups++, performed);
+    final done = [
+      for (final (r, role) in group)
+        if (r.active) role,
+    ];
+    final worth = roles.every((r) => r == 'cluster_fragment')
+        ? performed.length / group.length
+        : (done.where((r) => r == 'anchor').length + continuationSets * done.where((r) => r != 'anchor').length).clamp(
+            0.0,
+            groupSetCap,
+          );
+    add((m) => m.equivalent += worth, performed);
   }
   return report;
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/coach.dart';
 import '../logic/numbers.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -182,6 +183,66 @@ class CycleSummaryContent extends StatelessWidget {
                                     : ''}${_estimate(change.change.abs())} ${summary.unit}',
                           style: t.titleMedium?.copyWith(
                             color: change.change > 0.05 ? cs.primary : cs.onSurfaceVariant,
+                            fontFeatures: tabular,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+        if (summary.response.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 24, 4, 12),
+            child: LabelWithInfo(
+              Text('VOLUME RESPONSE', style: t.labelSmall),
+              InfoDot(
+                tooltip: 'Volume response',
+                onTap: () => info(
+                  'Volume response',
+                  'For each muscle: the average weekly sets completed in the build ${cycle.periodNoun(plural: true)} the '
+                      'coach could compare, and how far the muscle moved over them (weekly changes compounded). '
+                      '"Start lower" means the cycle ended with the muscle falling; "start higher" means it held '
+                      'every ${cycle.periodNoun()} without progressing or falling. Start next cycle can apply these '
+                      'as one set fewer or more.',
+                ),
+              ),
+            ),
+          ),
+          Card(
+            child: Column(
+              children: [
+                for (final (i, r) in summary.response.indexed) ...[
+                  if (i > 0) const Divider(indent: 16, endIndent: 16),
+                  Padding(
+                    padding: EdgeInsets.all(context.style.sp(16)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(r.muscle, style: t.bodyLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 4),
+                              Text(
+                                [
+                                  '${fmtSets(r.sets)} sets a week',
+                                  if (r.nextStart < 0) 'start lower',
+                                  if (r.nextStart > 0) 'start higher',
+                                ].join(' · '),
+                                style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          fmtTrend(r.percent),
+                          style: t.titleMedium?.copyWith(
+                            color: trendColor(cs, trendOf(r.percent)),
                             fontFeatures: tabular,
                           ),
                         ),

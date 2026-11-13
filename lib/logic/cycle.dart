@@ -377,9 +377,8 @@ WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t) {
   );
 }
 
-/// Planned work per seven days for the repeating schedule. Weekly sets count
-/// direct (primary) conventional sets as 1 and indirect (secondary) as 0.5;
-/// protocol groups stay separate.
+/// Planned work per seven days for the repeating schedule. Weekly sets count direct (primary) sets as 1 and
+/// indirect (secondary) as 0.5, with special methods in straight-set equivalents ([VolumeMetrics.sets]).
 class WeeklyVolume {
   final VolumeMetrics direct;
   final VolumeMetrics indirect;
@@ -388,8 +387,7 @@ class WeeklyVolume {
   final double directDaysPerWeek;
   WeeklyVolume(this.direct, this.indirect, {this.directDaysPerWeek = 0});
   double get sets => countedSets();
-  double countedSets({bool includePartialSets = true}) =>
-      direct.conventional + (includePartialSets ? 0.5 * indirect.conventional : 0);
+  double countedSets({bool includePartialSets = true}) => direct.sets + (includePartialSets ? 0.5 * indirect.sets : 0);
 }
 
 Map<String, WeeklyVolume> plannedWeeklyVolume(
