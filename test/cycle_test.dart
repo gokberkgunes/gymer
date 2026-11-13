@@ -1,5 +1,6 @@
 // Expected statuses come from the Flet app's storage.mesocycle_status().
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymer/logic/coach.dart';
 import 'package:gymer/logic/cycle.dart';
 import 'package:gymer/models.dart';
 import 'package:gymer/store.dart';
@@ -61,7 +62,7 @@ void main() {
     expect(cycleStatus(c, DateTime(2026, 10, 26, 0, 30)).currentMicro, 2);
   });
 
-  test('weekly sets count direct as 1, indirect as 0.5; protocols stay separate', () {
+  test('weekly sets count direct as 1, indirect as 0.5; protocols stay separate; the coach adjusts them', () {
     final c = Mesocycle(id: 'c', start: DateTime(2026, 1, 5), microDays: 3, schedule: {1: 'A'});
     final a = WorkoutTemplate(
       id: 'A',
@@ -128,5 +129,88 @@ void main() {
     expect(repeated.containsKey('Side Delts'), isFalse); // Empty exercises do not add a day.
     final week = Mesocycle(id: 'week', start: c.start, schedule: {1: 'B', 4: 'B'});
     expect(plannedWeeklyVolume(week, templates, muscles)['Quads']!.directDaysPerWeek, 2);
+
+    // Coach: three build weeks logged, the fourth running. Bench held twice without fatigue (+1 set), squat
+    // fell (−1 set), curls fell too but are already under maintenance volume, rows progressed.
+    final start = addDays(dateOnly(DateTime.now()), -21);
+    final plan = WorkoutTemplate(
+      id: 'P',
+      name: 'Push',
+      exercises: [
+        for (final n in ['Bench', 'Squat', 'Curl', 'Row']) TemplateExercise(name: n),
+      ],
+    );
+    Session logged(int weekIndex, Map<String, (int, int)> repsRir) => Session(
+      id: 'w$weekIndex',
+      templateId: 'P',
+      name: 'Push',
+      unit: 'kg',
+      cycleId: 'coach',
+      phase: 'Build',
+      startedAt: addDays(start, weekIndex * 7).add(const Duration(hours: 10)),
+      exercises: [
+        for (final MapEntry(key: name, value: (reps, rir)) in repsRir.entries)
+          SessionExercise(
+            name: name,
+            sets: [for (var i = 0; i < 3; i++) SetEntry(weight: 100, reps: reps, rir: rir, done: true)],
+          ),
+      ],
+    );
+    final coach = AppStore()
+      ..templates = [plan]
+      ..exercises = const [
+        Exercise(name: 'Bench', primary: ['Chest']),
+        Exercise(name: 'Squat', primary: ['Quads']),
+        Exercise(name: 'Curl', primary: ['Biceps']),
+        Exercise(name: 'Row', primary: ['Back']),
+      ]
+      ..cycles = [
+        Mesocycle(id: 'coach', start: start, length: 6, schedule: {1: 'P'}),
+      ]
+      ..history = [
+        logged(2, {'Bench': (10, 2), 'Squat': (8, 2), 'Curl': (8, 2), 'Row': (12, 2)}),
+        logged(1, {'Bench': (10, 2), 'Squat': (10, 2), 'Curl': (10, 2), 'Row': (11, 2)}),
+        logged(0, {'Bench': (10, 2), 'Squat': (10, 2), 'Curl': (10, 2), 'Row': (10, 2)}),
+      ];
+    addTearDown(coach.dispose);
+    var report = coach.coachReport();
+    expect(
+      {for (final v in report.verdicts.values) v.muscle: v.trend},
+      {'Chest': Trend.holding, 'Quads': Trend.falling, 'Biceps': Trend.falling, 'Back': Trend.progressing},
+    );
+    expect(report.verdicts['Quads']!.fatigue, ['the first set was weaker than the time before']);
+    expect(
+      [for (final s in report.suggestions) (s.muscle, s.delta, s.exercise, s.templateId)],
+      [('Quads', -1, 'Squat', 'P'), ('Chest', 1, 'Bench', 'P')],
+    );
+    for (final s in report.suggestions) {
+      coach.applySuggestion(s);
+      coach.applySuggestion(s); // one change per muscle per week
+    }
+    report = coach.coachReport();
+    expect(report.suggestions.map((s) => s.applied?.delta), [-1, 1]);
+    expect((report.volume['Chest']!.sets, report.volume['Quads']!.sets), (4, 2));
+    coach.startSession(plan);
+    expect([for (final e in coach.active!.exercises) e.sets.length], [4, 2, 3, 3]);
+    expect(coach.templateChanged(), isFalse); // the coach's sets are the plan, not an edit to ask about
+    expect(plan.exercises.map((e) => e.sets.length), everyElement(3)); // the saved workout is never rewritten
+    coach.discardSession();
+    final kept = Mesocycle.fromJson(coach.cycles.single.toJson());
+    expect(kept.setAdjustments.map((a) => (a.muscle, a.exercise, a.delta, a.micro)), [
+      ('Quads', 'Squat', -1, 4),
+      ('Chest', 'Bench', 1, 4),
+    ]);
+    expect(coach.cloneCycle(coach.cycles.single).setAdjustments, isEmpty); // the next cycle starts from the base
+    coach.undoSuggestion(report.suggestions.last);
+    expect(coach.coachReport().volume['Chest']!.sets, 3);
+    // A missed workout in the finished week blocks additions, never removals.
+    coach.undoSuggestion(report.suggestions.first);
+    coach.cycles.single.schedule[3] = 'P';
+    expect(coach.coachReport().suggestions.map((s) => s.muscle), ['Quads']);
+    // Outside a cycle: completed sets of the last seven days, arrows by calendar week, falling muscles listed.
+    coach.cycles = [];
+    final free = coach.coachReport();
+    expect((free.planned, free.suggestions.length), (false, 0));
+    expect(free.declining.map((v) => v.muscle), ['Quads', 'Biceps']);
   });
 }

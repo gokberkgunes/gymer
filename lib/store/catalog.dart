@@ -150,6 +150,9 @@ extension AppStoreCatalog on AppStore {
       }
       // Everything that stores an exercise by name must follow a rename: cycle starting loads match by name too.
       for (final c in cycles) {
+        for (final a in c.setAdjustments) {
+          if (sameExercise(a.exercise, from)) a.exercise = updated.name;
+        }
         for (final plan in c.startingLoads.values) {
           for (final e in plan) {
             if (sameExercise(e.name, from)) e.name = updated.name;
@@ -301,6 +304,7 @@ extension AppStoreCatalog on AppStore {
   /// Today's plan, including automatic deload volume, without starting or saving a workout.
   TimingBreakdown plannedTiming(WorkoutTemplate t, {DateTime? at}) {
     final ctx = cycleContext(at);
+    if (ctx != null) t = plannedTemplate(ctx.$1, t);
     if (ctx == null || ctx.$2.phase != 'Deload') return templateTiming(t);
     final preview = Session(
       id: '',

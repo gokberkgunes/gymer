@@ -99,7 +99,9 @@ extension AppStoreSessionStart on AppStore {
       rirLocked: cycle?.rirLock ?? false,
       restLocked: cycle?.restLock ?? false,
     );
-    for (final te in t?.exercises ?? <TemplateExercise>[]) {
+    // Coaching set changes live on the cycle; the saved workout stays the base plan.
+    final plan = t == null || cycle == null ? t : plannedTemplate(cycle, t);
+    for (final te in plan?.exercises ?? <TemplateExercise>[]) {
       session.exercises.add(
         status?.phase == 'Deload' ? _deloadExercise(te, cycle!, session) : _buildExercise(te, session, cycle),
       );
@@ -107,7 +109,7 @@ extension AppStoreSessionStart on AppStore {
     active = session;
     reconcileCircuits(session.circuits, session.exercises.map((e) => e.name));
     if (t != null && session.exercises.any((e) => e.sets.isNotEmpty)) {
-      session.estimatedSeconds = sessionTiming(session, plan: t).total;
+      session.estimatedSeconds = sessionTiming(session, plan: plan).total;
     }
     rest = null;
     _syncAlerts();
@@ -279,7 +281,7 @@ extension AppStoreSessionStart on AppStore {
     final starting = _cycleStartingExercise(te.name, method, session);
     if (starting != null) {
       for (final (i, set) in e.sets.indexed) {
-        set.hintWeight = starting.sets[i].weight;
+        if (i < starting.sets.length) set.hintWeight = starting.sets[i].weight;
       }
     }
     _applyGuidance(e, session, cycle);

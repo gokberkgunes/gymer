@@ -25,9 +25,8 @@ class RepMaxScreen extends StatefulWidget {
   final double? initialWeight;
   final int? initialRm;
   final String? note;
-  final bool asTab;
 
-  const RepMaxScreen({super.key, this.exercise, this.initialWeight, this.initialRm, this.note, this.asTab = false});
+  const RepMaxScreen({super.key, this.exercise, this.initialWeight, this.initialRm, this.note});
 
   @override
   State<RepMaxScreen> createState() => _RepMaxScreenState();
@@ -103,11 +102,10 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
 
     final info = InfoDot(tooltip: 'How to use this calculator', onTap: () => _info(context));
     final body = ListView(
-      padding: widget.asTab ? pageInsets : subPageInsets,
+      padding: subPageInsets,
       children: [
-        if (widget.asTab) PageHeader('Rep Max', info: info),
         if (widget.note != null) Text(widget.note!, style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-        if (!widget.asTab) const SizedBox(height: 12),
+        const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -265,20 +263,18 @@ class _RepMaxScreenState extends State<RepMaxScreen> {
         ]),
       ],
     );
-    return widget.asTab
-        ? body
-        : Scaffold(
-            appBar: AppBar(
-              title: LabelWithInfo(
-                Text(
-                  widget.exercise == null ? 'Rep Max Calculator' : '${widget.exercise} Rep Max',
-                  overflow: TextOverflow.ellipsis,
-                ),
-                info,
-              ),
-            ),
-            body: body,
-          );
+    return Scaffold(
+      appBar: AppBar(
+        title: LabelWithInfo(
+          Text(
+            widget.exercise == null ? 'Rep Max Calculator' : '${widget.exercise} Rep Max',
+            overflow: TextOverflow.ellipsis,
+          ),
+          info,
+        ),
+      ),
+      body: body,
+    );
   }
 
   void _info(BuildContext context) {

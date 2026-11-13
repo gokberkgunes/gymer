@@ -447,58 +447,15 @@ Future<String?> pickTemplate(
   );
 }
 
-class _Volume extends StatelessWidget {
-  final Mesocycle cycle;
-  const _Volume({required this.cycle});
-
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final t = Theme.of(context).textTheme;
-    final volume = plannedWeeklyVolume(cycle, {for (final tpl in store.templates) tpl.id: tpl}, store.musclesOf);
-    final names = [
-      ...rpLandmarks.keys,
-      for (final m in volume.keys)
-        if (!rpLandmarks.containsKey(m)) m,
-    ];
-    final protocols = volume.values.any((v) => v.direct.hasProtocols || v.indirect.hasProtocols);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final m in names)
-              MuscleVolumeRow(
-                muscle: m,
-                sets: volume[m]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0,
-                frequency: volume[m]?.directDaysPerWeek ?? 0,
-              ),
-            if (protocols) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-                child: Text('Special set methods are not included in these estimates.', style: t.bodySmall),
-              ),
-              for (final m in names)
-                for (final (label, metrics) in [('Direct', volume[m]?.direct), ('Indirect', volume[m]?.indirect)])
-                  if (metrics != null && metrics.hasProtocols)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        '$m · $label: ${(metrics.scaled(1)..conventional = 0).describe()} / week',
-                        style: t.bodySmall,
-                      ),
-                    ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The RP landmarks of [muscle], its optional planned [sets], and how to read the weekly-sets bar.
-void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
+/// The RP landmarks of [muscle], its optional [sets] (planned unless [setsLabel] says otherwise), the coach's
+/// [verdict] with the exercises behind it, and how to read the weekly-sets bar.
+void showLandmarkInfo(
+  BuildContext context,
+  String muscle, {
+  double? sets,
+  String setsLabel = 'Planned weekly sets',
+  MuscleVerdict? verdict,
+}) {
   final l = rpLandmarks[muscle];
   final partialSets = StoreScope.read(context).settings.includePartialSets;
   showDialog<void>(
@@ -513,7 +470,7 @@ void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
             if (sets != null) ...[
               Row(
                 children: [
-                  const Expanded(child: Text('Planned weekly sets')),
+                  Expanded(child: Text(setsLabel)),
                   const SizedBox(width: 12),
                   Text(
                     fmtSets(sets),
@@ -524,6 +481,27 @@ void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+            ],
+            if (verdict != null) ...[
+              Text(switch (verdict.trend) {
+                Trend.progressing => 'Progressing',
+                Trend.holding => 'Holding',
+                Trend.falling => 'Falling',
+              }, style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              for (final e in verdict.exercises)
+                Row(
+                  children: [
+                    Expanded(child: Text(e.name)),
+                    const SizedBox(width: 12),
+                    Text(fmtTrend(e.percent), style: TextStyle(color: trendColor(Theme.of(c).colorScheme, e.trend))),
+                  ],
+                ),
+              if (verdict.fatigue.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Signs of fatigue: ${verdict.fatigue.join('; ')}.', style: Theme.of(c).textTheme.bodySmall),
+              ],
               const SizedBox(height: 16),
             ],
             const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -544,8 +522,7 @@ void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
             const SizedBox(height: 4),
             const Text(
               'The light part runs from MEV to MAV, the solid part is the MAV range, and the orange end is the MRV '
-              'range. The numbers beneath are where these zones begin and end; the small mark is your planned '
-              'weekly sets.',
+              'range. The numbers beneath are where these zones begin and end; the small mark is your weekly sets.',
             ),
             const SizedBox(height: 12),
             if (l == null)
@@ -573,7 +550,16 @@ void showLandmarkInfo(BuildContext context, String muscle, {double? sets}) {
   );
 }
 
-/// Weekly sets as written on the Cycle tab: up to two decimals, no trailing zeros (7.5, 12).
+/// Estimated-1RM change as written by the coach: +2.1 %, −0.8 %.
+String fmtTrend(double percent) => '${percent < 0 ? '−' : '+'}${percent.abs().toStringAsFixed(1)} %';
+
+Color trendColor(ColorScheme cs, Trend trend) => switch (trend) {
+  Trend.progressing => cs.success,
+  Trend.holding => cs.onSurfaceVariant,
+  Trend.falling => cs.error,
+};
+
+/// Weekly sets as written on the Coach tab: up to two decimals, no trailing zeros (7.5, 12).
 String fmtSets(double v) => v.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
 
 /// Weekly sets are muted below MEV and warning-coloured from MRV up; otherwise plain.
@@ -589,13 +575,24 @@ Color weeklySetsColor(ColorScheme cs, String muscle, double sets) {
 
 /// A full-width landmark bar with a small muscle label at the left and weekly frequency at the right. Tapping
 /// reveals the exact weekly sets. [delta], when given, is the change from the saved plan (the workout editor's
-/// weekly-sets sheet). [frequency] adds direct training days per week on the Cycle tab.
+/// weekly-sets sheet). [frequency] adds direct training days per week and [verdict] the coach's arrow, both
+/// on the Coach tab, where [setsLabel] names sets that are not the plan.
 class MuscleVolumeRow extends StatefulWidget {
   final String muscle;
   final double sets;
   final double? delta;
   final double? frequency;
-  const MuscleVolumeRow({super.key, required this.muscle, required this.sets, this.delta, this.frequency});
+  final MuscleVerdict? verdict;
+  final String setsLabel;
+  const MuscleVolumeRow({
+    super.key,
+    required this.muscle,
+    required this.sets,
+    this.delta,
+    this.frequency,
+    this.verdict,
+    this.setsLabel = 'Planned weekly sets',
+  });
 
   @override
   State<MuscleVolumeRow> createState() => _MuscleVolumeRowState();
@@ -629,9 +626,15 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
       textDirection: TextDirection.ltr,
     )..layout();
     return Semantics(
-      label: '${widget.muscle}, ${fmtSets(widget.sets)} planned weekly sets',
+      label: '${widget.muscle}, ${fmtSets(widget.sets)} ${widget.setsLabel.toLowerCase()}',
       child: InkWell(
-        onTap: () => showLandmarkInfo(context, widget.muscle, sets: widget.sets),
+        onTap: () => showLandmarkInfo(
+          context,
+          widget.muscle,
+          sets: widget.sets,
+          setsLabel: widget.setsLabel,
+          verdict: widget.verdict,
+        ),
         onHighlightChanged: (pressed) {
           if (_pressed != pressed) setState(() => _pressed = pressed);
         },
@@ -645,9 +648,23 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
               children: [
                 Row(
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Text(widget.muscle, maxLines: 1, overflow: TextOverflow.ellipsis, style: labelStyle),
                     ),
+                    if (widget.verdict case final verdict?)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4),
+                        child: Icon(
+                          switch (verdict.trend) {
+                            Trend.progressing => Icons.trending_up_rounded,
+                            Trend.holding => Icons.trending_flat_rounded,
+                            Trend.falling => Icons.trending_down_rounded,
+                          },
+                          size: 12,
+                          color: trendColor(cs, verdict.trend),
+                        ),
+                      ),
+                    const Spacer(),
                     if (change != null && change.abs() > 1e-9)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),

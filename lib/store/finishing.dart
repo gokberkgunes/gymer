@@ -30,8 +30,11 @@ extension AppStoreFinishing on AppStore {
   /// The program structure differs from the saved workout.
   bool templateChanged() {
     final s = active;
-    final t = template(s?.templateId);
-    if (s == null || t == null || s.phase == 'Deload') return false;
+    final saved = template(s?.templateId);
+    if (s == null || saved == null || s.phase == 'Deload') return false;
+    // Sets the coach added or removed for this cycle are the plan, not a change to ask about.
+    final cycle = cycles.where((c) => c.id == s.cycleId).firstOrNull;
+    final t = cycle == null ? saved : plannedTemplate(cycle, saved);
     String sig(Iterable<(String, String, int, String, bool)> rows) =>
         rows.map((r) => '${r.$1.toLowerCase()}|${r.$2}|${r.$3}|${canonicalSetType(r.$4)}|${r.$5}').join(';');
     final a = [
@@ -53,7 +56,13 @@ extension AppStoreFinishing on AppStore {
     if (s == null || s.doneAll == 0) return null;
     final t = template(s.templateId);
     if (t != null && s.phase != 'Deload') {
-      if (saveStructure) _saveStructure(s, t);
+      if (saveStructure) {
+        _saveStructure(s, t);
+        // The saved workout now holds these sets itself; keep the records so the week's change is not repeated.
+        for (final a in cycles.where((c) => c.id == s.cycleId).expand((c) => c.setAdjustments)) {
+          if (a.templateId == t.id) a.delta = 0;
+        }
+      }
       _updateTemplateDefaults(s, t);
     }
     if (s.clockRunning) {

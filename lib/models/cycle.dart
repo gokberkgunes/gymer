@@ -24,6 +24,46 @@ class DayEvent {
   );
 }
 
+/// A coaching change to one exercise's working sets, kept on the cycle so the saved workout is not rewritten.
+/// [micro] is the microcycle (1-based) it was applied in: one change per muscle per microcycle.
+class SetAdjustment {
+  String muscle;
+  String templateId;
+  String exercise;
+  int delta;
+  int micro;
+
+  SetAdjustment({
+    required this.muscle,
+    required this.templateId,
+    required this.exercise,
+    required this.delta,
+    required this.micro,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'muscle': muscle,
+    'template': templateId,
+    'exercise': exercise,
+    'delta': delta,
+    'micro': micro,
+  };
+
+  static SetAdjustment? tryJson(Object? j) {
+    if (j is! Map) return null;
+    final muscle = j['muscle'], template = j['template'], exercise = j['exercise'];
+    final delta = _int(j['delta']), micro = _int(j['micro']);
+    if (muscle is! String || template is! String || exercise is! String || delta == null || micro == null) return null;
+    return SetAdjustment(
+      muscle: muscle,
+      templateId: template,
+      exercise: exercise,
+      delta: delta.clamp(-20, 20),
+      micro: micro,
+    );
+  }
+}
+
 class Mesocycle {
   final String id;
   String name;
@@ -46,6 +86,7 @@ class Mesocycle {
   DateTime? endedAt;
   String startingLoadUnit;
   Map<String, List<SessionExercise>> startingLoads;
+  List<SetAdjustment> setAdjustments;
   Map<int, String> schedule;
   Map<String, DayEvent> events;
 
@@ -71,9 +112,11 @@ class Mesocycle {
     this.endedAt,
     this.startingLoadUnit = 'kg',
     Map<String, List<SessionExercise>>? startingLoads,
+    List<SetAdjustment>? setAdjustments,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
   }) : startingLoads = startingLoads ?? {},
+       setAdjustments = setAdjustments ?? [],
        weekRir = weekRir ?? {},
        schedule = schedule ?? {},
        events = events ?? {};
@@ -107,6 +150,7 @@ class Mesocycle {
       'startingLoadUnit': startingLoadUnit,
       'startingLoads': {for (final e in startingLoads.entries) e.key: e.value.map((x) => x.toJson()).toList()},
     },
+    if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
   };
@@ -139,6 +183,7 @@ class Mesocycle {
       for (final e in (j['startingLoads'] as Map? ?? {}).entries)
         e.key as String: [for (final x in e.value as List) SessionExercise.fromJson(x as Map<String, dynamic>)],
     },
+    setAdjustments: [for (final x in j['setAdjustments'] as List? ?? []) ?SetAdjustment.tryJson(x)],
     schedule: {for (final e in (j['schedule'] as Map? ?? {}).entries) int.parse('${e.key}'): e.value as String},
     events: {
       for (final e in (j['events'] as Map? ?? {}).entries)

@@ -4,6 +4,7 @@ library;
 import 'dart:math' as math;
 
 import '../models.dart';
+import 'methods.dart';
 import 'volume.dart';
 
 class CycleStatus {
@@ -339,6 +340,43 @@ final volumeLandmarks = <String, (String, String)>{
   for (final e in rpLandmarks.entries) e.key: (e.value.mev, e.value.mav),
 };
 
+/// Net coaching change to one exercise's working sets in one workout of this cycle.
+int setAdjustmentFor(Mesocycle c, String templateId, String exercise) => c.setAdjustments
+    .where((a) => a.templateId == templateId && sameExercise(a.exercise, exercise))
+    .fold(0, (n, a) => n + a.delta);
+
+/// The saved workout with this cycle's set adjustments applied: added sets copy the last working set, removed
+/// ones come off the end, and one working set always remains. The saved workout itself is never changed.
+WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t) {
+  if (!c.setAdjustments.any((a) => a.templateId == t.id && a.delta != 0)) return t;
+  final used = <String>{};
+  return WorkoutTemplate(
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    setSeconds: t.setSeconds,
+    setOverhead: t.setOverhead,
+    transition: t.transition,
+    sessionOverhead: t.sessionOverhead,
+    circuits: t.circuits,
+    exercises: [
+      for (final e in t.exercises)
+        () {
+          final delta = used.add(e.name.toLowerCase()) ? setAdjustmentFor(c, t.id, e.name) : 0;
+          if (delta == 0 || e.workSets == 0) return e;
+          final sets = [for (final s in e.sets) s.copy()];
+          for (var i = 0; i < delta; i++) {
+            sets.add(sets.last.copy()..groupStart = false);
+          }
+          for (var i = 0; i > delta && sets.where((s) => !isWarmup(s.type)).length > 1; i--) {
+            sets.removeLast();
+          }
+          return TemplateExercise(name: e.name, method: e.method, sets: sets);
+        }(),
+    ],
+  );
+}
+
 /// Planned work per seven days for the repeating schedule. Weekly sets count
 /// direct (primary) conventional sets as 1 and indirect (secondary) as 0.5;
 /// protocol groups stay separate.
@@ -362,8 +400,9 @@ Map<String, WeeklyVolume> plannedWeeklyVolume(
   final rows = <VolumeRow>[];
   final directDays = <String, int>{};
   for (final MapEntry(key: day, value: id) in c.schedule.entries) {
-    final t = templates[id];
-    if (t == null) continue;
+    final saved = templates[id];
+    if (saved == null) continue;
+    final t = plannedTemplate(c, saved);
     final trained = <String>{};
     for (final (i, e) in t.exercises.indexed) {
       final (primary, secondary) = musclesOf(e.name);

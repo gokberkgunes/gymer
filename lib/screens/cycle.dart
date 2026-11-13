@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../logic/coach.dart';
 import '../logic/cycle.dart';
 import '../logic/numbers.dart';
 import '../models.dart';
@@ -106,8 +107,6 @@ class CycleScreen extends StatelessWidget {
           _Schedule(cycle: cycle),
           const SectionLabel('Training'),
           CycleHeatmap(cycle: cycle),
-          const SectionLabel('Weekly sets'),
-          _Volume(cycle: cycle),
         ],
         if (past.isNotEmpty) ...[
           const SectionLabel('Past cycles'),
@@ -155,6 +154,9 @@ class CycleScreen extends StatelessWidget {
     if (ok == true) store.extendCycle(c, n);
   }
 }
+
+void showInfoSections(BuildContext context, String title, List<(String, String)> sections) =>
+    _infoDialog(context, title, sections);
 
 void _infoDialog(BuildContext context, String title, List<(String, String)> sections) {
   showDialog<void>(

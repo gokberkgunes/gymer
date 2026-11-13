@@ -5,10 +5,10 @@ import 'package:flutter/services.dart';
 
 import '../widgets/common.dart';
 import '../widgets/rest_timer.dart';
+import 'coach.dart';
 import 'cycle.dart';
 import 'data_io.dart';
 import 'history.dart';
-import 'rep_max.dart';
 import 'session.dart';
 import 'settings.dart';
 import 'train.dart';
@@ -210,7 +210,7 @@ class _HomeShellState extends State<HomeShell> {
                       TrainScreen(onOpenCycle: () => _select(2)),
                       const HistoryScreen(),
                       const CycleScreen(),
-                      const RepMaxScreen(asTab: true),
+                      const CoachScreen(),
                       const SettingsScreen(),
                     ].indexed)
                       // Each tab retains its pages and drafts without animating while hidden.
@@ -245,7 +245,11 @@ class _HomeShellState extends State<HomeShell> {
                           selectedIcon: Icon(Icons.calendar_month_rounded),
                           label: 'Cycle',
                         ),
-                        NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Rep Max'),
+                        NavigationDestination(
+                          icon: Icon(Icons.sports_outlined),
+                          selectedIcon: Icon(Icons.sports_rounded),
+                          label: 'Coach',
+                        ),
                         NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'Settings'),
                       ],
                     ),

@@ -10,6 +10,7 @@ import 'data/seed.dart';
 import 'logic/achievements.dart';
 import 'logic/circuits.dart';
 import 'logic/bodyweight.dart';
+import 'logic/coach.dart';
 import 'logic/cycle.dart';
 import 'logic/cycle_review.dart';
 import 'logic/estimate.dart';
@@ -33,6 +34,7 @@ part 'store/rest_clock.dart';
 part 'store/finishing.dart';
 part 'store/history.dart';
 part 'store/backups.dart';
+part 'store/coach.dart';
 
 class AppStore extends ChangeNotifier {
   AppStore({File? file, Alerts? alerts})
