@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymer/main.dart';
+import 'package:gymer/screens/bodyweight.dart';
 import 'package:gymer/store.dart';
+import 'package:gymer/theme.dart';
+import 'package:gymer/widgets/common.dart';
 import 'package:gymer/widgets/num_field.dart';
 import 'package:gymer/widgets/rest_timer.dart';
 
@@ -52,8 +55,9 @@ void main() {
     expect(rest, 90);
   });
 
-  testWidgets('a set is not completed from a number the user replaced with unusable text', (tester) async {
+  testWidgets('unusable numeric text blocks set completion and bodyweight saving until corrected', (tester) async {
     final store = AppStore();
+    addTearDown(store.dispose);
     await store.load();
     await tester.pumpWidget(GymerApp(store: store));
     await tester.tap(find.text('Legs'));
@@ -72,5 +76,37 @@ void main() {
     expect(store.toggleSet(exercise, 0).ok, isTrue);
     expect(exercise.sets.first.weight, 105);
     await tester.pumpAndSettle(const Duration(seconds: 1));
+
+    await tester.pumpWidget(const SizedBox());
+    store.discardSession();
+    store.settings.trackBodyweight = true;
+    store.logBodyweight(DateTime(2026, 1, 1), 80);
+    await tester.pumpWidget(
+      StoreScope(
+        store: store,
+        child: MaterialApp(theme: buildTheme(Brightness.dark, store.settings), home: const BodyweightScreen()),
+      ),
+    );
+    await tester.tap(find.byType(ListTile));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '90');
+    await tester.pump();
+    final save = find.widgetWithText(TextButton, 'Save');
+    for (final text in ['90+', '0', '10001', '']) {
+      await tester.enterText(find.byType(TextField), text);
+      await tester.pump();
+      expect(tester.widget<TextButton>(save).onPressed, isNull, reason: 'must not save the previous 90 for "$text"');
+      await tester.tap(save);
+      await tester.pump();
+      expect(store.bodyweights.single.kg, 80);
+      if (text.isNotEmpty) expect(find.text(text), findsOneWidget);
+    }
+    await tester.enterText(find.byType(TextField), '90+5');
+    await tester.pump();
+    expect(tester.widget<TextButton>(save).onPressed, isNotNull);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(store.bodyweights.single.kg, 95);
+    await tester.pumpWidget(const SizedBox());
   });
 }

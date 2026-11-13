@@ -172,6 +172,7 @@ Future<void> _editBodyweight(BuildContext context, {BodyweightEntry? entry}) asy
   if (!store.settings.trackBodyweight) return;
   var day = entry?.date ?? dateOnly(DateTime.now());
   double? value = entry?.inUnit(store.settings.unit);
+  var badText = false;
   await showDialog<void>(
     context: context,
     builder: (dc) => StatefulBuilder(
@@ -186,6 +187,7 @@ Future<void> _editBodyweight(BuildContext context, {BodyweightEntry? entry}) asy
               suffix: store.settings.unit,
               placeholder: 'Weight',
               onChanged: (v) => setDialog(() => value = v),
+              onBadText: (bad) => setDialog(() => badText = bad),
             ),
             const SizedBox(height: 12),
             TextButton(
@@ -214,7 +216,7 @@ Future<void> _editBodyweight(BuildContext context, {BodyweightEntry? entry}) asy
             ),
           TextButton(onPressed: () => Navigator.pop(dc), child: const Text('Cancel')),
           TextButton(
-            onPressed: value == null || !value!.isFinite || value! <= 0
+            onPressed: badText || value == null || !value!.isFinite || value! <= 0
                 ? null
                 : () {
                     final error = store.logBodyweight(day, value!);

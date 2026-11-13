@@ -21,6 +21,9 @@ class PlatformAlerts extends Alerts {
 
   Future<void> init() async {
     if (!_mobile) return;
+    // A timer posted before Android stopped the app is unknown to this run, so it could never be removed:
+    // it stayed up in the foreground and its backup alarm still announced "Rest over" after the set began.
+    if (Platform.isAndroid) unawaited(_live.invokeMethod<void>('clear').catchError((_) {}));
     _ready =
         await _plugin.initialize(
           settings: const InitializationSettings(

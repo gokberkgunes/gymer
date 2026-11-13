@@ -65,7 +65,7 @@ Future<void> restoreBackup(BuildContext context) async {
     'Restore backup',
     'Replaces all data here with the backup\'s contents.'
         ' Your current data is backed up first.'
-        '${store.active != null ? ' The workout in progress is discarded.' : ''}',
+        '${store.active != null ? ' The workout in progress is replaced by the backup\'s.' : ''}',
     action: 'Choose file',
     destructive: true,
   );
@@ -153,7 +153,7 @@ class _AutoBackupsScreenState extends State<AutoBackupsScreen> {
       context,
       'Restore this backup?',
       'Replaces all data with the copy from ${_when(b.at)}. Your current data is backed up first.'
-          '${store.active != null ? ' The workout in progress is discarded.' : ''}',
+          '${store.active != null ? ' The workout in progress is replaced by the backup\'s.' : ''}',
       action: 'Restore',
       destructive: true,
     );
