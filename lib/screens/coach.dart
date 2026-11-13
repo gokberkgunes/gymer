@@ -18,11 +18,20 @@ class CoachScreen extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final report = store.coachReport();
     final volume = report.volume;
-    final setsLabel = report.planned ? 'Planned weekly sets' : 'Sets in the last 7 days';
+    final setsLabel = report.planned ? 'Planned weekly sets' : 'Weekly sets, last 4 weeks';
     final names = [
       ...rpLandmarks.keys,
       for (final m in volume.keys)
         if (!rpLandmarks.containsKey(m)) m,
+    ];
+    double sets(String muscle) =>
+        volume[muscle]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0;
+    // Falling muscles already answered by a set change are not listed twice.
+    final suggested = {for (final s in report.suggestions) s.muscle};
+    final changes = [
+      for (final v in report.declining)
+        if (!suggested.contains(v.muscle)) v,
+      ...report.rising,
     ];
     final protocols = volume.values.any((v) => v.direct.hasProtocols || v.indirect.hasProtocols);
     return ListView(
@@ -39,25 +48,26 @@ class CoachScreen extends StatelessWidget {
               children: [
                 for (final (i, s) in report.suggestions.indexed) ...[
                   if (i > 0) const Divider(indent: 16, endIndent: 16),
-                  _SuggestionRow(suggestion: s),
-                ],
-              ],
-            ),
-          ),
-        ] else if (report.declining.isNotEmpty) ...[
-          const SectionLabel('Strength falling'),
-          Card(
-            child: Column(
-              children: [
-                for (final (i, v) in report.declining.indexed) ...[
-                  if (i > 0) const Divider(indent: 16, endIndent: 16),
-                  _DecliningRow(verdict: v),
+                  _SuggestionRow(suggestion: s, zone: volumeZone(s.muscle, sets(s.muscle))),
                 ],
               ],
             ),
           ),
         ],
-        SectionLabel(report.planned ? 'Weekly sets' : 'Sets, last 7 days'),
+        if (changes.isNotEmpty) ...[
+          const SectionLabel('Biggest changes'),
+          Card(
+            child: Column(
+              children: [
+                for (final (i, v) in changes.indexed) ...[
+                  if (i > 0) const Divider(indent: 16, endIndent: 16),
+                  _TrendRow(verdict: v, sets: sets(v.muscle), setsLabel: setsLabel),
+                ],
+              ],
+            ),
+          ),
+        ],
+        SectionLabel(report.planned ? 'Weekly sets' : 'Weekly sets, last 4 weeks'),
         Card(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -67,7 +77,7 @@ class CoachScreen extends StatelessWidget {
                 for (final m in names)
                   MuscleVolumeRow(
                     muscle: m,
-                    sets: volume[m]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0,
+                    sets: sets(m),
                     frequency: volume[m]?.directDaysPerWeek ?? 0,
                     verdict: report.verdicts[m],
                     setsLabel: setsLabel,
@@ -100,7 +110,8 @@ class CoachScreen extends StatelessWidget {
 /// "Chest +1 set" with its target beneath, the reason behind (i), and Apply (or Undo once applied).
 class _SuggestionRow extends StatelessWidget {
   final SetSuggestion suggestion;
-  const _SuggestionRow({required this.suggestion});
+  final String? zone;
+  const _SuggestionRow({required this.suggestion, required this.zone});
 
   @override
   Widget build(BuildContext context) {
@@ -127,7 +138,7 @@ class _SuggestionRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  [s.exercise, ?workout].join(' · '),
+                  [s.exercise, ?workout, ?zone].join(' · '),
                   style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -159,34 +170,44 @@ class _SuggestionRow extends StatelessWidget {
   }
 }
 
-class _DecliningRow extends StatelessWidget {
+/// A falling or rising muscle: its volume zone beneath the name, the change at the right, details behind (i).
+class _TrendRow extends StatelessWidget {
   final MuscleVerdict verdict;
-  const _DecliningRow({required this.verdict});
+  final double sets;
+  final String setsLabel;
+  const _TrendRow({required this.verdict, required this.sets, required this.setsLabel});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final v = verdict;
+    final zone = volumeZone(v.muscle, sets);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Row(
         children: [
           Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: LabelWithInfo(
-                Text(v.muscle, style: t.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-                InfoDot(
-                  tooltip: 'Details',
-                  onTap: () => showLandmarkInfo(context, v.muscle, verdict: v),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LabelWithInfo(
+                  Text(v.muscle, style: t.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  InfoDot(
+                    tooltip: 'Details',
+                    onTap: () => showLandmarkInfo(context, v.muscle, sets: sets, setsLabel: setsLabel, verdict: v),
+                  ),
                 ),
-              ),
+                Text(
+                  [?zone, '${fmtSets(sets)} sets'].join(' · '),
+                  style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
           Text(
             fmtTrend(v.percent),
-            style: t.titleMedium?.copyWith(color: cs.error, fontFeatures: tabular),
+            style: t.titleMedium?.copyWith(color: trendColor(cs, v.trend), fontFeatures: tabular),
           ),
         ],
       ),
@@ -197,10 +218,12 @@ class _DecliningRow extends StatelessWidget {
 void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coach reads your log', const [
   (
     'Arrows',
-    'Each exercise is compared with the same exercise in the same workout one week (or microcycle) earlier, set by '
-        'set, using estimated 1RM so reps in reserve count. Up means progressing, flat holding, down falling. Only '
-        'straight sets with an external load and the same logging context are compared; deloads and warm-ups never '
-        'are. A muscle needs two comparable workouts before it gets an arrow. Tap a muscle for the exercises.',
+    'Each exercise is compared with the same exercise in the same workout one week (or microcycle) earlier. '
+        'Straight sets are compared set by set, by estimated 1RM so reps in reserve count, or by load × reps if '
+        'you choose that in Settings → Advanced. Other set methods are always compared by total volume. Up means '
+        'progressing, flat holding, down falling. Only external loads with the same logging context are compared; '
+        'deloads and warm-ups never are. A muscle needs two comparable workouts before it gets an arrow. Tap a '
+        'muscle for the exercises.',
   ),
   (
     'Set changes',
@@ -215,7 +238,8 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
   ),
   (
     'Limits',
-    'One change per muscle per week, never above the top of MRV or below MV, nothing in the first two weeks or '
+    'One change per muscle per week, never above the top of MRV or below MEV (below MV if you turn that off in '
+        'Settings → Advanced), nothing in the first two weeks or '
         'during a deload, and no added sets after a week with a missed workout.',
   ),
   (
@@ -224,8 +248,10 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'and the next mesocycle starts from it again.',
   ),
   (
-    'Strength falling',
-    'With nothing to change, the two muscles losing the most strength are listed. Falling across several muscles '
-        'at once usually means too much total work or too little recovery.',
+    'Biggest changes',
+    'The two muscles falling fastest and the two rising fastest, each with where its weekly sets sit: under MEV '
+        '(Below MV, MV), towards MAV (MEV), in MAV, or at the recoverable limit (MRV). The same drop means '
+        'something different in each: too little work at the bottom, too much at the top. Falling across several '
+        'muscles at once usually means too much total work or too little recovery.',
   ),
 ]);

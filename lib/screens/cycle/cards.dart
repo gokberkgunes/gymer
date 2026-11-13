@@ -502,6 +502,13 @@ void showLandmarkInfo(
                 const SizedBox(height: 4),
                 Text('Signs of fatigue: ${verdict.fatigue.join('; ')}.', style: Theme.of(c).textTheme.bodySmall),
               ],
+              if (sets != null && zoneAdvice(verdict.trend, volumeZone(muscle, sets)).isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '${volumeZone(muscle, sets)}: ${zoneAdvice(verdict.trend, volumeZone(muscle, sets))}',
+                  style: Theme.of(c).textTheme.bodySmall,
+                ),
+              ],
               const SizedBox(height: 16),
             ],
             const Text('What the landmarks mean', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -676,7 +683,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                     if (widget.frequency case final days?)
                       Tooltip(
                         message:
-                            'Planned direct training days per week. Each scheduled day counts once, including '
+                            'Direct training days per week. Each day counts once, including '
                             'special set methods. Warm-ups and indirect work do not count. Schedules longer or '
                             'shorter than seven days are averaged per week.',
                         child: Text('${fmtSets(days)} ${days == 1 ? 'day' : 'days'}/week', style: frequencyStyle),

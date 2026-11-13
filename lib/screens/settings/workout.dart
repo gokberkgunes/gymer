@@ -366,8 +366,62 @@ class _AdvancedSettings extends StatelessWidget {
                   title: const Text('Include partial sets'),
                   content: const Text(
                     'Primary muscles count as one set. With this on, secondary muscles also receive half a set. '
-                    'Turn it off to count direct work only. This applies to the Cycle tab and workout editor. '
+                    'Turn it off to count direct work only. This applies to the Coach tab and workout editor. '
                     'Warm-ups and special-method groups remain separate; this does not refer to partial-range reps.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
+        ]),
+        const SectionLabel('Coach'),
+        _group([
+          _stackedChoice(
+            context,
+            'Compare progress by',
+            s.coachCompare,
+            const {'strength': 'Estimated 1RM', 'volume': 'Total volume'},
+            (v) => store.updateSettings((x) => x.coachCompare = v),
+            info: InfoDot(
+              tooltip: 'Which to choose',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Compare progress by'),
+                  content: const SingleChildScrollView(
+                    child: Text(
+                      'This decides how the Coach tab judges straight sets from one week to the next.\n\n'
+                      'Estimated 1RM turns load, reps and reps in reserve into one strength number. It stays fair '
+                      'when a mesocycle moves closer to failure each week, and when you trade reps for load. It '
+                      'depends on honest RIR and is less reliable above about 12 reps.\n\n'
+                      'Total volume is load × reps, set by set. It needs no RIR, so it suits you if you do not '
+                      'track RIR or train in high rep ranges. It cannot tell real progress from simply pushing '
+                      'closer to failure, and a heavier load for fewer reps can read as a drop.\n\n'
+                      'Drop sets, myo-reps, rest-pause, clusters and other special methods are always compared by '
+                      'total volume, because a rep-max estimate does not hold across their segments.',
+                    ),
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
+          _row(
+            context,
+            'Keep sets at MEV or above',
+            Switch(value: s.coachKeepMev, onChanged: (v) => store.updateSettings((x) => x.coachKeepMev = v)),
+            info: InfoDot(
+              tooltip: 'What this limits',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Keep sets at MEV or above'),
+                  content: const Text(
+                    'MEV is the minimum effective volume: below it a muscle is unlikely to grow. With this on, the '
+                    'coach never suggests removing a set that would take a muscle under its MEV, even when it is '
+                    'falling. Turn it off to let removals continue down to MV, the maintenance volume, for example '
+                    'while deliberately holding a muscle back.',
                   ),
                   actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
                 ),

@@ -62,7 +62,7 @@ void main() {
     expect(cycleStatus(c, DateTime(2026, 10, 26, 0, 30)).currentMicro, 2);
   });
 
-  test('weekly sets count direct as 1, indirect as 0.5; protocols stay separate; the coach adjusts them', () {
+  test('weekly sets count direct as 1, indirect as 0.5; protocols stay separate; the coach reads and adjusts them', () {
     final c = Mesocycle(id: 'c', start: DateTime(2026, 1, 5), microDays: 3, schedule: {1: 'A'});
     final a = WorkoutTemplate(
       id: 'A',
@@ -173,6 +173,9 @@ void main() {
         logged(0, {'Bench': (10, 2), 'Squat': (10, 2), 'Curl': (10, 2), 'Row': (10, 2)}),
       ];
     addTearDown(coach.dispose);
+    // Three weekly quad sets are under MEV: by default the coach removes nothing there.
+    expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Chest', 1)]);
+    expect(Settings.fromJson((coach.settings..coachKeepMev = false).toJson()).coachKeepMev, isFalse);
     var report = coach.coachReport();
     expect(
       {for (final v in report.verdicts.values) v.muscle: v.trend},
@@ -183,6 +186,42 @@ void main() {
       [for (final s in report.suggestions) (s.muscle, s.delta, s.exercise, s.templateId)],
       [('Quads', -1, 'Squat', 'P'), ('Chest', 1, 'Bench', 'P')],
     );
+    expect(report.rising.map((v) => v.muscle), ['Back']);
+    // Each change is read against the volume landmarks: the same drop means different things low and high.
+    expect(
+      [
+        for (final sets in [1.0, 3.0, 5.0, 10.0, 18.0, 30.0]) volumeZone('Chest', sets),
+      ],
+      ['Below MV', 'MV', 'MEV', 'MAV', 'MRV', 'Above MRV'],
+    );
+    expect((volumeZone('Back', 25), volumeZone('Neck', 5)), ('Above MAV', null));
+    expect(zoneAdvice(Trend.falling, 'MV'), contains('too little work'));
+    expect(zoneAdvice(Trend.falling, 'MRV'), contains('Fewer sets'));
+    expect(zoneAdvice(Trend.holding, 'MAV'), isEmpty);
+    // Same load and reps closer to failure: weaker by estimated 1RM, unchanged by volume. Special methods are
+    // always compared by total volume, whatever the setting.
+    SessionExercise straight(int rir) => SessionExercise(
+      name: 'Bench',
+      sets: [for (var i = 0; i < 3; i++) SetEntry(weight: 100, reps: 10, rir: rir, done: true)],
+    );
+    expect(compareExercise(straight(1), 'kg', straight(3), 'kg')!.trend, Trend.falling);
+    expect(compareExercise(straight(1), 'kg', straight(3), 'kg', byVolume: true)!.percent, 0);
+    SessionExercise myo(List<int> reps) => SessionExercise(
+      name: 'Curl',
+      method: 'Myo-Reps',
+      sets: [
+        for (final (i, r) in reps.indexed)
+          SetEntry(weight: 50, reps: r, type: i == 0 ? 'Activation' : 'Myo-set', done: true),
+      ],
+    );
+    expect(compareExercise(myo([15, 5, 5]), 'kg', myo([15, 5, 4]), 'kg')!.percent, closeTo(100 / 24, 1e-9));
+    expect(compareExercise(myo([13, 5]), 'kg', myo([15, 5]), 'kg')!.fatigue, isNotEmpty);
+    expect(compareExercise(myo([15, 5]), 'kg', straight(2), 'kg'), isNull); // a changed method is not comparable
+    coach.settings.coachCompare = 'volume';
+    expect(coach.coachReport().verdicts['Quads']!.percent, closeTo(-20, 1e-9)); // 3 × 8 against 3 × 10
+    expect(Settings.fromJson(coach.settings.toJson()).coachCompare, 'volume');
+    expect(Settings.fromJson({'coachCompare': 'x'}).coachCompare, 'strength');
+    coach.settings.coachCompare = 'strength';
     for (final s in report.suggestions) {
       coach.applySuggestion(s);
       coach.applySuggestion(s); // one change per muscle per week

@@ -73,45 +73,82 @@ List<SetEntry> _straightWork(SessionExercise e) => [
 
 bool _usable(SetEntry s) => s.done && (s.weight ?? 0) > 0 && (s.reps ?? 0) > 0;
 
-/// Compares set positions of two sessions of one exercise by estimated 1RM, which already counts reps in
-/// reserve. Only straight sets of external-load exercises with the same logging context are comparable, as for
-/// records; null when no position matches.
+/// Compares two sessions of one exercise in one workout; null when nothing is comparable.
+///
+/// Straight sets are matched by position with the same logging context. By default each pair is compared by
+/// estimated 1RM, which already counts reps in reserve; with [byVolume] by load × reps instead. Every other set
+/// method is always compared by the total volume of its working sets, because rep-max estimates do not hold
+/// across rest-pause, drop or cluster segments and the number of segments reached is itself the result.
+/// Only external loads logged as totals are comparable, as for records and volume.
 ExerciseTrend? compareExercise(
   SessionExercise now,
   String nowUnit,
   SessionExercise before,
   String beforeUnit, {
   String? templateId,
+  bool byVolume = false,
 }) {
-  if (now.loadMode != 'external' || before.loadMode != 'external') return null;
-  if (now.method != 'Straight' || before.method != 'Straight') return null;
-  final a = _straightWork(now), b = _straightWork(before);
-  var total = 0.0, pairs = 0;
+  if (now.loadMode != 'external' || before.loadMode != 'external' || now.method != before.method) return null;
+  final straight = now.method == 'Straight';
+  double kg(SetEntry s, String unit) => convertWeight(s.weight!, unit, 'kg');
+  bool counted(SessionExercise e, SetEntry s) => _usable(s) && countsAsVolume(e, s);
+  var percent = 0.0, pairs = 0;
   double? first;
-  var harder = false;
-  for (var i = 0; i < math.min(a.length, b.length); i++) {
-    final x = a[i], y = b[i];
-    if (!_usable(x) || !_usable(y) || x.context != y.context) continue;
-    final wx = convertWeight(x.weight!, nowUnit, 'kg'), wy = convertWeight(y.weight!, beforeUnit, 'kg');
-    final change = (setOneRm(wx, x.reps, x.rir)! / setOneRm(wy, y.reps, y.rir)! - 1) * 100;
-    total += change;
-    pairs++;
-    if (i == 0) first = change;
-    if ((wx - wy).abs() <= wy * 0.005 && x.reps == y.reps && x.rir != null && y.rir != null && x.rir! < y.rir!) {
-      harder = true;
+  var harder = false, dropOff = false;
+  final List<SetEntry> work;
+  if (straight) {
+    final a = work = _straightWork(now), b = _straightWork(before);
+    var volumeNow = 0.0, volumeBefore = 0.0, total = 0.0;
+    for (var i = 0; i < math.min(a.length, b.length); i++) {
+      final x = a[i], y = b[i];
+      if (!_usable(x) || !_usable(y) || x.context != y.context) continue;
+      if (byVolume && !(countsAsVolume(now, x) && countsAsVolume(before, y))) continue;
+      final wx = kg(x, nowUnit), wy = kg(y, beforeUnit);
+      final change = byVolume
+          ? (wx * x.reps! / (wy * y.reps!) - 1) * 100
+          : (setOneRm(wx, x.reps, x.rir)! / setOneRm(wy, y.reps, y.rir)! - 1) * 100;
+      volumeNow += wx * x.reps!;
+      volumeBefore += wy * y.reps!;
+      total += change;
+      pairs++;
+      if (i == 0) first = change;
+      if ((wx - wy).abs() <= wy * 0.005 && x.reps == y.reps && x.rir != null && y.rir != null && x.rir! < y.rir!) {
+        harder = true;
+      }
+    }
+    if (pairs == 0) return null;
+    percent = byVolume ? (volumeNow / volumeBefore - 1) * 100 : total / pairs;
+    final done = a.where(_usable).toList();
+    dropOff =
+        done.length > 1 &&
+        (done.last.weight! - done.first.weight!).abs() <= done.first.weight! * 0.005 &&
+        done.last.reps! < done.first.reps! * 0.6;
+  } else {
+    work = now.work;
+    final a = [
+      for (final s in now.work)
+        if (counted(now, s)) s,
+    ];
+    final b = [
+      for (final s in before.work)
+        if (counted(before, s)) s,
+    ];
+    if (a.isEmpty || b.isEmpty) return null;
+    double volume(List<SetEntry> sets, String unit) => sets.fold(0.0, (sum, s) => sum + kg(s, unit) * s.reps!);
+    percent = (volume(a, nowUnit) / volume(b, beforeUnit) - 1) * 100;
+    pairs = math.min(a.length, b.length);
+    // The opening segment is the least affected by what follows it.
+    if (identical(a.first, now.work.first) &&
+        identical(b.first, before.work.first) &&
+        a.first.context == b.first.context) {
+      first = (kg(a.first, nowUnit) * a.first.reps! / (kg(b.first, beforeUnit) * b.first.reps!) - 1) * 100;
     }
   }
-  if (pairs == 0) return null;
-  final done = a.where(_usable).toList();
-  final dropOff =
-      done.length > 1 &&
-      (done.last.weight! - done.first.weight!).abs() <= done.first.weight! * 0.005 &&
-      done.last.reps! < done.first.reps! * 0.6;
-  final skipped = a.any((s) => s.done) ? a.where((s) => !s.done).length : 0;
+  final skipped = work.any((s) => s.done) ? work.where((s) => !s.done).length : 0;
   return ExerciseTrend(
     name: now.name,
     templateId: templateId,
-    percent: total / pairs,
+    percent: percent,
     pairs: pairs,
     dropOff: dropOff,
     fatigue: [
@@ -143,8 +180,9 @@ Map<String, MuscleVerdict> muscleVerdicts(
   Iterable<Session> sessions,
   CoachPeriods periods,
   int period,
-  (List<String>, List<String>) Function(String exercise) musclesOf,
-) {
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  bool byVolume = false,
+}) {
   final latest = <(String?, String), (Session, SessionExercise)>{};
   final earlier = <(String?, String), (Session, SessionExercise)>{};
   for (final session in sessions) {
@@ -162,7 +200,14 @@ Map<String, MuscleVerdict> muscleVerdicts(
   for (final MapEntry(:key, value: (session, exercise)) in latest.entries) {
     final before = earlier[key];
     if (before == null) continue;
-    final trend = compareExercise(exercise, session.unit, before.$2, before.$1.unit, templateId: session.templateId);
+    final trend = compareExercise(
+      exercise,
+      session.unit,
+      before.$2,
+      before.$1.unit,
+      templateId: session.templateId,
+      byVolume: byVolume,
+    );
     if (trend == null) continue;
     for (final muscle in musclesOf(exercise.name).$1) {
       byMuscle.putIfAbsent(muscle, () => []).add(trend);
@@ -171,11 +216,47 @@ Map<String, MuscleVerdict> muscleVerdicts(
   return {for (final e in byMuscle.entries) e.key: MuscleVerdict(e.key, e.value)};
 }
 
-/// Sets actually completed in the given sessions, per muscle, in the same units as [plannedWeeklyVolume].
+/// Where a muscle's weekly [sets] sit among its RP landmarks, as drawn on the weekly-sets bar; null without
+/// landmarks. "Below MV" and "MV" are under the minimum effective volume.
+String? volumeZone(String muscle, double sets) {
+  final l = rpLandmarks[muscle];
+  final mav = l?.mavRange;
+  if (l == null || mav == null) return null;
+  final mv = Landmark.range(l.mv), mev = l.mevRange, mrv = l.mrvRange;
+  if (mv != null && sets < mv.$1) return 'Below MV';
+  if (mev != null && sets < mev.$1) return 'MV';
+  if (sets < mav.$1) return 'MEV';
+  if (sets <= mav.$2 && (mrv == null || sets < mrv.$1)) return 'MAV';
+  if (mrv == null) return 'Above MAV';
+  return sets <= mrv.$2 ? 'MRV' : 'Above MRV';
+}
+
+/// What a falling or rising muscle's volume zone suggests; empty for a holding muscle or an unknown zone.
+String zoneAdvice(Trend trend, String? zone) {
+  if (zone == null || trend == Trend.holding) return '';
+  final low = zone == 'Below MV' || zone == 'MV', high = zone == 'MRV' || zone.startsWith('Above');
+  if (trend == Trend.falling) {
+    return low
+        ? 'Weekly sets are under the minimum effective volume. Falling here points to too little work for this '
+              'muscle, or to recovery outside the gym, not to too many sets.'
+        : high
+        ? 'Weekly sets are at the limit of what can be recovered from. Fewer sets are the likely fix.'
+        : 'Weekly sets are in the productive range. Look at sleep, food and total workload before the set count.';
+  }
+  return low
+      ? 'Rising on very little volume. There is room to add sets later; nothing needs to change now.'
+      : high
+      ? 'Rising close to the limit of what can be recovered from. Hold here; more sets risk a stall.'
+      : 'Rising in the productive range. Keep the sets as they are.';
+}
+
+/// Sets actually completed in the given sessions, per muscle and averaged over [weeks], in the same units as
+/// [plannedWeeklyVolume]. Several weeks keep one late or early workout from emptying the picture.
 Map<String, WeeklyVolume> performedVolume(
   Iterable<Session> sessions,
-  (List<String>, List<String>) Function(String exercise) musclesOf,
-) {
+  (List<String>, List<String>) Function(String exercise) musclesOf, {
+  int weeks = 1,
+}) {
   final rows = <VolumeRow>[];
   final days = <String, Set<String>>{};
   for (final session in sessions) {
@@ -204,9 +285,9 @@ Map<String, WeeklyVolume> performedVolume(
   return {
     for (final m in {...report.direct.keys, ...report.indirect.keys})
       m: WeeklyVolume(
-        report.direct[m] ?? VolumeMetrics(),
-        report.indirect[m] ?? VolumeMetrics(),
-        directDaysPerWeek: (days[m]?.length ?? 0).toDouble(),
+        (report.direct[m] ?? VolumeMetrics()).scaled(1 / weeks),
+        (report.indirect[m] ?? VolumeMetrics()).scaled(1 / weeks),
+        directDaysPerWeek: (days[m]?.length ?? 0) / weeks,
       ),
   };
 }
@@ -284,7 +365,8 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
 
 /// The coach's rule for one finished build period, most important first, at most three:
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
-/// fatigue loses one. One change per muscle per microcycle, never past the top of MRV or below MV, and no
+/// fatigue loses one. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
+/// [keepMev] off), and no
 /// additions after a missed workout. [verdicts] is the finished period, [previous] the one before it,
 /// [weeklySets] the current plan per muscle and [micro] the running microcycle (1-based).
 List<SetSuggestion> coachSuggestions({
@@ -296,6 +378,7 @@ List<SetSuggestion> coachSuggestions({
   required Map<String, MuscleVerdict> previous,
   required Map<String, double> weeklySets,
   required bool missedWorkout,
+  bool keepMev = true,
 }) {
   final applied = <SetSuggestion>[
     for (final a in cycle.setAdjustments)
@@ -327,7 +410,7 @@ List<SetSuggestion> coachSuggestions({
         previous[v.muscle]!.trend != Trend.progressing;
     if (!remove && !add) continue;
     final delta = remove ? -1 : 1;
-    final floor = Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
+    final floor = (keepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
     final top = landmark?.mrvRange?.$2 ?? landmark?.mavRange?.$2;
     if (remove && sets - 1 < floor) continue;
     if (add && (missedWorkout || (top != null && sets + 1 > top))) continue;

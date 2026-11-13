@@ -4,14 +4,15 @@ part of '../store.dart';
 class CoachReport {
   final Mesocycle? cycle;
 
-  /// Whether [volume] is the cycle's plan; otherwise it is what was completed in the last seven days.
+  /// Whether [volume] is the cycle's plan; otherwise it is the weekly average completed in the last four weeks.
   final bool planned;
   final Map<String, WeeklyVolume> volume;
   final Map<String, MuscleVerdict> verdicts;
   final List<SetSuggestion> suggestions;
 
-  /// The muscles losing the most strength, shown when there is nothing to change.
+  /// The muscles losing the most, and those gaining the most, each with its volume zone on the tab.
   final List<MuscleVerdict> declining;
+  final List<MuscleVerdict> rising;
 
   const CoachReport({
     required this.cycle,
@@ -20,6 +21,7 @@ class CoachReport {
     required this.verdicts,
     required this.suggestions,
     required this.declining,
+    required this.rising,
   });
 }
 
@@ -30,6 +32,7 @@ extension AppStoreCoach on AppStore {
     final status = active == null ? null : cycleStatus(active, now);
     final cycle = status == null || status.phase == 'Complete' ? null : active;
     final byId = {for (final t in templates) t.id: t};
+    final byVolume = settings.coachCompare == 'volume';
 
     var verdicts = <String, MuscleVerdict>{};
     var suggestions = <SetSuggestion>[];
@@ -40,7 +43,8 @@ extension AppStoreCoach on AppStore {
         cycle,
       ).where((s) => (s.phase ?? cycleStatus(cycle, s.startedAt).phase) == 'Build').toList();
       final periods = CoachPeriods(dateOnly(cycle.start), math.max(1, cycle.microDays));
-      Map<String, MuscleVerdict> of(int micro) => muscleVerdicts(sessions, periods, micro - 1, musclesOf);
+      Map<String, MuscleVerdict> of(int micro) =>
+          muscleVerdicts(sessions, periods, micro - 1, musclesOf, byVolume: byVolume);
       final micro = status.currentMicro;
       verdicts = of(micro);
       final finished = of(micro - 1);
@@ -56,6 +60,7 @@ extension AppStoreCoach on AppStore {
           weeklySets: {
             for (final e in volume.entries) e.key: e.value.countedSets(includePartialSets: settings.includePartialSets),
           },
+          keepMev: settings.coachKeepMev,
           missedWorkout: calendarDays(
             cycle,
             history,
@@ -65,14 +70,18 @@ extension AppStoreCoach on AppStore {
     } else {
       final sessions = history.where((s) => s.phase != 'Deload' && s.doneSets > 0).toList();
       final week = CoachPeriods.weeks.indexOf(now);
-      verdicts = muscleVerdicts(sessions, CoachPeriods.weeks, week, musclesOf);
-      if (verdicts.isEmpty) verdicts = muscleVerdicts(sessions, CoachPeriods.weeks, week - 1, musclesOf);
+      verdicts = muscleVerdicts(sessions, CoachPeriods.weeks, week, musclesOf, byVolume: byVolume);
+      if (verdicts.isEmpty) {
+        verdicts = muscleVerdicts(sessions, CoachPeriods.weeks, week - 1, musclesOf, byVolume: byVolume);
+      }
       volume = cycle != null
           ? plannedWeeklyVolume(cycle, byId, musclesOf)
-          : performedVolume(history.where((s) => daysBetween(s.startedAt, now) < 7), musclesOf);
+          : performedVolume(history.where((s) => daysBetween(s.startedAt, now) < 28), musclesOf, weeks: 4);
     }
     final declining = verdicts.values.where((v) => v.trend == Trend.falling).toList()
       ..sort((a, b) => a.percent.compareTo(b.percent));
+    final rising = verdicts.values.where((v) => v.trend == Trend.progressing).toList()
+      ..sort((a, b) => b.percent.compareTo(a.percent));
     return CoachReport(
       cycle: cycle,
       planned: cycle != null,
@@ -80,6 +89,7 @@ extension AppStoreCoach on AppStore {
       verdicts: verdicts,
       suggestions: suggestions,
       declining: declining.take(2).toList(),
+      rising: rising.take(2).toList(),
     );
   }
 

@@ -138,6 +138,13 @@ class Settings {
 
   /// Include secondary-muscle work as half sets in weekly estimates.
   bool includePartialSets;
+
+  /// How the coach compares straight sets: 'strength' (estimated 1RM) or 'volume' (load × reps). Other set
+  /// methods are always compared by volume.
+  String coachCompare;
+
+  /// The coach never removes a set that would take a muscle under its MEV; off lowers the floor to MV.
+  bool coachKeepMev;
   bool dimCompleted;
   bool collapseCompleted;
   List<String> pinnedExerciseActions;
@@ -192,6 +199,8 @@ class Settings {
     this.editorWeeklySets = false,
     this.editorMuscleTotals = false,
     this.includePartialSets = true,
+    this.coachCompare = 'strength',
+    this.coachKeepMev = true,
     this.dimCompleted = true,
     this.collapseCompleted = true,
     List<String>? pinnedExerciseActions,
@@ -299,6 +308,8 @@ class Settings {
     'editorWeeklySets': editorWeeklySets,
     'editorMuscleTotals': editorMuscleTotals,
     'includePartialSets': includePartialSets,
+    if (coachCompare != 'strength') 'coachCompare': coachCompare,
+    if (!coachKeepMev) 'coachKeepMev': false,
     'dimCompleted': dimCompleted,
     'collapseCompleted': collapseCompleted,
     'pinnedExerciseActions': pinnedExerciseActions,
@@ -368,6 +379,8 @@ class Settings {
       editorWeeklySets: b('editorWeeklySets', d.editorWeeklySets),
       editorMuscleTotals: b('editorMuscleTotals', d.editorMuscleTotals),
       includePartialSets: b('includePartialSets', d.includePartialSets),
+      coachCompare: s('coachCompare', d.coachCompare, {'strength', 'volume'}),
+      coachKeepMev: b('coachKeepMev', d.coachKeepMev),
       dimCompleted: b('dimCompleted', d.dimCompleted),
       collapseCompleted: b('collapseCompleted', d.collapseCompleted),
       pinnedExerciseActions: j['pinnedExerciseActions'] is List

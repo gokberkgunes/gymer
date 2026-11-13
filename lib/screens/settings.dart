@@ -65,7 +65,7 @@ class SettingsScreen extends StatelessWidget {
             'Confetti, personal-best effects and milestones',
             const CelebrationSettings(),
           ),
-          link(Icons.tune_rounded, 'Advanced', 'Weekly sets, timing and keyboard', const _AdvancedSettings()),
+          link(Icons.tune_rounded, 'Advanced', 'Weekly sets, coach, timing and keyboard', const _AdvancedSettings()),
           link(Icons.storage_outlined, 'Databases', 'Exercises, set types and rep max', const _DatabaseSettings()),
           link(Icons.save_outlined, 'Data', 'Backups, import and export', const _DataSettings()),
         ]),
