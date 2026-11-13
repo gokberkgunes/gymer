@@ -7,6 +7,9 @@ class CoachReport {
   /// Whether [volume] is the cycle's plan; otherwise it is the weekly average completed in the last four weeks.
   final bool planned;
   final Map<String, WeeklyVolume> volume;
+
+  /// Sets completed so far in the running microcycle, per seven days like the plan; null outside a cycle.
+  final Map<String, WeeklyVolume>? performed;
   final Map<String, MuscleVerdict> verdicts;
   final List<SetSuggestion> suggestions;
 
@@ -22,6 +25,7 @@ class CoachReport {
     required this.cycle,
     required this.planned,
     required this.volume,
+    this.performed,
     required this.verdicts,
     required this.suggestions,
     this.deload = const [],
@@ -42,6 +46,7 @@ extension AppStoreCoach on AppStore {
     var verdicts = <String, MuscleVerdict>{};
     var suggestions = <SetSuggestion>[];
     var deload = const <MuscleVerdict>[];
+    Map<String, WeeklyVolume>? performed;
     final Map<String, WeeklyVolume> volume;
     if (cycle != null && status!.running) {
       volume = plannedWeeklyVolume(cycle, byId, musclesOf);
@@ -52,6 +57,12 @@ extension AppStoreCoach on AppStore {
       Map<String, MuscleVerdict> of(int micro) =>
           muscleVerdicts(sessions, periods, micro - 1, musclesOf, byVolume: byVolume);
       final micro = status.currentMicro;
+      // Every workout of the running microcycle counts here, deload ones included: this is what was done.
+      performed = performedVolume(
+        _cycleSessions(cycle).where((s) => periods.indexOf(s.startedAt) == micro - 1),
+        musclesOf,
+        weeks: periods.days / 7,
+      );
       verdicts = of(micro);
       final finished = of(micro - 1);
       if (verdicts.isEmpty) verdicts = finished;
@@ -96,6 +107,7 @@ extension AppStoreCoach on AppStore {
       cycle: cycle,
       planned: cycle != null,
       volume: volume,
+      performed: performed,
       verdicts: verdicts,
       // A deload answers whole-body fatigue; set-by-set changes wait until it is taken or dismissed.
       suggestions: deload.isEmpty ? suggestions : suggestions.where((s) => s.applied != null).toList(),

@@ -80,6 +80,9 @@ class CoachScreen extends StatelessWidget {
                   MuscleVolumeRow(
                     muscle: m,
                     sets: sets(m),
+                    performed: report.performed == null
+                        ? null
+                        : report.performed![m]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0,
                     frequency: volume[m]?.directDaysPerWeek ?? 0,
                     verdict: report.verdicts[m],
                     setsLabel: setsLabel,
@@ -301,6 +304,11 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'progressing, flat holding, down falling. Only external loads with the same logging context are compared; '
         'deloads and warm-ups never are. A muscle needs two comparable workouts before it gets an arrow. Tap a '
         'muscle for the exercises.',
+  ),
+  (
+    'Planned and done',
+    'Inside a mesocycle the thin mark on each bar is the plan and the solid mark is what you have completed so '
+        'far this week, so a skipped or shortened workout shows as a muscle falling behind.',
   ),
   (
     'Set changes',

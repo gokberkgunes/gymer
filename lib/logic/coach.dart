@@ -255,7 +255,7 @@ String zoneAdvice(Trend trend, String? zone) {
 Map<String, WeeklyVolume> performedVolume(
   Iterable<Session> sessions,
   (List<String>, List<String>) Function(String exercise) musclesOf, {
-  int weeks = 1,
+  double weeks = 1,
 }) {
   final rows = <VolumeRow>[];
   final days = <String, Set<String>>{};

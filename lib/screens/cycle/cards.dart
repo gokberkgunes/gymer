@@ -454,6 +454,7 @@ void showLandmarkInfo(
   String muscle, {
   double? sets,
   String setsLabel = 'Planned weekly sets',
+  double? performed,
   MuscleVerdict? verdict,
 }) {
   final l = rpLandmarks[muscle];
@@ -481,6 +482,14 @@ void showLandmarkInfo(
                   ),
                 ],
               ),
+              if (performed != null)
+                Row(
+                  children: [
+                    const Expanded(child: Text('Completed so far this week')),
+                    const SizedBox(width: 12),
+                    Text(fmtSets(performed), style: Theme.of(c).textTheme.titleLarge?.copyWith(fontFeatures: tabular)),
+                  ],
+                ),
               const SizedBox(height: 16),
             ],
             if (verdict != null) ...[
@@ -591,6 +600,9 @@ class MuscleVolumeRow extends StatefulWidget {
   final double? frequency;
   final MuscleVerdict? verdict;
   final String setsLabel;
+
+  /// Sets completed so far this week, drawn as a second, solid mark beside the planned one.
+  final double? performed;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -599,6 +611,7 @@ class MuscleVolumeRow extends StatefulWidget {
     this.frequency,
     this.verdict,
     this.setsLabel = 'Planned weekly sets',
+    this.performed,
   });
 
   @override
@@ -633,13 +646,16 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
       textDirection: TextDirection.ltr,
     )..layout();
     return Semantics(
-      label: '${widget.muscle}, ${fmtSets(widget.sets)} ${widget.setsLabel.toLowerCase()}',
+      label:
+          '${widget.muscle}, ${fmtSets(widget.sets)} ${widget.setsLabel.toLowerCase()}'
+          '${widget.performed == null ? '' : ', ${fmtSets(widget.performed!)} completed so far'}',
       child: InkWell(
         onTap: () => showLandmarkInfo(
           context,
           widget.muscle,
           sets: widget.sets,
           setsLabel: widget.setsLabel,
+          performed: widget.performed,
           verdict: widget.verdict,
         ),
         onHighlightChanged: (pressed) {
@@ -697,6 +713,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                     child: CustomPaint(
                       painter: _LandmarkBar(
                         sets: widget.sets,
+                        performed: widget.performed,
                         landmark: l,
                         colors: cs,
                         numberStyle: numberStyle,
@@ -722,6 +739,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
 class _LandmarkBar extends CustomPainter {
   static const trackHeight = 14.0;
   final double sets;
+  final double? performed;
   final Landmark landmark;
   final ColorScheme colors;
   final TextStyle numberStyle;
@@ -729,6 +747,7 @@ class _LandmarkBar extends CustomPainter {
   final bool pressed;
   const _LandmarkBar({
     required this.sets,
+    this.performed,
     required this.landmark,
     required this.colors,
     required this.numberStyle,
@@ -742,7 +761,8 @@ class _LandmarkBar extends CustomPainter {
     // The scale ends exactly at the top of MRV, so its number sits at the bar's right end. Planned sets beyond it
     // stretch the scale a little past the mark; without an MRV, the track runs a quarter past MAV.
     final end = mrv?.$2 ?? mav.$2 * 1.25;
-    final top = sets > end ? sets * 1.04 : end;
+    final most = math.max(sets, performed ?? 0);
+    final top = most > end ? most * 1.04 : end;
     double x(double v) => (v / top).clamp(0.0, 1.0) * size.width;
     TextPainter text(String s, TextStyle style) => TextPainter(
       text: TextSpan(text: s, style: style),
@@ -775,6 +795,16 @@ class _LandmarkBar extends CustomPainter {
       lastRight = left + tp.width;
     }
 
+    // Completed sets: a short solid mark inside the track, under the longer faint planned tick.
+    if (performed case final done?) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(x(done).clamp(1.5, size.width - 1.5), mid), width: 3, height: 8),
+          const Radius.circular(1.5),
+        ),
+        Paint()..color = colors.onSurface,
+      );
+    }
     final width = pressed ? 3.0 : 1.0;
     final mark = x(sets).clamp(width / 2, size.width - width / 2);
     canvas.drawRRect(
@@ -789,6 +819,7 @@ class _LandmarkBar extends CustomPainter {
   @override
   bool shouldRepaint(_LandmarkBar old) =>
       old.sets != sets ||
+      old.performed != performed ||
       old.landmark != landmark ||
       old.colors != colors ||
       old.numberStyle != numberStyle ||

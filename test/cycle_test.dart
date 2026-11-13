@@ -268,10 +268,24 @@ void main() {
     report = coach.coachReport();
     expect(report.suggestions.map((s) => s.applied?.delta), [-1, 1]);
     expect((report.volume['Chest']!.sets, report.volume['Quads']!.sets), (4, 2));
+    expect(report.performed!['Chest'], isNull); // nothing trained yet in the running week
     coach.startSession(plan);
     expect([for (final e in coach.active!.exercises) e.sets.length], [4, 2, 3, 3]);
     expect(coach.templateChanged(), isFalse); // the coach's sets are the plan, not an edit to ask about
     expect(plan.exercises.map((e) => e.sets.length), everyElement(3)); // the saved workout is never rewritten
+    // Planned against done: three of the four planned bench sets completed so far this week.
+    for (final set in coach.active!.exercises.first.sets.take(3)) {
+      set
+        ..weight = 100
+        ..reps = 10
+        ..done = true;
+    }
+    final thisWeek = coach.active!..finishedAt = DateTime.now();
+    coach.history.insert(0, thisWeek);
+    final live = coach.coachReport();
+    expect((live.volume['Chest']!.sets, live.performed!['Chest']!.sets), (4, 3));
+    expect(live.performed!['Quads'], isNull);
+    coach.history.removeAt(0);
     coach.discardSession();
     final kept = Mesocycle.fromJson(coach.cycles.single.toJson());
     expect(kept.setAdjustments.map((a) => (a.muscle, a.exercise, a.delta, a.micro)), [
