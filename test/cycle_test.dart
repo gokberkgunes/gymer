@@ -283,6 +283,13 @@ void main() {
       final first = {
         'Chest': weeks([(10, Trend.progressing), (6, Trend.progressing), (5, Trend.falling), (14, Trend.falling)]),
       };
+      // Sets that bought nothing: as much progress at 8 weekly sets as at 12 means starting lower.
+      MuscleResponse gains(List<(double, double)> rows) => MuscleResponse('Triceps', [
+        for (final (sets, percent) in rows) (micro: 2, sets: sets, trend: trendOf(percent), percent: percent),
+      ]);
+      expect(gains([(8, 2.5), (10, 2), (12, 2.4)]).sameAtFewer, (fewer: 8.0, more: 12.0));
+      expect(gains([(8, 2.5), (10, 2), (12, 2.4)]).nextStart, -1);
+      expect((gains([(8, 1.2), (12, 3)]).sameAtFewer, gains([(8, 2), (9, 2)]).sameAtFewer), (null, null));
       expect(personalRanges([first]), isEmpty);
       expect(
         personalRanges([

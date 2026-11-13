@@ -533,9 +533,23 @@ class MuscleResponse {
   /// The weekly changes compounded: where the muscle ended relative to its first compared week.
   double get percent => (weeks.fold(1.0, (product, w) => product * (1 + w.percent / 100)) - 1) * 100;
 
-  /// Where to start next time: lower when the cycle ended falling, higher when two or more judged weeks never
-  /// progressed and never fell (it stayed under-stimulated), otherwise the same.
-  int get nextStart => weeks.last.trend == Trend.falling
+  /// Sets that bought nothing: the muscle progressed at least as well in its lowest-volume judged week as in
+  /// its highest, two or more weekly sets apart. Null otherwise.
+  ({double fewer, double more})? get sameAtFewer {
+    final byVolume = [...weeks]..sort((a, b) => a.sets.compareTo(b.sets));
+    final low = byVolume.first, high = byVolume.last;
+    return high.sets - low.sets >= 2 &&
+            low.trend == Trend.progressing &&
+            high.trend == Trend.progressing &&
+            low.percent >= high.percent - trendStep / 2
+        ? (fewer: low.sets, more: high.sets)
+        : null;
+  }
+
+  /// Where to start next time: lower when the cycle ended falling or extra sets bought nothing
+  /// ([sameAtFewer]), higher when two or more judged weeks never progressed and never fell (it stayed
+  /// under-stimulated), otherwise the same.
+  int get nextStart => weeks.last.trend == Trend.falling || sameAtFewer != null
       ? -1
       : weeks.length > 1 && weeks.every((w) => w.trend == Trend.holding)
       ? 1

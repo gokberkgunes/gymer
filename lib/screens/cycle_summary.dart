@@ -205,7 +205,8 @@ class CycleSummaryContent extends StatelessWidget {
                   'Volume response',
                   'For each muscle: the average weekly sets completed in the build ${cycle.periodNoun(plural: true)} the '
                       'coach could compare, and how far the muscle moved over them (weekly changes compounded). '
-                      '"Start lower" means the cycle ended with the muscle falling; "start higher" means it held '
+                      '"Start lower" means the cycle ended with the muscle falling, or it progressed as well in its '
+                      'lowest-volume week as in its highest; "start higher" means it held '
                       'every ${cycle.periodNoun()} without progressing or falling. Start next cycle can apply these '
                       'as one set fewer or more.',
                 ),
@@ -230,6 +231,8 @@ class CycleSummaryContent extends StatelessWidget {
                               Text(
                                 [
                                   '${fmtSets(r.sets)} sets a week',
+                                  if (r.sameAtFewer case final same?)
+                                    'progressed the same at ${fmtSets(same.fewer)} sets as at ${fmtSets(same.more)}',
                                   if (r.nextStart < 0) 'start lower',
                                   if (r.nextStart > 0) 'start higher',
                                 ].join(' · '),
