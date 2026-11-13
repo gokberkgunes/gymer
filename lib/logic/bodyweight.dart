@@ -36,6 +36,16 @@ List<BodyweightPoint> bodyweightTrend(List<BodyweightEntry> entries, String unit
   return points;
 }
 
+/// Change of the smoothed bodyweight per week over roughly the last two weeks; null without a weigh-in in the
+/// last fortnight and another at least fourteen days before it.
+double? bodyweightWeeklyRate(List<BodyweightPoint> trend, DateTime now) {
+  final last = trend.lastOrNull;
+  if (last == null || daysBetween(last.date, now) > 14) return null;
+  final earlier = trend.where((p) => daysBetween(p.date, last.date) >= 14).lastOrNull;
+  if (earlier == null) return null;
+  return (last.trend - earlier.trend) / daysBetween(earlier.date, last.date) * 7;
+}
+
 /// Separate from entered loads and progression; no estimate for ambiguous per-side loads.
 double? combinedBodyweightLoad(Session session, SessionExercise exercise, SetEntry set) {
   if (session.bodyweight == null ||

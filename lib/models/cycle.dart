@@ -92,6 +92,9 @@ class Mesocycle {
   /// Absent means grow, the normal coaching.
   Map<String, String> muscleGoals;
 
+  /// Eating phase the coach is told about: '' gaining, 'maintain' or 'cut'. Recovery is lower in a deficit.
+  String diet;
+
   /// The microcycle in which the coach's early-deload hint was dismissed; it stays hidden for that one.
   int? deloadHintDismissed;
   Map<int, String> schedule;
@@ -121,6 +124,7 @@ class Mesocycle {
     Map<String, List<SessionExercise>>? startingLoads,
     List<SetAdjustment>? setAdjustments,
     Map<String, String>? muscleGoals,
+    this.diet = '',
     this.deloadHintDismissed,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
@@ -162,6 +166,7 @@ class Mesocycle {
     },
     if (deloadHintDismissed != null) 'deloadHintDismissed': deloadHintDismissed,
     if (muscleGoals.isNotEmpty) 'muscleGoals': muscleGoals,
+    if (diet.isNotEmpty) 'diet': diet,
     if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
@@ -196,6 +201,7 @@ class Mesocycle {
         e.key as String: [for (final x in e.value as List) SessionExercise.fromJson(x as Map<String, dynamic>)],
     },
     deloadHintDismissed: _int(j['deloadHintDismissed']),
+    diet: const {'maintain', 'cut'}.contains(j['diet']) ? j['diet'] as String : '',
     muscleGoals: {
       for (final e in (j['muscleGoals'] as Map? ?? {}).entries)
         if (e.key is String && (e.value == 'maintain' || e.value == 'priority')) e.key as String: e.value as String,

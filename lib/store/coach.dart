@@ -167,7 +167,7 @@ extension AppStoreCoach on AppStore {
     final taken = <(String, String)>{};
     for (final r in cycleResponses(source).values) {
       final delta = r.nextStart;
-      if (delta == 0 || plan.muscleGoals[r.muscle] == 'maintain') continue;
+      if (delta == 0 || plan.muscleGoals[r.muscle] == 'maintain' || (delta > 0 && plan.diet == 'cut')) continue;
       final landmark = rpLandmarks[r.muscle];
       final sets = weekly[r.muscle]?.countedSets(includePartialSets: settings.includePartialSets) ?? 0;
       final floor =
@@ -222,6 +222,14 @@ extension AppStoreCoach on AppStore {
     } else {
       cycle.muscleGoals.remove(muscle);
     }
+    changed();
+  }
+
+  /// Tells the coach the eating phase of the running cycle: 'maintain', 'cut', or anything else for gaining.
+  void setDiet(String diet) {
+    final cycle = activeCycle;
+    if (cycle == null) return;
+    cycle.diet = diet == 'maintain' || diet == 'cut' ? diet : '';
     changed();
   }
 

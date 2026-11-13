@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../logic/bodyweight.dart';
 import '../logic/coach.dart';
 import '../logic/cycle.dart';
 import '../models.dart';
@@ -39,6 +40,14 @@ class CoachScreen extends StatelessWidget {
         PageHeader(
           'Coach',
           info: InfoDot(tooltip: 'How the coach reads your log', onTap: () => _coachInfo(context)),
+          // The eating phase is told to the coach here; it changes how readily sets are added or removed.
+          trailing: report.cycle != null && report.cycle == store.activeCycle
+              ? TextButton(
+                  style: TextButton.styleFrom(minimumSize: compactButton),
+                  onPressed: () => _dietDialog(context),
+                  child: Text(_dietLabels[report.cycle!.diet] ?? 'Gaining'),
+                )
+              : null,
         ),
         if (report.suggestions.isNotEmpty || report.deload.isNotEmpty) ...[
           SectionLabel('This ${report.cycle?.periodNoun() ?? 'week'}'),
@@ -282,6 +291,62 @@ class _TrendRow extends StatelessWidget {
   }
 }
 
+const _dietLabels = {'': 'Gaining', 'maintain': 'Maintaining', 'cut': 'Cutting'};
+
+void _dietDialog(BuildContext context) {
+  final store = StoreScope.read(context);
+  final unit = store.settings.unit;
+  final rate = store.settings.trackBodyweight
+      ? bodyweightWeeklyRate(bodyweightTrend(store.bodyweights, unit), DateTime.now())
+      : null;
+  showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('Eating phase'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            StatefulBuilder(
+              builder: (c, setDiet) => SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+                    textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+                  ),
+                  segments: [for (final e in _dietLabels.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+                  selected: {store.activeCycle?.diet ?? ''},
+                  onSelectionChanged: (v) => setDiet(() => store.setDiet(v.first)),
+                ),
+              ),
+            ),
+            if (rate != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Bodyweight trend: ${rate.abs() < 0.05 ? 'steady' : '${rate > 0 ? '+' : '−'}${rate.abs().toStringAsFixed(1)} $unit a week'}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Text(
+              'Recovery depends on how much you eat, so the coach should know.\n\n'
+              'Gaining: normal coaching.\n\n'
+              'Maintaining: a set is added only after two flat weeks, never sooner.\n\n'
+              'Cutting: the aim is to keep strength. No sets are added, holding counts as success, and a flat '
+              'week with poor sleep or a run-down day already takes a set away.\n\n'
+              'Kept for this mesocycle and carried into the next one.',
+            ),
+          ],
+        ),
+      ),
+      actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+    ),
+  );
+}
+
 void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coach reads your log', const [
   (
     'Arrows',
@@ -342,6 +407,11 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'means its sets are never changed and only a drop in strength is reported, which frees recovery for other '
         'muscles. Priority muscles come first when sets are added. The choice is kept for the mesocycle and '
         'carried into the next one.',
+  ),
+  (
+    'Eating phase',
+    'The button beside the title tells the coach whether you are gaining, maintaining or cutting in this '
+        'mesocycle. Cutting adds no sets and removes them sooner; maintaining adds more slowly.',
   ),
   (
     'Deload now',

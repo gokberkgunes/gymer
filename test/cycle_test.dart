@@ -1,5 +1,6 @@
 // Expected statuses come from the Flet app's storage.mesocycle_status().
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymer/logic/bodyweight.dart';
 import 'package:gymer/logic/coach.dart';
 import 'package:gymer/logic/cycle.dart';
 import 'package:gymer/logic/volume.dart';
@@ -344,6 +345,18 @@ void main() {
       expect(coach.coachReport().suggestions.last.reason, contains('Priority'));
       coach.setMuscleGoal('Chest', '');
       expect(real.muscleGoals, isEmpty);
+      // Eating phase: while cutting nothing is added, and the next cycle is not started higher either.
+      coach.setDiet('cut');
+      expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Quads', -1)]);
+      expect(Mesocycle.fromJson({...real.toJson(), 'diet': 'bulk'}).diet, '');
+      expect(coach.startingVolumes(real, coach.cloneCycle(real)).map((a) => a.muscle), ['Quads']);
+      coach.setDiet('');
+      final trend = bodyweightTrend([
+        for (final (day, kg) in [(1, 80.0), (8, 79.5), (15, 79.0), (22, 78.5)])
+          BodyweightEntry(DateTime(2026, 1, day), kg),
+      ], 'kg');
+      expect(bodyweightWeeklyRate(trend, DateTime(2026, 1, 23)), lessThan(-0.2));
+      expect(bodyweightWeeklyRate(trend, DateTime(2026, 3, 1)), isNull); // no recent weigh-in
       // Recovery check-ins of the finished week: soreness turns a flat muscle into a removal, a run-down week
       // blocks additions, and a low pump with early recovery earns a set after a single flat week.
       final lastWeek = coach.history.first;

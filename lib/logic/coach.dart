@@ -444,6 +444,8 @@ Set<String> droppingOff(MuscleVerdict verdict, MuscleVerdict? previous) => {
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
 /// fatigue loses one. The optional check-ins ([recovery]) sharpen this: still sore counts as fatigue, a low
 /// pump with early recovery earns the added set after one flat period, and a run-down period adds nothing.
+/// The cycle's eating phase sets the pace: while cutting nothing is added and a run-down flat week already
+/// costs a set; at maintenance a set is added only after two flat periods, never on the check-in shortcut.
 /// The cycle's muscle goals decide who is coached: a maintained muscle gets no set changes at all, and
 /// priority muscles are served first among the additions. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
 /// [keepMev] off), and no
@@ -485,9 +487,16 @@ List<SetSuggestion> coachSuggestions({
     final sets = weeklySets[v.muscle] ?? 0;
     final sore = recovery.sore.contains(v.muscle), underworked = recovery.underworked.contains(v.muscle);
     final fatigue = [...v.fatigue, if (sore) 'it was still sore at the next workout'];
-    final remove = v.trend == Trend.falling || (v.trend == Trend.holding && fatigue.isNotEmpty);
+    final cutting = cycle.diet == 'cut';
+    final remove =
+        v.trend == Trend.falling || (v.trend == Trend.holding && (fatigue.isNotEmpty || (cutting && recovery.runDown)));
     final stalled = previous[v.muscle] != null && previous[v.muscle]!.trend != Trend.progressing;
-    final add = v.trend == Trend.holding && fatigue.isEmpty && !recovery.runDown && (stalled || underworked);
+    final add =
+        !cutting &&
+        v.trend == Trend.holding &&
+        fatigue.isEmpty &&
+        !recovery.runDown &&
+        (stalled || (underworked && cycle.diet != 'maintain'));
     if (!remove && !add) continue;
     final delta = remove ? -1 : 1;
     final floor = (keepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
@@ -503,7 +512,8 @@ List<SetSuggestion> coachSuggestions({
               'fall off sharply from set to set, so another set there would add little. A longer rest may help.';
     final signs =
         '${fatigue.isEmpty ? '' : ' Signs of fatigue: ${fatigue.join('; ')}.'}'
-        '${recovery.runDown ? ' Sleep or overall state was poor that $period, which may be part of it.' : ''}';
+        '${recovery.runDown ? ' Sleep or overall state was poor that $period, which may be part of it.' : ''}'
+        '${cutting ? ' While cutting, recovery is lower, so sets come off sooner and none are added.' : ''}';
     final reason = remove
         ? v.trend == Trend.falling
               ? '${_names(v.exercises)} fell ${_percent(v.percent)} from the $period before.$signs'
