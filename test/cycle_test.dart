@@ -237,6 +237,21 @@ void main() {
     expect(Settings.fromJson(coach.settings.toJson()).coachCompare, 'volume');
     expect(Settings.fromJson({'coachCompare': 'x'}).coachCompare, 'strength');
     coach.settings.coachCompare = 'strength';
+    // Muscle goals: a maintained muscle is never changed; the choice survives saving and the next cycle.
+    coach.setMuscleGoal('Chest', 'maintain');
+    expect(coach.coachReport().suggestions.map((s) => s.muscle), ['Quads']);
+    expect(
+      Mesocycle.fromJson({
+        ...real.toJson(),
+        'muscleGoals': {'Chest': 'maintain', 'Back': 'x'},
+      }).muscleGoals,
+      {'Chest': 'maintain'},
+    );
+    expect(coach.cloneCycle(real).muscleGoals, {'Chest': 'maintain'});
+    coach.setMuscleGoal('Chest', 'priority');
+    expect(coach.coachReport().suggestions.last.reason, contains('Priority'));
+    coach.setMuscleGoal('Chest', '');
+    expect(real.muscleGoals, isEmpty);
     // Recovery check-ins of the finished week: soreness turns a flat muscle into a removal, a run-down week
     // blocks additions, and a low pump with early recovery earns a set after a single flat week.
     final lastWeek = coach.history.first;

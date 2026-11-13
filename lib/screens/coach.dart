@@ -80,6 +80,8 @@ class CoachScreen extends StatelessWidget {
                   MuscleVolumeRow(
                     muscle: m,
                     sets: sets(m),
+                    goal: report.cycle?.muscleGoals[m],
+                    goalEditable: report.cycle != null && report.cycle == store.activeCycle,
                     performed: report.performed == null
                         ? null
                         : report.performed![m]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0,
@@ -328,6 +330,13 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
     'One change per muscle per week, never above the top of MRV or below MEV (below MV if you turn that off in '
         'Settings → Advanced), nothing in the first two weeks or '
         'during a deload, and no added sets after a week with a missed workout.',
+  ),
+  (
+    'Grow, maintain, priority',
+    'Inside a mesocycle, tap a muscle to tell the coach how to treat it. Grow is the normal coaching. Maintain '
+        'means its sets are never changed and only a drop in strength is reported, which frees recovery for other '
+        'muscles. Priority muscles come first when sets are added. The choice is kept for the mesocycle and '
+        'carried into the next one.',
   ),
   (
     'Deload now',

@@ -88,6 +88,10 @@ class Mesocycle {
   Map<String, List<SessionExercise>> startingLoads;
   List<SetAdjustment> setAdjustments;
 
+  /// What the coach is told per muscle: 'maintain' (no set changes) or 'priority' (first claim on added sets).
+  /// Absent means grow, the normal coaching.
+  Map<String, String> muscleGoals;
+
   /// The microcycle in which the coach's early-deload hint was dismissed; it stays hidden for that one.
   int? deloadHintDismissed;
   Map<int, String> schedule;
@@ -116,11 +120,13 @@ class Mesocycle {
     this.startingLoadUnit = 'kg',
     Map<String, List<SessionExercise>>? startingLoads,
     List<SetAdjustment>? setAdjustments,
+    Map<String, String>? muscleGoals,
     this.deloadHintDismissed,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
   }) : startingLoads = startingLoads ?? {},
        setAdjustments = setAdjustments ?? [],
+       muscleGoals = muscleGoals ?? {},
        weekRir = weekRir ?? {},
        schedule = schedule ?? {},
        events = events ?? {};
@@ -155,6 +161,7 @@ class Mesocycle {
       'startingLoads': {for (final e in startingLoads.entries) e.key: e.value.map((x) => x.toJson()).toList()},
     },
     if (deloadHintDismissed != null) 'deloadHintDismissed': deloadHintDismissed,
+    if (muscleGoals.isNotEmpty) 'muscleGoals': muscleGoals,
     if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
@@ -189,6 +196,10 @@ class Mesocycle {
         e.key as String: [for (final x in e.value as List) SessionExercise.fromJson(x as Map<String, dynamic>)],
     },
     deloadHintDismissed: _int(j['deloadHintDismissed']),
+    muscleGoals: {
+      for (final e in (j['muscleGoals'] as Map? ?? {}).entries)
+        if (e.key is String && (e.value == 'maintain' || e.value == 'priority')) e.key as String: e.value as String,
+    },
     setAdjustments: [for (final x in j['setAdjustments'] as List? ?? []) ?SetAdjustment.tryJson(x)],
     schedule: {for (final e in (j['schedule'] as Map? ?? {}).entries) int.parse('${e.key}'): e.value as String},
     events: {

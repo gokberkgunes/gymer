@@ -416,7 +416,9 @@ String _percent(double v) => '${v.abs().toStringAsFixed(1)} %';
 /// The coach's rule for one finished build period, most important first, at most three:
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
 /// fatigue loses one. The optional check-ins ([recovery]) sharpen this: still sore counts as fatigue, a low
-/// pump with early recovery earns the added set after one flat period, and a run-down period adds nothing. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
+/// pump with early recovery earns the added set after one flat period, and a run-down period adds nothing.
+/// The cycle's muscle goals decide who is coached: a maintained muscle gets no set changes at all, and
+/// priority muscles are served first among the additions. One change per muscle per microcycle, never past the top of MRV or below MEV (MV with
 /// [keepMev] off), and no
 /// additions after a missed workout. [verdicts] is the finished period, [previous] the one before it,
 /// [weeklySets] the current plan per muscle and [micro] the running microcycle (1-based).
@@ -451,7 +453,7 @@ List<SetSuggestion> coachSuggestions({
   final removals = <(double, SetSuggestion)>[], additions = <(double, SetSuggestion)>[];
   final period = cycle.periodNoun(), periodsWord = cycle.periodNoun(plural: true);
   for (final v in verdicts.values) {
-    if (handled.contains(v.muscle)) continue;
+    if (handled.contains(v.muscle) || cycle.muscleGoals[v.muscle] == 'maintain') continue;
     final landmark = rpLandmarks[v.muscle];
     final sets = weeklySets[v.muscle] ?? 0;
     final sore = recovery.sore.contains(v.muscle), underworked = recovery.underworked.contains(v.muscle);
@@ -476,6 +478,7 @@ List<SetSuggestion> coachSuggestions({
               : '${_names(v.exercises)} did not move from the $period before.$signs'
         : stalled
         ? '${_names(v.exercises)} have not moved for two $periodsWord, with no signs of fatigue.'
+              '${cycle.muscleGoals[v.muscle] == 'priority' ? ' Priority muscles are added to first.' : ''}'
         : '${_names(v.exercises)} did not move from the $period before; the pump was low and it had recovered '
               'days earlier.';
     (remove ? removals : additions).add((
@@ -484,7 +487,8 @@ List<SetSuggestion> coachSuggestions({
     ));
   }
   removals.sort((a, b) => a.$1.compareTo(b.$1));
-  additions.sort((a, b) => a.$1.compareTo(b.$1));
+  int rank((double, SetSuggestion) x) => cycle.muscleGoals[x.$2.muscle] == 'priority' ? 0 : 1;
+  additions.sort((a, b) => rank(a) != rank(b) ? rank(a).compareTo(rank(b)) : a.$1.compareTo(b.$1));
   // One exercise serves every muscle it trains: a second muscle never changes the same exercise again.
   final taken = {for (final a in applied) (a.templateId, a.exercise.toLowerCase())};
   final changes = [

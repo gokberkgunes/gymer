@@ -147,6 +147,18 @@ extension AppStoreCoach on AppStore {
     changed();
   }
 
+  /// Tells the coach how to treat [muscle] in the running cycle: 'maintain', 'priority', or anything else to grow.
+  void setMuscleGoal(String muscle, String goal) {
+    final cycle = activeCycle;
+    if (cycle == null) return;
+    if (goal == 'maintain' || goal == 'priority') {
+      cycle.muscleGoals[muscle] = goal;
+    } else {
+      cycle.muscleGoals.remove(muscle);
+    }
+    changed();
+  }
+
   void dismissDeloadHint() {
     final cycle = activeCycle;
     if (cycle == null) return;

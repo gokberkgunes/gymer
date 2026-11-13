@@ -456,9 +456,11 @@ void showLandmarkInfo(
   String setsLabel = 'Planned weekly sets',
   double? performed,
   MuscleVerdict? verdict,
+  bool goalEditable = false,
 }) {
   final l = rpLandmarks[muscle];
-  final partialSets = StoreScope.read(context).settings.includePartialSets;
+  final store = StoreScope.read(context);
+  final partialSets = store.settings.includePartialSets;
   showDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
@@ -468,6 +470,31 @@ void showLandmarkInfo(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (goalEditable && store.activeCycle != null) ...[
+              // What the coach is told about this muscle for the running mesocycle.
+              StatefulBuilder(
+                builder: (c, setGoal) => SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(value: '', label: Text('Grow')),
+                      ButtonSegment(value: 'maintain', label: Text('Maintain')),
+                      ButtonSegment(value: 'priority', label: Text('Priority')),
+                    ],
+                    selected: {store.activeCycle?.muscleGoals[muscle] ?? ''},
+                    onSelectionChanged: (v) => setGoal(() => store.setMuscleGoal(muscle, v.first)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Grow: normal coaching. Maintain: the coach changes no sets and only reports a drop. '
+                'Priority: first in line when sets are added.',
+                style: Theme.of(c).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+            ],
             if (sets != null) ...[
               Row(
                 children: [
@@ -603,6 +630,11 @@ class MuscleVolumeRow extends StatefulWidget {
 
   /// Sets completed so far this week, drawn as a second, solid mark beside the planned one.
   final double? performed;
+
+  /// The coach goal of this muscle in the running cycle ('maintain', 'priority' or null), named after the
+  /// muscle; [goalEditable] lets the tap dialog change it.
+  final String? goal;
+  final bool goalEditable;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -612,6 +644,8 @@ class MuscleVolumeRow extends StatefulWidget {
     this.verdict,
     this.setsLabel = 'Planned weekly sets',
     this.performed,
+    this.goal,
+    this.goalEditable = false,
   });
 
   @override
@@ -657,6 +691,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
           setsLabel: widget.setsLabel,
           performed: widget.performed,
           verdict: widget.verdict,
+          goalEditable: widget.goalEditable,
         ),
         onHighlightChanged: (pressed) {
           if (_pressed != pressed) setState(() => _pressed = pressed);
@@ -672,7 +707,12 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                 Row(
                   children: [
                     Flexible(
-                      child: Text(widget.muscle, maxLines: 1, overflow: TextOverflow.ellipsis, style: labelStyle),
+                      child: Text(
+                        widget.goal == null ? widget.muscle : '${widget.muscle} · ${widget.goal}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: labelStyle,
+                      ),
                     ),
                     if (widget.verdict case final verdict?)
                       Padding(
