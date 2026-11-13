@@ -132,6 +132,7 @@ class _ExerciseCard extends StatelessWidget {
     final weightKind = loadMode == 'external' ? NumKind.weight : NumKind.load;
     final grouped = isGroupedMethod(e.method);
     final note = info?.note.trim() ?? '';
+    final stalled = e.name.isEmpty ? 0 : store.stalledSessions(e.name);
 
     final rows = <Widget>[];
     var group = 0;
@@ -296,13 +297,29 @@ class _ExerciseCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (weekly != null && (info?.primary.isNotEmpty ?? false))
+            if (stalled >= stallSessions || (weekly != null && (info?.primary.isNotEmpty ?? false)))
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 4,
-                  children: [for (final m in info!.primary) _MuscleTotal(muscle: m, sets: weekly![m] ?? 0)],
+                  children: [
+                    if (stalled >= stallSessions)
+                      Material(
+                        color: cs.warning.withValues(alpha: 0.14),
+                        borderRadius: context.style.brSmall,
+                        child: InkWell(
+                          borderRadius: context.style.brSmall,
+                          onTap: () => showStallInfo(context, e.name, stalled),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            child: Text('Stalled', style: t.labelMedium?.copyWith(color: cs.warning)),
+                          ),
+                        ),
+                      ),
+                    if (weekly != null)
+                      for (final m in info?.primary ?? const <String>[]) _MuscleTotal(muscle: m, sets: weekly![m] ?? 0),
+                  ],
                 ),
               ),
             if (note.isNotEmpty)

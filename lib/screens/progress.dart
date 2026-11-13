@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../logic/coach.dart' show stallSessions;
 import '../logic/numbers.dart';
 
 import '../logic/methods.dart';
@@ -89,6 +90,11 @@ class ExerciseProgressList extends StatelessWidget {
                                       TextSpan(
                                         text: '  ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(1)}%',
                                         style: TextStyle(color: delta >= 0 ? cs.primary : cs.error),
+                                      ),
+                                    if (store.stalledSessions(r.name) >= stallSessions)
+                                      TextSpan(
+                                        text: '  stalled',
+                                        style: TextStyle(color: cs.warning),
                                       ),
                                   ],
                                 ),

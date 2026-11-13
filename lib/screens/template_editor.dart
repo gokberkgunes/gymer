@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../logic/circuits.dart';
-import '../logic/coach.dart' show sessionSetCeiling;
+import '../logic/coach.dart' show sessionSetCeiling, stallSessions;
 import '../logic/cycle.dart' show rpLandmarks;
 import '../logic/estimate.dart';
 import '../logic/methods.dart';

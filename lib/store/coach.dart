@@ -228,6 +228,9 @@ extension AppStoreCoach on AppStore {
       if (e.value.direct.sets > 0) e.key: e.value.direct.sets,
   };
 
+  /// Latest sessions of [exercise] in a row without a gain in estimated 1RM; [stallSessions] or more is a stall.
+  int stalledSessions(String exercise) => sessionsWithoutGain([for (final p in progress(exercise)) p.value]);
+
   /// Net coach change to the working sets of [template] in the running mesocycle, for the Train card.
   int coachSetDelta(WorkoutTemplate template) =>
       activeCycle?.setAdjustments.where((a) => a.templateId == template.id).fold<int>(0, (n, a) => n + a.delta) ?? 0;

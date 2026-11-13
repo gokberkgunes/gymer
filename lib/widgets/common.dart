@@ -382,3 +382,19 @@ void notify(BuildContext context, String message) {
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
 }
+
+/// What a stalled exercise is and what can be done about it; opened from the quiet "stalled" marks.
+void showStallInfo(BuildContext context, String exercise, int sessions) => showDialog<void>(
+  context: context,
+  builder: (c) => AlertDialog(
+    title: Text('$exercise has stalled'),
+    content: Text(
+      'Its estimated 1RM has not gone up in the last $sessions sessions. Three ways out:\n\n'
+      'Drop one load increment and build the reps up again.\n\n'
+      'Change the rep range in the exercise details, for example from 8–12 to 10–15.\n\n'
+      'Substitute a different exercise for the same muscle.\n\n'
+      'Whether the muscle needs more or fewer sets is the Coach tab\'s call.',
+    ),
+    actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+  ),
+);

@@ -425,6 +425,17 @@ void main() {
         ],
       );
       (List<String>, List<String>) chest(String name) => (['Chest'], <String>[]);
+      // Stall detection counts the latest sessions that did not beat what came before; three is a stall.
+      expect(
+        [
+          sessionsWithoutGain([100, 102, 104]),
+          sessionsWithoutGain([100, 104, 104, 103, 104.2]),
+          sessionsWithoutGain([100, 104, 95, 97, 99]), // climbing back is not a gain until the old best falls
+          sessionsWithoutGain([100]),
+        ],
+        [0, 3, 3, 0],
+      );
+      expect(coach.stalledSessions('Bench'), 2); // three equal sessions: two without a gain, one short of a stall
       // The editor marks a muscle whose sets in one workout pass the ceiling: ten bench sets are at it, not over.
       expect(coach.sessionSets(full), {'Chest': 10.0});
       expect(everyDayFull(real, {'P': full}, chest, 'Chest'), isTrue);

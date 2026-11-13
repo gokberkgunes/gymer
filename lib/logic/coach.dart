@@ -870,3 +870,19 @@ Map<String, PersonalRange> personalRanges(Iterable<Map<String, MuscleResponse>> 
   }
   return ranges;
 }
+
+/// Sessions an exercise needs without a gain before it counts as stalled.
+const stallSessions = 3;
+
+/// How many of the latest sessions failed to beat what came before them: [values] are one best estimate per
+/// session, oldest first, and each trailing one is compared with the best of up to twelve earlier sessions
+/// (half a percent above it is a gain). Three or more is a stall: reps and load have stopped moving.
+int sessionsWithoutGain(List<double> values) {
+  var count = 0;
+  for (var i = values.length - 1; i > 0; i--) {
+    final earlier = values.sublist(math.max(0, i - 12), i).reduce(math.max);
+    if (values[i] > earlier * 1.005) break;
+    count++;
+  }
+  return count;
+}
