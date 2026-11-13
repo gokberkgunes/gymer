@@ -214,6 +214,28 @@ void main() {
       coach.dismissDeloadHint();
       expect(coach.coachReport().deload, isEmpty);
       expect(Mesocycle.fromJson(real.toJson()).deloadHintDismissed, 4);
+      // Two falling muscles are also enough when the week was a personal high in total hard sets.
+      final some = {
+        for (final (m, p) in [('Quads', -3.0), ('Chest', -2.0), ('Back', 2.0), ('Biceps', 2.0), ('Calves', 0.0)])
+          m: MuscleVerdict(m, [ExerciseTrend(name: m, templateId: 'P', percent: p, pairs: 1)]),
+      };
+      expect(wholeBodyDecline(some), isEmpty);
+      expect(wholeBodyDecline(some, atPersonalHigh: true).map((v) => v.muscle), ['Quads', 'Chest']);
+      Session total(int week, int sets) => Session(
+        id: 't$week',
+        templateId: null,
+        name: 'x',
+        unit: 'kg',
+        startedAt: DateTime(2026, 1, 5 + 7 * week),
+        exercises: [
+          SessionExercise(name: 'x', sets: [for (var i = 0; i < sets; i++) SetEntry(done: true)]),
+        ],
+      );
+      final four = [total(0, 10), total(1, 12), total(2, 11), total(3, 9)];
+      expect(
+        (isPersonalHighWeek(12, four), isPersonalHighWeek(11, four), isPersonalHighWeek(30, four.take(3))),
+        (true, false, false),
+      );
       // Three weekly quad sets are under MEV: by default the coach removes nothing there.
       expect(coach.coachReport().suggestions.map((s) => (s.muscle, s.delta)), [('Chest', 1)]);
       expect(Settings.fromJson((coach.settings..coachKeepMev = false).toJson()).coachKeepMev, isFalse);

@@ -17,6 +17,9 @@ class CoachReport {
   /// changes are held back while it shows.
   final List<MuscleVerdict> deload;
 
+  /// The finished period's total hard sets were the most of any week so far.
+  final bool deloadAtHigh;
+
   /// The muscles losing the most, and those gaining the most, each with its volume zone on the tab.
   final List<MuscleVerdict> declining;
   final List<MuscleVerdict> rising;
@@ -32,6 +35,7 @@ class CoachReport {
     required this.verdicts,
     required this.suggestions,
     this.deload = const [],
+    this.deloadAtHigh = false,
     required this.declining,
     required this.rising,
     this.personal = const {},
@@ -50,6 +54,7 @@ extension AppStoreCoach on AppStore {
     var verdicts = <String, MuscleVerdict>{};
     var suggestions = <SetSuggestion>[];
     var deload = const <MuscleVerdict>[];
+    var deloadAtHigh = false;
     Map<String, WeeklyVolume>? performed;
     final Map<String, WeeklyVolume> volume;
     if (cycle != null && status!.running) {
@@ -71,7 +76,14 @@ extension AppStoreCoach on AppStore {
       final finished = of(micro - 1);
       if (verdicts.isEmpty) verdicts = finished;
       if (status.phase == 'Build' && status.deloadMicro > 0 && cycle.deloadHintDismissed != micro) {
-        deload = wholeBodyDecline(finished);
+        // Every hard set of the finished period, per seven days, against all weeks before it.
+        final own = _cycleSessions(cycle).where((s) => periods.indexOf(s.startedAt) == micro - 2).toList();
+        final periodStart = addDays(periods.start, (micro - 2) * periods.days);
+        deloadAtHigh = isPersonalHighWeek(
+          own.fold(0, (n, s) => n + s.doneSets) * 7 / periods.days,
+          history.where((s) => s.startedAt.isBefore(periodStart)),
+        );
+        deload = wholeBodyDecline(finished, atPersonalHigh: deloadAtHigh);
       }
       if (status.phase == 'Build') {
         suggestions = coachSuggestions(
@@ -116,6 +128,7 @@ extension AppStoreCoach on AppStore {
       // A deload answers whole-body fatigue; set-by-set changes wait until it is taken or dismissed.
       suggestions: deload.isEmpty ? suggestions : suggestions.where((s) => s.applied != null).toList(),
       deload: deload,
+      deloadAtHigh: deloadAtHigh && deload.isNotEmpty,
       declining: declining.take(2).toList(),
       rising: rising.take(2).toList(),
       personal: personalRanges([

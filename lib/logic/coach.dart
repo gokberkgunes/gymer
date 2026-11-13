@@ -292,12 +292,24 @@ Map<String, WeeklyVolume> performedVolume(
   };
 }
 
-/// Whole-body fatigue: at least two muscles fell and they are at least half of the muscles that could be
-/// judged. Removing a set here and there does not answer that; a deload does. Worst first, empty otherwise.
-List<MuscleVerdict> wholeBodyDecline(Map<String, MuscleVerdict> verdicts) {
+/// Whole-body fatigue: at least two muscles fell, and either they are at least half of the muscles that could
+/// be judged or the week's total hard sets were a personal high ([atPersonalHigh]). Removing a set here and
+/// there does not answer that; a deload does. Worst first, empty otherwise.
+List<MuscleVerdict> wholeBodyDecline(Map<String, MuscleVerdict> verdicts, {bool atPersonalHigh = false}) {
   final falling = verdicts.values.where((v) => v.trend == Trend.falling).toList()
     ..sort((a, b) => a.percent.compareTo(b.percent));
-  return falling.length >= 2 && falling.length * 2 >= verdicts.length ? falling : const [];
+  return falling.length >= 2 && (atPersonalHigh || falling.length * 2 >= verdicts.length) ? falling : const [];
+}
+
+/// Whether [total] hard sets in one week match or beat every earlier Monday-to-Sunday week of [earlier]
+/// workouts. Needs four earlier training weeks, so a new log cannot set a "record" by default.
+bool isPersonalHighWeek(double total, Iterable<Session> earlier) {
+  final weeks = <int, int>{};
+  for (final s in earlier) {
+    weeks.update(CoachPeriods.weeks.indexOf(s.startedAt), (n) => n + s.doneSets, ifAbsent: () => s.doneSets);
+  }
+  final totals = weeks.values.where((n) => n > 0);
+  return totals.length >= 4 && total > 0 && total >= totals.reduce(math.max);
 }
 
 /// What the recovery check-ins of one period say, beyond the logged numbers.

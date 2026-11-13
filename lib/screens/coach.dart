@@ -45,7 +45,8 @@ class CoachScreen extends StatelessWidget {
           Card(
             child: Column(
               children: [
-                if (report.deload.isNotEmpty) _DeloadRow(falling: report.deload, cycle: report.cycle!),
+                if (report.deload.isNotEmpty)
+                  _DeloadRow(falling: report.deload, cycle: report.cycle!, atHigh: report.deloadAtHigh),
                 for (final (i, s) in report.suggestions.indexed) ...[
                   if (i > 0 || report.deload.isNotEmpty) const Divider(indent: 16, endIndent: 16),
                   _SuggestionRow(suggestion: s, zone: volumeZone(s.muscle, sets(s.muscle))),
@@ -101,7 +102,8 @@ class CoachScreen extends StatelessWidget {
 class _DeloadRow extends StatelessWidget {
   final List<MuscleVerdict> falling;
   final Mesocycle cycle;
-  const _DeloadRow({required this.falling, required this.cycle});
+  final bool atHigh;
+  const _DeloadRow({required this.falling, required this.cycle, required this.atHigh});
 
   @override
   Widget build(BuildContext context) {
@@ -125,8 +127,8 @@ class _DeloadRow extends StatelessWidget {
                       (
                         '',
                         'Last $period ${falling.map((v) => '${v.muscle} (${fmtTrend(v.percent)})').join(', ')} fell. '
-                            'That is at least half of the muscles that could be compared, which points to fatigue '
-                            'across the whole body rather than too many sets for one muscle.',
+                            '${atHigh ? 'It was also your highest total of hard sets in any week so far. ' : ''}'
+                            'That points to fatigue across the whole body rather than too many sets for one muscle.',
                       ),
                       (
                         'Start',
@@ -343,8 +345,8 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
   ),
   (
     'Deload now',
-    'When at least two muscles fell last week and they are at least half of those that could be compared, the '
-        'coach offers to start the planned deload now instead of removing sets muscle by muscle. Dismiss hides it '
+    'When at least two muscles fell last week, and they are at least half of those that could be compared or '
+        'the week was your highest total of hard sets so far, the coach offers to start the planned deload now instead of removing sets muscle by muscle. Dismiss hides it '
         'for the week.',
   ),
   (
