@@ -219,6 +219,15 @@ extension AppStoreCoach on AppStore {
     return {for (final e in words.entries) e.key: e.value.join(', ')};
   }
 
+  /// Direct sets per muscle inside this one workout, special methods as equivalents: what a single session
+  /// asks of each muscle, for the editor's ceiling mark ([sessionSetCeiling]).
+  Map<String, double> sessionSets(WorkoutTemplate template) => {
+    for (final e in plannedWeeklyVolume(Mesocycle(id: '', start: DateTime(2024), schedule: {1: template.id}), {
+      template.id: template,
+    }, musclesOf).entries)
+      if (e.value.direct.sets > 0) e.key: e.value.direct.sets,
+  };
+
   /// Net coach change to the working sets of [template] in the running mesocycle, for the Train card.
   int coachSetDelta(WorkoutTemplate template) =>
       activeCycle?.setAdjustments.where((a) => a.templateId == template.id).fold<int>(0, (n, a) => n + a.delta) ?? 0;

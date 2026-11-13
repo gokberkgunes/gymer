@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../logic/circuits.dart';
+import '../logic/coach.dart' show sessionSetCeiling;
 import '../logic/cycle.dart' show rpLandmarks;
 import '../logic/estimate.dart';
 import '../logic/methods.dart';
@@ -309,6 +310,7 @@ class _TemplateEditorState extends State<TemplateEditor> {
   /// Weekly sets per muscle with this draft, against the saved plan (Settings → Workout → Weekly sets button).
   Future<void> _weeklySets() async {
     final v = _store.editorWeeklySets(_d);
+    final here = _store.sessionSets(_d);
     final muscles = [
       ...rpLandmarks.keys,
       for (final m in {...v.before.keys, ...v.after.keys})
@@ -329,7 +331,24 @@ class _TemplateEditorState extends State<TemplateEditor> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                  child: Text('Weekly sets', style: t.titleLarge),
+                  child: LabelWithInfo(
+                    Text('Weekly sets', style: t.titleLarge),
+                    InfoDot(
+                      tooltip: 'Sets in this workout',
+                      onTap: () => showDialog<void>(
+                        context: sheet,
+                        builder: (c) => AlertDialog(
+                          title: const Text('Sets in one workout'),
+                          content: const Text(
+                            'A muscle is marked when this workout alone gives it more than $sessionSetCeiling direct '
+                            'sets. Past about ten hard sets for one muscle in one session, further sets add little: '
+                            'spreading them over another day usually works better than a longer workout.',
+                          ),
+                          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -344,7 +363,12 @@ class _TemplateEditorState extends State<TemplateEditor> {
                     child: Text('Tag muscles on exercises to see weekly sets.', style: t.bodySmall),
                   ),
                 for (final m in muscles)
-                  MuscleVolumeRow(muscle: m, sets: v.after[m] ?? 0, delta: (v.after[m] ?? 0) - (v.before[m] ?? 0)),
+                  MuscleVolumeRow(
+                    muscle: m,
+                    sets: v.after[m] ?? 0,
+                    delta: (v.after[m] ?? 0) - (v.before[m] ?? 0),
+                    warning: (here[m] ?? 0) > sessionSetCeiling ? '${fmtSets(here[m]!)} in this workout' : null,
+                  ),
               ],
             ),
           ),

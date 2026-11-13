@@ -425,6 +425,8 @@ void main() {
         ],
       );
       (List<String>, List<String>) chest(String name) => (['Chest'], <String>[]);
+      // The editor marks a muscle whose sets in one workout pass the ceiling: ten bench sets are at it, not over.
+      expect(coach.sessionSets(full), {'Chest': 10.0});
       expect(everyDayFull(real, {'P': full}, chest, 'Chest'), isTrue);
       expect(everyDayFull(real, {'P': plan}, coach.musclesOf, 'Chest'), isFalse);
       MuscleVerdict two(double fly) => MuscleVerdict('Chest', [

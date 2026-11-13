@@ -667,6 +667,9 @@ class MuscleVolumeRow extends StatefulWidget {
   /// Latest check-in answers in words and the cycle's applied set changes, both for the tap dialog.
   final String? feel;
   final List<String> changes;
+
+  /// A short warning after the name, such as too many sets for the muscle in one workout.
+  final String? warning;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -681,6 +684,7 @@ class MuscleVolumeRow extends StatefulWidget {
     this.personal,
     this.feel,
     this.changes = const [],
+    this.warning,
   });
 
   @override
@@ -764,6 +768,11 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                           size: 12,
                           color: trendColor(cs, verdict.trend),
                         ),
+                      ),
+                    if (widget.warning case final warning?)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(warning, style: labelStyle.copyWith(color: cs.warning)),
                       ),
                     const Spacer(),
                     if (change != null && change.abs() > 1e-9)
