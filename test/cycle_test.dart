@@ -403,6 +403,11 @@ void main() {
         set.targetRir = null;
       }
       // An exercise that hurt never gets the added set (bench is the only chest exercise), and is named.
+      // The Recovery card reads sleep and overall answers of recent workouts, oldest first.
+      lastWeek0.checkIn = CheckIn(sleep: 0);
+      coach.history[1].checkIn = CheckIn(overall: 2);
+      expect([for (final a in coach.coachReport().dayAnswers) (a.sleep, a.overall)], [(null, 2), (0, null)]);
+      coach.history[1].checkIn = null;
       lastWeek0.checkIn = CheckIn(pain: {'Bench', 'Squat'});
       final hurt = coach.coachReport().suggestions;
       expect(hurt.map((s) => s.muscle), ['Quads']);

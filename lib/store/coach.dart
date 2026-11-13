@@ -37,6 +37,9 @@ class CoachReport {
   /// Applied set changes of this mesocycle per muscle, each with what the muscle did the week after.
   final Map<String, List<String>> changeLog;
 
+  /// Sleep and overall answers of the last ten workouts that had either, oldest first.
+  final List<({DateTime date, int? sleep, int? overall})> dayAnswers;
+
   const CoachReport({
     required this.cycle,
     required this.planned,
@@ -52,6 +55,7 @@ class CoachReport {
     this.sincePrevious = false,
     this.feel = const {},
     this.changeLog = const {},
+    this.dayAnswers = const [],
   });
 }
 
@@ -190,6 +194,10 @@ extension AppStoreCoach on AppStore {
       sincePrevious: sincePrevious,
       changeLog: changeLog,
       feel: _latestFeel(now),
+      dayAnswers: [
+        for (final s in history.where((s) => s.checkIn?.sleep != null || s.checkIn?.overall != null).take(10))
+          (date: s.startedAt, sleep: s.checkIn!.sleep, overall: s.checkIn!.overall),
+      ].reversed.toList(),
     );
   }
 

@@ -104,7 +104,73 @@ class CoachScreen extends StatelessWidget {
             ),
           ),
         ),
+        if (report.dayAnswers.isNotEmpty) ...[
+          SectionLabel(
+            'Recovery',
+            trailing: InfoDot(
+              tooltip: 'Reading the squares',
+              onTap: () => showInfoSections(context, 'Recovery', const [
+                (
+                  '',
+                  'Your sleep and overall answers from the check-in after each workout, oldest on the left, newest '
+                      'on the right, for the last ten workouts that had an answer. Red is poor or run down, grey '
+                      'normal, green good or strong; an outline means that question was skipped. A run of red '
+                      'explains falling strength better than the set count does.',
+                ),
+              ]),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Column(
+                children: [
+                  _AnswerRow(label: 'Sleep', answers: [for (final a in report.dayAnswers) a.sleep]),
+                  const SizedBox(height: 8),
+                  _AnswerRow(label: 'Overall', answers: [for (final a in report.dayAnswers) a.overall]),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// One check-in question over the last workouts: a small square per workout, oldest first.
+class _AnswerRow extends StatelessWidget {
+  final String label;
+  final List<int?> answers;
+  const _AnswerRow({required this.label, required this.answers});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final poor = answers.where((a) => a == 0).length, answered = answers.nonNulls.length;
+    return Semantics(
+      label: '$label: $poor poor of $answered answered workouts',
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+          for (final a in answers)
+            Container(
+              width: 12,
+              height: 12,
+              margin: const EdgeInsets.only(left: 4),
+              decoration: BoxDecoration(
+                color: switch (a) {
+                  0 => cs.error,
+                  1 => cs.onSurfaceVariant.withValues(alpha: 0.45),
+                  2 => cs.success,
+                  _ => null,
+                },
+                border: a == null ? Border.all(color: cs.outlineVariant) : null,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
