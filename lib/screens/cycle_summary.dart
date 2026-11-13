@@ -257,6 +257,55 @@ class CycleSummaryContent extends StatelessWidget {
             ),
           ),
         ],
+        if (summary.underMev.isNotEmpty || summary.atMrv.isNotEmpty || summary.stalled.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 24, 4, 12),
+            child: LabelWithInfo(
+              Text('FOR NEXT CYCLE', style: t.labelSmall),
+              InfoDot(
+                tooltip: 'For next cycle',
+                onTap: () => info(
+                  'For next cycle',
+                  'Things worth changing before you start again. Under MEV: the muscle averaged fewer weekly sets '
+                      'than its minimum effective volume, so it was probably only maintained. At or above MRV: it '
+                      'averaged at the limit of what can be recovered from. Stalled: the exercise has not improved '
+                      'for three sessions and is a candidate to swap. The landmarks are general references.',
+                ),
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: EdgeInsets.all(context.style.sp(16)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final (label, names) in [
+                    ('Under MEV', summary.underMev),
+                    ('At or above MRV', summary.atMrv),
+                    ('Stalled', summary.stalled),
+                  ])
+                    if (names.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: '$label  ',
+                                style: TextStyle(color: cs.onSurfaceVariant),
+                              ),
+                              TextSpan(text: names.join(', ')),
+                            ],
+                          ),
+                          style: t.bodyMedium,
+                        ),
+                      ),
+                ],
+              ),
+            ),
+          ),
+        ],
         if (summary.bests.isNotEmpty) ...[
           const SizedBox(height: 16),
           PersonalBestCard(summary.bests, title: 'Personal bests'),

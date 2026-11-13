@@ -114,6 +114,10 @@ class CycleSummary {
 
   /// Per muscle: average weekly sets, strength change and where to start next cycle.
   final List<MuscleResponse> response;
+
+  /// Candidates to change before the next cycle: muscles whose average weekly sets sat under MEV, muscles at
+  /// or above the MRV range, and scheduled exercises that have stalled.
+  final List<String> underMev, atMrv, stalled;
   const CycleSummary({
     required this.unit,
     required this.start,
@@ -127,6 +131,9 @@ class CycleSummary {
     required this.bests,
     required this.strength,
     this.response = const [],
+    this.underMev = const [],
+    this.atMrv = const [],
+    this.stalled = const [],
   });
 }
 

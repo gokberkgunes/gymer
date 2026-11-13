@@ -100,6 +100,12 @@ extension AppStoreCycles on AppStore {
         bests[(best.exercise.toLowerCase(), best.kind)] = best;
       }
     }
+    final response = cycleResponses(cycle).values.toList();
+    String? zone(MuscleResponse r) => volumeZone(r.muscle, r.sets);
+    final scheduled = {
+      for (final id in cycle.schedule.values)
+        for (final e in template(id)?.exercises ?? const <TemplateExercise>[]) e.name,
+    };
     return CycleSummary(
       unit: settings.unit,
       start: dateOnly(cycle.start),
@@ -112,7 +118,19 @@ extension AppStoreCycles on AppStore {
       duration: sessions.fold(Duration.zero, (total, s) => total + s.duration),
       bests: bests.values.toList(),
       strength: cycleStrengthChanges(cycle, sessions, settings.unit),
-      response: cycleResponses(cycle).values.toList(),
+      response: response,
+      underMev: [
+        for (final r in response)
+          if (zone(r) == 'Below MV' || zone(r) == 'MV') r.muscle,
+      ],
+      atMrv: [
+        for (final r in response)
+          if (zone(r) == 'MRV' || (zone(r)?.startsWith('Above') ?? false)) r.muscle,
+      ],
+      stalled: [
+        for (final name in scheduled)
+          if (stalledSessions(name) >= stallSessions) name,
+      ],
     );
   }
 

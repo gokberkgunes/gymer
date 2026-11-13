@@ -296,6 +296,9 @@ void main() {
       );
       expect(response['Back']!.percent, greaterThan(response['Chest']!.percent));
       expect(coach.summarizeCycle(real).response.map((r) => r.muscle), response.keys);
+      // For next cycle: three weekly sets are under MEV for all four muscles here; nothing is at MRV or stalled.
+      final review = coach.summarizeCycle(real);
+      expect((review.underMev.length, review.atMrv.length, review.stalled.length), (4, 0, 0));
       final next = coach.cloneCycle(real);
       expect(
         [for (final a in coach.startingVolumes(real, next)) (a.muscle, a.exercise, a.delta, a.micro)],
