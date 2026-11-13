@@ -357,6 +357,23 @@ void main() {
       ], 'kg');
       expect(bodyweightWeeklyRate(trend, DateTime(2026, 1, 23)), lessThan(-0.2));
       expect(bodyweightWeeklyRate(trend, DateTime(2026, 3, 1)), isNull); // no recent weigh-in
+      // Experience sets how far additions go; a personal range that found the falling point takes over.
+      expect(
+        [
+          for (final x in ['beginner', 'intermediate', 'advanced']) addCeiling('Chest', x, null),
+        ],
+        [11, 16, 24],
+      );
+      expect((addCeiling('Back', 'advanced', null), addCeiling('Neck', 'advanced', null)), (20, null));
+      expect(addCeiling('Chest', 'advanced', (low: 6, high: 9, cycles: 2)), 8);
+      expect(Settings.fromJson({'experience': 'pro'}).experience, 'intermediate');
+      // A beginner who had a set added last week waits a week before the next one.
+      real.setAdjustments.add(SetAdjustment(muscle: 'Chest', templateId: 'P', exercise: 'Row', delta: 1, micro: 3));
+      coach.settings.experience = 'beginner';
+      expect(coach.coachReport().suggestions.map((s) => s.muscle), ['Quads']);
+      coach.settings.experience = 'intermediate';
+      expect(coach.coachReport().suggestions.map((s) => s.muscle), ['Quads', 'Chest']);
+      real.setAdjustments.clear();
       // Recovery check-ins of the finished week: soreness turns a flat muscle into a removal, a run-down week
       // blocks additions, and a low pump with early recovery earns a set after a single flat week.
       final lastWeek = coach.history.first;

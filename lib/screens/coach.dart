@@ -397,8 +397,10 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
   ),
   (
     'Limits',
-    'One change per muscle per week, never above the top of MRV or below MEV (below MV if you turn that off in '
-        'Settings → Advanced), nothing in the first two weeks or '
+    'One change per muscle per week. Sets are never added past a ceiling that follows your training experience '
+        '(Settings → Advanced): the middle of MAV under a year, the top of MAV at one to three years, the top of '
+        'MRV after that, or one set below where the muscle fell in earlier mesocycles once that is known. Never '
+        'below MEV (below MV if you turn that off), nothing in the first two weeks or '
         'during a deload, and no added sets after a week with a missed workout.',
   ),
   (

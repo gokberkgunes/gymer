@@ -440,10 +440,28 @@ Set<String> droppingOff(MuscleVerdict verdict, MuscleVerdict? previous) => {
       e.name.toLowerCase(),
 };
 
+/// The most weekly sets the coach will add up to for [muscle]. A personal range that has found where the
+/// muscle falls wins: one set under that level. Otherwise experience decides: beginners stop in the middle of
+/// MAV, intermediates at its top (where the MRV zone begins), advanced lifters at the top of MRV. Null without
+/// landmarks.
+double? addCeiling(String muscle, String experience, PersonalRange? personal) {
+  if (personal?.high case final high?) return high - 1;
+  final l = rpLandmarks[muscle];
+  final mav = l?.mavRange;
+  if (mav == null) return null;
+  return switch (experience) {
+    'beginner' => (mav.$1 + mav.$2) / 2,
+    'advanced' => l?.mrvRange?.$2 ?? mav.$2,
+    _ => mav.$2,
+  };
+}
+
 /// The coach's rule for one finished build period, most important first, at most three:
 /// progressing keeps its sets; flat for two periods without fatigue gets one more; flat or falling with
 /// fatigue loses one. The optional check-ins ([recovery]) sharpen this: still sore counts as fatigue, a low
 /// pump with early recovery earns the added set after one flat period, and a run-down period adds nothing.
+/// Experience and personal ranges set how far additions go ([addCeiling]); a beginner also gets at most one
+/// added set per muscle every two periods.
 /// The cycle's eating phase sets the pace: while cutting nothing is added and a run-down flat week already
 /// costs a set; at maintenance a set is added only after two flat periods, never on the check-in shortcut.
 /// The cycle's muscle goals decide who is coached: a maintained muscle gets no set changes at all, and
@@ -462,6 +480,8 @@ List<SetSuggestion> coachSuggestions({
   required bool missedWorkout,
   bool keepMev = true,
   Recovery recovery = const Recovery(),
+  String experience = 'intermediate',
+  Map<String, PersonalRange> personal = const {},
 }) {
   final applied = <SetSuggestion>[
     for (final a in cycle.setAdjustments)
@@ -500,7 +520,11 @@ List<SetSuggestion> coachSuggestions({
     if (!remove && !add) continue;
     final delta = remove ? -1 : 1;
     final floor = (keepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
-    final top = landmark?.mrvRange?.$2 ?? landmark?.mavRange?.$2;
+    final top = addCeiling(v.muscle, experience, personal[v.muscle]);
+    final justAdded =
+        experience == 'beginner' &&
+        cycle.setAdjustments.any((a) => a.muscle == v.muscle && a.micro == micro - 1 && a.delta > 0);
+    if (add && justAdded) continue;
     if (remove && sets - 1 < floor) continue;
     if (add && (missedWorkout || (top != null && sets + 1 > top))) continue;
     final avoid = add ? droppingOff(v, previous[v.muscle]) : const <String>{};

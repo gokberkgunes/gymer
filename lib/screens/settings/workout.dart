@@ -408,6 +408,30 @@ class _AdvancedSettings extends StatelessWidget {
               ),
             ),
           ),
+          _stackedChoice(
+            context,
+            'Training experience',
+            s.experience,
+            const {'beginner': 'Under 1 year', 'intermediate': '1–3 years', 'advanced': 'Longer'},
+            (v) => store.updateSettings((x) => x.experience = v),
+            info: InfoDot(
+              tooltip: 'What this changes',
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Training experience'),
+                  content: const Text(
+                    'How far and how fast the coach adds sets. Under a year: newer lifters grow on little volume, '
+                    'so additions stop in the middle of the MAV range and come at most every second week. One to '
+                    'three years: additions stop at the top of MAV, where the MRV range begins. Longer: additions '
+                    'may continue to the top of MRV. Once a muscle has its own range from earlier mesocycles, that '
+                    'takes over: the coach stops one set below where the muscle fell before.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+                ),
+              ),
+            ),
+          ),
           _row(
             context,
             'Keep sets at MEV or above',

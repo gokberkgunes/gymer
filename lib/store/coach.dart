@@ -51,6 +51,11 @@ extension AppStoreCoach on AppStore {
     final byId = {for (final t in templates) t.id: t};
     final byVolume = settings.coachCompare == 'volume';
 
+    final personal = personalRanges([
+      for (final c in cycles)
+        if (c.setupComplete && c != cycle) cycleResponses(c),
+    ]);
+
     var verdicts = <String, MuscleVerdict>{};
     var suggestions = <SetSuggestion>[];
     var deload = const <MuscleVerdict>[];
@@ -97,6 +102,8 @@ extension AppStoreCoach on AppStore {
             for (final e in volume.entries) e.key: e.value.countedSets(includePartialSets: settings.includePartialSets),
           },
           keepMev: settings.coachKeepMev,
+          experience: settings.experience,
+          personal: personal,
           recovery: recoveryOf(sessions.where((s) => periods.indexOf(s.startedAt) == micro - 2)),
           missedWorkout: calendarDays(
             cycle,
@@ -131,10 +138,7 @@ extension AppStoreCoach on AppStore {
       deloadAtHigh: deloadAtHigh && deload.isNotEmpty,
       declining: declining.take(2).toList(),
       rising: rising.take(2).toList(),
-      personal: personalRanges([
-        for (final c in cycles)
-          if (c.setupComplete && c != cycle) cycleResponses(c),
-      ]),
+      personal: personal,
     );
   }
 
@@ -172,7 +176,7 @@ extension AppStoreCoach on AppStore {
       final sets = weekly[r.muscle]?.countedSets(includePartialSets: settings.includePartialSets) ?? 0;
       final floor =
           (settings.coachKeepMev ? landmark?.mevRange?.$1 : null) ?? Landmark.range(landmark?.mv ?? '')?.$1 ?? 0;
-      final top = landmark?.mrvRange?.$2 ?? landmark?.mavRange?.$2;
+      final top = addCeiling(r.muscle, settings.experience, null);
       if (delta < 0 ? sets - 1 < floor : top != null && sets + 1 > top) continue;
       final target = adjustmentTarget(plan, byId, musclesOf, r.muscle, delta, null);
       if (target == null || !taken.add((target.$1, target.$2.toLowerCase()))) continue;
