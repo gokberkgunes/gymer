@@ -39,7 +39,10 @@ class BodyweightSummaryCard extends StatelessWidget {
                       Text(
                         points.isEmpty
                             ? 'No entries'
-                            : '${formatNumber(points.last.weight, NumKind.weight)} ${store.settings.unit}',
+                            : [
+                                '${formatNumber(points.last.weight, NumKind.weight)} ${store.settings.unit}',
+                                ?_ratePerWeek(points),
+                              ].join('  '),
                         style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: tabular),
                       ),
                     ],
@@ -58,6 +61,14 @@ class BodyweightSummaryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The trend's change per week as a share of bodyweight ("+0.3 %/wk"); null without two weeks of entries.
+String? _ratePerWeek(List<BodyweightPoint> points) {
+  final rate = bodyweightWeeklyRate(points, DateTime.now());
+  if (rate == null || points.last.trend <= 0) return null;
+  final percent = rate / points.last.trend * 100;
+  return '${percent < 0 ? '−' : '+'}${percent.abs().toStringAsFixed(1)} %/wk';
 }
 
 class BodyweightScreen extends StatelessWidget {
@@ -82,7 +93,9 @@ class BodyweightScreen extends StatelessWidget {
               builder: (c) => AlertDialog(
                 title: const Text('Bodyweight'),
                 content: const Text(
-                  'One measurement per day. The line is a seven-day smoothed trend; dots show actual measurements. New workouts keep the latest known bodyweight from that day or earlier. Editing this log never rewrites finished workouts.',
+                  'One measurement per day. The line is a seven-day smoothed trend; dots show actual measurements. New workouts keep the latest known bodyweight from that day or earlier. Editing this log never rewrites finished workouts.\n\n'
+                  'Per week is the change of the trend over about the last two weeks, as a share of your bodyweight. '
+                  'Common targets are roughly 0.25–0.5 % a week when gaining and 0.5–1 % when cutting.',
                 ),
                 actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Done'))],
               ),
@@ -117,6 +130,7 @@ class BodyweightScreen extends StatelessWidget {
                     children: [
                       Expanded(child: Stat('${formatNumber(points.last.weight, NumKind.weight)} $unit', 'Latest')),
                       Expanded(child: Stat('${formatNumber(points.last.trend, NumKind.weight)} $unit', '7-day trend')),
+                      if (_ratePerWeek(points) case final rate?) Expanded(child: Stat(rate, 'Per week')),
                     ],
                   ),
                   const SizedBox(height: 20),
