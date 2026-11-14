@@ -132,6 +132,9 @@ String fmtDate(DateTime d) => '${_weekdays[d.weekday - 1]}, ${d.day} ${_months[d
 /// "1 set", "2 sets".
 String plural(int n, String one, [String? many]) => '$n ${n == 1 ? one : (many ?? '${one}s')}';
 
+/// "November 2026".
+String fmtMonth(DateTime d) => '${_monthsLong[d.month - 1]} ${d.year}';
+
 String fmtShortDate(DateTime d) => '${d.day} ${_months[d.month - 1]}';
 
 /// The app's only style of (i) button: a small icon placed right after a label, never a full-size

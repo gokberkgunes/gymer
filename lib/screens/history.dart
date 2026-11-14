@@ -123,7 +123,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final body = ListView(
       padding: root ? pageInsets : subPageInsets,
       children: [
-        if (root) PageHeader(title, trailing: _exercises ? null : _searchField(context)),
+        if (root)
+          PageHeader(
+            title,
+            trailing: _exercises ? null : _searchField(context),
+            actions: [
+              if (!_exercises && store.history.isNotEmpty)
+                IconButton(
+                  tooltip: 'Month calendar',
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  onPressed: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const _HistoryCalendar())),
+                ),
+            ],
+          ),
         if (root) ...[
           SegmentedButton<bool>(
             showSelectedIcon: false,
@@ -352,6 +365,145 @@ class _WeekDots extends StatelessWidget {
             ],
           ),
       ],
+    );
+  }
+}
+
+/// Finding a workout by date: one month at a time, Monday first, with every training day marked. A day with
+/// one workout opens its summary; a day with several lists them.
+class _HistoryCalendar extends StatefulWidget {
+  const _HistoryCalendar();
+
+  @override
+  State<_HistoryCalendar> createState() => _HistoryCalendarState();
+}
+
+class _HistoryCalendarState extends State<_HistoryCalendar> {
+  late DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final byDay = <String, List<Session>>{};
+    for (final s in store.history) {
+      byDay.putIfAbsent(dateKey(s.startedAt), () => []).add(s);
+    }
+    final now = DateTime.now();
+    final first = store.history.isEmpty ? now : store.history.last.startedAt;
+    final canBack = _month.isAfter(DateTime(first.year, first.month));
+    final canForward = _month.isBefore(DateTime(now.year, now.month));
+    final days = DateTime(_month.year, _month.month + 1, 0).day;
+    final offset = _month.weekday - 1; // Monday first
+    final trained = [
+      for (var d = 1; d <= days; d++)
+        if (byDay.containsKey(dateKey(DateTime(_month.year, _month.month, d)))) d,
+    ].length;
+
+    void open(List<Session> sessions) {
+      if (sessions.length == 1) return openSessionSummary(context, sessions.single);
+      showModalBottomSheet<void>(
+        context: context,
+        builder: (sheet) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final s in sessions)
+                ListTile(
+                  title: Text(s.name),
+                  subtitle: Text(fmtRecent(s.startedAt)),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    openSessionSummary(context, s);
+                  },
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Calendar')),
+      body: ListView(
+        padding: subPageInsets,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous month',
+                icon: const Icon(Icons.chevron_left_rounded),
+                onPressed: canBack ? () => setState(() => _month = DateTime(_month.year, _month.month - 1)) : null,
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(fmtMonth(_month), style: t.titleMedium),
+                    Text(plural(trained, 'training day'), style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next month',
+                icon: const Icon(Icons.chevron_right_rounded),
+                onPressed: canForward ? () => setState(() => _month = DateTime(_month.year, _month.month + 1)) : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final d in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+                Expanded(
+                  child: Center(child: Text(d, style: t.labelSmall)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          GridView.count(
+            crossAxisCount: 7,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 4,
+            crossAxisSpacing: 4,
+            children: [
+              for (var i = 0; i < offset; i++) const SizedBox.shrink(),
+              for (var d = 1; d <= days; d++)
+                () {
+                  final date = DateTime(_month.year, _month.month, d);
+                  final sessions = byDay[dateKey(date)];
+                  final today = dateKey(date) == dateKey(now);
+                  return Semantics(
+                    label: '${fmtDate(date)}${sessions == null ? '' : ', ${plural(sessions.length, 'workout')}'}',
+                    button: sessions != null,
+                    child: Material(
+                      color: sessions == null ? Colors.transparent : cs.primary.withValues(alpha: 0.18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: context.style.brSmall,
+                        side: today ? BorderSide(color: cs.outline) : BorderSide.none,
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: sessions == null ? null : () => open(sessions),
+                        child: Center(
+                          child: Text(
+                            '$d',
+                            style: t.bodyMedium?.copyWith(
+                              fontWeight: sessions == null ? null : FontWeight.w700,
+                              color: sessions == null ? cs.onSurfaceVariant : cs.onSurface,
+                              fontFeatures: tabular,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }(),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
