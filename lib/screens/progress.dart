@@ -11,6 +11,7 @@ import '../models.dart';
 import '../theme.dart';
 import 'exercises.dart';
 import 'bodyweight.dart';
+import 'measurements.dart';
 import '../widgets/common.dart';
 import '../store.dart';
 
@@ -36,10 +37,13 @@ class ExerciseProgressList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (store.settings.trackBodyweight) const BodyweightSummaryCard(),
+        if (store.settings.trackMeasurements) const MeasurementsSummaryCard(),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
           child: Text(
-            store.settings.trackBodyweight ? 'Exercise trends' : 'Estimated one-rep max per exercise',
+            store.settings.trackBodyweight || store.settings.trackMeasurements
+                ? 'Exercise trends'
+                : 'Estimated one-rep max per exercise',
             style: t.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
         ),

@@ -115,9 +115,29 @@ void main() {
           {'date': '2026-01-01', 'kg': -5},
           {'date': '2026-01-02', 'kg': 80},
         ],
+        'measurements': [
+          {'date': '2026-01-01', 'site': 'Waist', 'cm': 82},
+          {'date': '2026-01-01', 'site': 'Waist', 'cm': 83}, // a second value for the day replaces the first
+          {'date': '2026-01-01', 'site': 'Neck', 'cm': 40},
+          {'date': '2026-01-02', 'site': 'Arm', 'cm': -1},
+          'nonsense',
+        ],
       }),
     );
     expect(store.bodyweights.map((e) => e.kg), [80]);
+    // Body measurements are optional: damaged ones are skipped, and nothing is logged while the switch is off.
+    expect(store.measurements.map((e) => (e.site, e.cm)), [('Waist', 83.0)]);
+    expect(store.logMeasurement(DateTime(2026, 1, 3), 'Arm', 40), isNotNull);
+    store.settings
+      ..trackMeasurements = true
+      ..unit = 'lb';
+    expect(store.logMeasurement(DateTime(2026, 1, 3), 'Arm', 16), isNull); // inches with pounds
+    expect(store.logMeasurement(DateTime(2026, 1, 3), 'Arm', 0), isNotNull);
+    expect(store.measurements.last.cm, closeTo(40.64, 1e-9));
+    store.removeMeasurement(store.measurements.last);
+    expect(AppStore().toJson().containsKey('measurements'), isFalse);
+    expect((store.toJson()['measurements'] as List).single, {'date': '2026-01-01', 'site': 'Waist', 'cm': 83.0});
+    store.settings.unit = 'kg';
     expect(store.settings.plateProfiles.map((p) => p.id), ['gym']);
     final restored = store.settings.toJson();
     expect([for (final field in limits.keys) restored[field]], [0, 1, 999, 24, 0, 1.0, 1.2]);

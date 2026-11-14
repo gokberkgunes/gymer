@@ -17,6 +17,30 @@ class BodyweightEntry {
       BodyweightEntry(DateTime.parse(json['date'] as String), (json['kg'] as num).toDouble());
 }
 
+/// Body sites that can be measured with a tape.
+const measurementSites = ['Arm', 'Chest', 'Waist', 'Thigh', 'Calf'];
+
+/// One circumference on one day, stored in centimetres whatever the display unit.
+class MeasurementEntry {
+  final DateTime date;
+  final String site;
+  final double cm;
+  MeasurementEntry(DateTime date, this.site, this.cm) : date = dateOnly(date) {
+    if (!measurementSites.contains(site) || !cm.isFinite || cm <= 0 || cm > 400) {
+      throw const FormatException('Invalid body measurement.');
+    }
+  }
+
+  /// Centimetres with kilograms, inches with pounds.
+  double inUnit(String unit) => unit == 'lb' ? cm / 2.54 : cm;
+  static double toCm(double value, String unit) => unit == 'lb' ? value * 2.54 : value;
+  static String lengthUnit(String unit) => unit == 'lb' ? 'in' : 'cm';
+
+  Map<String, dynamic> toJson() => {'date': dateKey(date), 'site': site, 'cm': cm};
+  factory MeasurementEntry.fromJson(Map<String, dynamic> json) =>
+      MeasurementEntry(DateTime.parse(json['date'] as String), json['site'] as String, (json['cm'] as num).toDouble());
+}
+
 typedef BodyweightPoint = ({DateTime date, double weight, double trend});
 
 /// Seven-day exponential smoothing accounts for gaps between weigh-ins.

@@ -52,6 +52,7 @@ class AppStore extends ChangeNotifier {
   List<Session> history = [];
   List<Mesocycle> cycles = [];
   List<BodyweightEntry> bodyweights = [];
+  List<MeasurementEntry> measurements = [];
   Set<String> _seenAchievements = {};
   Session? active;
   RestTimer? rest;
@@ -121,6 +122,11 @@ class AppStore extends ChangeNotifier {
       for (final parsed in [for (final entry in j['bodyweights'] as List? ?? []) ?_tryBodyweight(entry)])
         dateKey(parsed.date): parsed,
     }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
+    // One value per site per day; a damaged entry is skipped like a damaged bodyweight.
+    final newMeasurements = <String, MeasurementEntry>{
+      for (final parsed in [for (final entry in j['measurements'] as List? ?? []) ?_tryMeasurement(entry)])
+        '${parsed.site}/${dateKey(parsed.date)}': parsed,
+    }.values.toList()..sort((a, b) => a.date.compareTo(b.date));
     final r = j['rest'];
     final newRest = r == null || newActive == null ? null : _tryRest(r);
     final seen = j['seenAchievements'];
@@ -137,6 +143,7 @@ class AppStore extends ChangeNotifier {
     cycles = newCycles;
     active = newActive;
     bodyweights = newBodyweights;
+    measurements = newMeasurements;
     rest = newRest;
     _seenAchievements = newSeen;
   }
@@ -145,6 +152,14 @@ class AppStore extends ChangeNotifier {
   static RestTimer? _tryRest(Object? entry) {
     try {
       return RestTimer.fromJson(entry as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static MeasurementEntry? _tryMeasurement(Object? entry) {
+    try {
+      return MeasurementEntry.fromJson(entry as Map<String, dynamic>);
     } catch (_) {
       return null;
     }
@@ -166,6 +181,7 @@ class AppStore extends ChangeNotifier {
     'history': history.map((s) => s.toJson()).toList(),
     'cycles': cycles.map((c) => c.toJson()).toList(),
     if (bodyweights.isNotEmpty) 'bodyweights': bodyweights.map((e) => e.toJson()).toList(),
+    if (measurements.isNotEmpty) 'measurements': measurements.map((e) => e.toJson()).toList(),
     if (_seenAchievements.isNotEmpty) 'seenAchievements': _seenAchievements.toList()..sort(),
     'active': active?.toJson(),
     'rest': rest?.toJson(),

@@ -64,6 +64,27 @@ extension AppStoreCatalog on AppStore {
     return null;
   }
 
+  /// One tape measurement per site per day, entered in the display unit (cm with kg, inches with lb).
+  String? logMeasurement(DateTime day, String site, double value) {
+    if (!settings.trackMeasurements) return 'Enable body measurements in Settings first.';
+    if (dateOnly(day).isAfter(dateOnly(DateTime.now()))) return 'Choose today or an earlier date.';
+    final MeasurementEntry entry;
+    try {
+      entry = MeasurementEntry(day, site, MeasurementEntry.toCm(value, settings.unit));
+    } on FormatException {
+      return 'Enter a measurement greater than zero.';
+    }
+    measurements = [...measurements.where((e) => !(e.site == site && dateKey(e.date) == dateKey(day))), entry]
+      ..sort((a, b) => a.date.compareTo(b.date));
+    changed();
+    return null;
+  }
+
+  void removeMeasurement(MeasurementEntry entry) {
+    measurements.removeWhere((e) => e.site == entry.site && dateKey(e.date) == dateKey(entry.date));
+    changed();
+  }
+
   void removeBodyweight(DateTime day) {
     bodyweights.removeWhere((e) => dateKey(e.date) == dateKey(day));
     _refreshActiveBodyweight();

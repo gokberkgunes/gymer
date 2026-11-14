@@ -60,6 +60,7 @@ extension AppStoreBackups on AppStore {
     history = incoming.history;
     cycles = incoming.cycles;
     bodyweights = incoming.bodyweights;
+    measurements = incoming.measurements;
     _seenAchievements = incoming._seenAchievements;
     active = incoming.active;
     rest = incoming.rest;

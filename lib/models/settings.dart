@@ -108,6 +108,9 @@ class Settings {
   int warmupSets;
   bool trackRir;
   bool trackBodyweight;
+
+  /// Optional tape measurements (arm, chest, waist, thigh, calf); off by default, never prompted.
+  bool trackMeasurements;
   String achievementCelebration; // glow | confetti | off
   bool setCelebrations;
   bool recordEffects;
@@ -191,6 +194,7 @@ class Settings {
     this.warmupSets = 3,
     this.trackRir = true,
     this.trackBodyweight = false,
+    this.trackMeasurements = false,
     this.achievementCelebration = 'glow',
     this.setCelebrations = true,
     this.recordEffects = true,
@@ -303,6 +307,7 @@ class Settings {
     'warmupSets': warmupSets,
     'trackRir': trackRir,
     'trackBodyweight': trackBodyweight,
+    if (trackMeasurements) 'trackMeasurements': true,
     'achievementCelebration': achievementCelebration,
     'setCelebrations': setCelebrations,
     'recordEffects': recordEffects,
@@ -377,6 +382,7 @@ class Settings {
       warmupSets: j['warmupSets'] == 2 ? 2 : 3,
       trackRir: b('trackRir', d.trackRir),
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
+      trackMeasurements: b('trackMeasurements', d.trackMeasurements),
       achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),
       setCelebrations: b('setCelebrations', d.setCelebrations),
       recordEffects: b('recordEffects', d.recordEffects),

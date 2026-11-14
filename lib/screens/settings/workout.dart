@@ -76,6 +76,19 @@ class _WorkoutSettings extends StatelessWidget {
                 ),
             ],
           ),
+          Column(
+            children: [
+              _switch(context, 'Track body measurements', s.trackMeasurements, (x, v) => x.trackMeasurements = v),
+              if (s.trackMeasurements)
+                _row(
+                  context,
+                  'Measurements',
+                  const Text('Open'),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MeasurementsScreen())),
+                ),
+            ],
+          ),
           _row(
             context,
             'Track RIR',

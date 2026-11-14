@@ -18,6 +18,7 @@ import 'celebrations.dart';
 import 'data_io.dart';
 import 'bodyweight.dart';
 import 'exercises.dart';
+import 'measurements.dart';
 import 'rep_max.dart';
 import 'achievements.dart';
 
