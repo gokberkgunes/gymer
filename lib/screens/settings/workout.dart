@@ -89,6 +89,21 @@ class _WorkoutSettings extends StatelessWidget {
                 ),
             ],
           ),
+          if (store.photosAvailable)
+            Column(
+              children: [
+                _switch(context, 'Progress photos', s.trackPhotos, (x, v) => x.trackPhotos = v),
+                if (s.trackPhotos)
+                  _row(
+                    context,
+                    'Photos',
+                    const Text('Open'),
+                    onTap: () => Navigator.of(
+                      context,
+                    ).push(MaterialPageRoute<void>(builder: (_) => const ProgressPhotosScreen())),
+                  ),
+              ],
+            ),
           _row(
             context,
             'Track RIR',

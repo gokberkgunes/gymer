@@ -69,6 +69,49 @@ extension AppStoreBackups on AppStore {
     changed();
   }
 
+  /// Progress photos live next to the data file, in the app's private storage, named by their date. They are
+  /// deliberately outside the JSON data: backups, exports and restores never contain or touch them, and
+  /// uninstalling the app removes them.
+  Directory? get _photoDir => _file == null ? null : Directory('${_file.parent.path}/photos');
+
+  /// Whether photos can be kept here at all (not in tests or without app storage).
+  bool get photosAvailable => _photoDir != null;
+
+  /// All progress photos with their dates, oldest first.
+  Future<List<(DateTime, File)>> progressPhotos() async {
+    final dir = _photoDir;
+    if (dir == null || !await dir.exists()) return [];
+    final photos = <(DateTime, File)>[];
+    await for (final f in dir.list()) {
+      final name = f.uri.pathSegments.last;
+      final date = f is File && name.length >= 10 ? DateTime.tryParse(name.substring(0, 10)) : null;
+      if (date != null) photos.add((date, f as File));
+    }
+    return photos..sort((a, b) => a.$2.path.compareTo(b.$2.path));
+  }
+
+  /// Copies a picked image into app storage under [day]. [extension] is kept so the image decodes as it was.
+  Future<String?> addProgressPhoto(List<int> bytes, String extension, DateTime day) async {
+    final dir = _photoDir;
+    if (dir == null) return 'Photos cannot be stored here.';
+    if (bytes.isEmpty) return 'That image is empty.';
+    final ext = RegExp(r'^[a-zA-Z0-9]{1,5}$').hasMatch(extension) ? extension.toLowerCase() : 'jpg';
+    try {
+      await dir.create(recursive: true);
+      await File('${dir.path}/${dateKey(day)}-${DateTime.now().microsecondsSinceEpoch}.$ext').writeAsBytes(bytes);
+      return null;
+    } on FileSystemException catch (e) {
+      return 'Could not save the photo: ${e.message}';
+    }
+  }
+
+  Future<void> deleteProgressPhoto(File photo) async {
+    final dir = _photoDir;
+    // Only ever a file of the photo folder.
+    if (dir == null || photo.parent.path != dir.path) return;
+    if (await photo.exists()) await photo.delete();
+  }
+
   /// Copies live next to the data file, in the app's private storage.
   Directory? get _backupDir => _file == null ? null : Directory('${_file.parent.path}/backups');
 

@@ -292,6 +292,21 @@ void main() {
     a.saveCycle(Mesocycle(id: 'c', start: DateTime(2026, 1, 5), weekRir: {2: 1}));
     await a.flush();
 
+    // Progress photos sit beside the data file by date, never inside the saved data.
+    expect((AppStore().photosAvailable, a.photosAvailable, (await a.progressPhotos()).length), (false, true, 0));
+    expect(await a.addProgressPhoto([1, 2, 3], 'PNG', DateTime(2026, 2, 1)), isNull);
+    expect(await a.addProgressPhoto([4], '../x', DateTime(2026, 1, 1)), isNull);
+    expect(await a.addProgressPhoto([], 'jpg', DateTime(2026, 1, 1)), isNotNull);
+    final photos = await a.progressPhotos();
+    expect(
+      [for (final (date, f) in photos) (dateKey(date), f.path.split('.').last)],
+      [('2026-01-01', 'jpg'), ('2026-02-01', 'png')],
+    );
+    await a.deleteProgressPhoto(file); // only files of the photo folder are ever deleted
+    await a.deleteProgressPhoto(photos.first.$2);
+    expect((await a.progressPhotos()).length, 1);
+    expect((file.existsSync(), jsonEncode(a.toJson()).contains('photo')), (true, false));
+
     final b = AppStore(file: file);
     await b.load();
     expect(b.active?.exercises.first.sets.first.weight, 42.5);

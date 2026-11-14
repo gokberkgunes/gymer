@@ -111,6 +111,9 @@ class Settings {
 
   /// Optional tape measurements (arm, chest, waist, thigh, calf); off by default, never prompted.
   bool trackMeasurements;
+
+  /// Optional progress photos, kept in app storage only and never in backups.
+  bool trackPhotos;
   String achievementCelebration; // glow | confetti | off
   bool setCelebrations;
   bool recordEffects;
@@ -195,6 +198,7 @@ class Settings {
     this.trackRir = true,
     this.trackBodyweight = false,
     this.trackMeasurements = false,
+    this.trackPhotos = false,
     this.achievementCelebration = 'glow',
     this.setCelebrations = true,
     this.recordEffects = true,
@@ -308,6 +312,7 @@ class Settings {
     'trackRir': trackRir,
     'trackBodyweight': trackBodyweight,
     if (trackMeasurements) 'trackMeasurements': true,
+    if (trackPhotos) 'trackPhotos': true,
     'achievementCelebration': achievementCelebration,
     'setCelebrations': setCelebrations,
     'recordEffects': recordEffects,
@@ -383,6 +388,7 @@ class Settings {
       trackRir: b('trackRir', d.trackRir),
       trackBodyweight: b('trackBodyweight', d.trackBodyweight),
       trackMeasurements: b('trackMeasurements', d.trackMeasurements),
+      trackPhotos: b('trackPhotos', d.trackPhotos),
       achievementCelebration: s('achievementCelebration', d.achievementCelebration, {'glow', 'confetti', 'off'}),
       setCelebrations: b('setCelebrations', d.setCelebrations),
       recordEffects: b('recordEffects', d.recordEffects),
