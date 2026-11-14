@@ -34,6 +34,7 @@ Future<String?> pickExercise(
     title: 'Exercise',
     present: (name) => present.contains(name.trim().toLowerCase()),
     values: () => [for (final e in store.exercises) e.name],
+    aliases: store.aliasesOf,
     filters: [...muscles, ...equipment],
     initialFilter: muscles.contains(muscle) ? muscle : null,
     matchesFilter: (name, filter) {
@@ -67,6 +68,7 @@ Future<String?> pickName(
   List<String> filters = const [],
   String? initialFilter,
   bool Function(String name, String filter)? matchesFilter,
+  List<String> Function(String)? aliases,
 }) {
   return showModalBottomSheet<String>(
     context: context,
@@ -84,6 +86,7 @@ Future<String?> pickName(
       filters: filters,
       initialFilter: initialFilter,
       matchesFilter: matchesFilter,
+      aliases: aliases,
     ),
   );
 }
@@ -100,6 +103,7 @@ class _Picker extends StatefulWidget {
   final List<String> filters;
   final String? initialFilter;
   final bool Function(String name, String filter)? matchesFilter;
+  final List<String> Function(String)? aliases;
   const _Picker({
     required this.title,
     required this.values,
@@ -112,6 +116,7 @@ class _Picker extends StatefulWidget {
     this.filters = const [],
     this.initialFilter,
     this.matchesFilter,
+    this.aliases,
   });
 
   @override
@@ -135,7 +140,10 @@ class _PickerState extends State<_Picker> {
     final raw = _query.text;
     final filter = _filter;
     final matches = [
-      for (final name in filterNames(widget.values(), raw))
+      for (final name
+          in widget.aliases == null
+              ? filterNames(widget.values(), raw)
+              : filterNamesWithAliases(widget.values(), raw, widget.aliases!))
         if (filter == null || (widget.matchesFilter?.call(name, filter) ?? true)) name,
     ];
     final addable = (raw.startsWith(' ') ? raw.substring(1) : raw).trim();

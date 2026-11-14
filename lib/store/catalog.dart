@@ -113,6 +113,22 @@ extension AppStoreCatalog on AppStore {
     return e;
   }
 
+  /// Adds the standard exercises that are not in the database yet (matched by name) and returns how many.
+  /// Existing exercises, including edited ones, are left exactly as they are.
+  int addStandardExercises() {
+    final missing = [
+      for (final e in moreExercises)
+        if (exercise(e.name) == null) e,
+    ];
+    if (missing.isEmpty) return 0;
+    exercises = [...exercises, ...missing]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    changed();
+    return missing.length;
+  }
+
+  /// Other names [name] is known by, for search ("RDL", "skullcrusher").
+  List<String> aliasesOf(String name) => exerciseAliases[name.trim().toLowerCase()] ?? const [];
+
   void toggleExerciseFavourite(String name) {
     final current = exercise(name);
     if (current == null) return;

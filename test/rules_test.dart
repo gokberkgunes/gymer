@@ -1,4 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymer/data/exercises_more.dart';
+import 'package:gymer/data/seed.dart';
+import 'package:gymer/logic/cycle.dart';
 import 'package:gymer/logic/methods.dart';
 import 'package:gymer/logic/numbers.dart';
 import 'package:gymer/logic/plates.dart';
@@ -53,6 +56,26 @@ void main() {
     expect(filterNames(names, 'lp').first, 'Leg Press');
     expect(filterNames(names, ' press'), ['Leg Press', 'Bench Press']);
     expect(filterNames(names, ' lp'), isEmpty);
+    // Search also finds an exercise through its other names, after direct matches and only once.
+    List<String> aliases(String name) => exerciseAliases[name.toLowerCase()] ?? const [];
+    const lifts = ['Romanian Deadlift', 'Skullcrusher', 'Barbell Row', 'Lat Pulldown'];
+    expect(filterNamesWithAliases(lifts, 'rdl', aliases), ['Romanian Deadlift']);
+    expect(filterNamesWithAliases(lifts, 'lying triceps', aliases), ['Skullcrusher']);
+    expect(filterNamesWithAliases(lifts, 'row', aliases).where((n) => n == 'Barbell Row').length, 1);
+    expect(filterNamesWithAliases(lifts, '', aliases).length, 4);
+    // The standard exercises are well-formed: unique, tagged with known muscles, and all aliases have an owner.
+    final standard = [...seedExercises, ...moreExercises];
+    expect({for (final e in standard) e.name.toLowerCase()}.length, standard.length);
+    expect(moreExercises.every((e) => e.primary.isNotEmpty && e.description.isNotEmpty), isTrue);
+    expect(
+      {
+        for (final e in moreExercises) ...e.primary,
+        for (final e in moreExercises) ...e.secondary,
+      }.difference(rpLandmarks.keys.toSet()),
+      isEmpty,
+    );
+    expect(exerciseAliases.keys.where((k) => !standard.any((e) => e.name.toLowerCase() == k)), isEmpty);
+    expect(moreExercises.length, greaterThanOrEqualTo(80));
   });
 
   test('automatic backups thin out like ZFS: 3 newest, 3 days, 4 weeks, 6 months', () {

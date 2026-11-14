@@ -32,11 +32,34 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
     final store = StoreScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final raw = _query.text;
-    final names = filterNames([for (final e in store.exercises) e.name], raw);
+    final names = filterNamesWithAliases([for (final e in store.exercises) e.name], raw, store.aliasesOf);
     final addable = (raw.startsWith(' ') ? raw.substring(1) : raw).trim();
     final canAdd = addable.isNotEmpty && store.exercise(addable) == null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Exercise Database')),
+      appBar: AppBar(
+        title: const Text('Exercise Database'),
+        actions: [
+          IconButton(
+            tooltip: 'Add standard exercises',
+            icon: const Icon(Icons.library_add_outlined),
+            onPressed: () async {
+              final ok = await confirm(
+                context,
+                'Add standard exercises',
+                'Adds the common exercises that are not in your database yet, with their muscles and equipment. '
+                    'Exercises you already have, including ones you edited, are not changed.',
+                action: 'Add',
+              );
+              if (!ok || !context.mounted) return;
+              final added = store.addStandardExercises();
+              notify(
+                context,
+                added == 0 ? 'All standard exercises are already here.' : 'Added ${plural(added, 'exercise')}.',
+              );
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(

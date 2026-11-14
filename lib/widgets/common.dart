@@ -356,6 +356,23 @@ double? _fuzzyScore(String query, String text) {
 
 /// Shared picker search: fuzzy by default; a leading space switches that
 /// search to contiguous, literal matching.
+/// [filterNames] that also finds a name through its other names: direct matches first, then names whose
+/// alias matches, each once.
+List<String> filterNamesWithAliases(Iterable<String> values, String rawQuery, List<String> Function(String) aliases) {
+  final direct = filterNames(values, rawQuery);
+  if (rawQuery.trim().isEmpty) return direct;
+  final owner = <String, String>{
+    for (final name in values)
+      for (final alias in aliases(name)) alias: name,
+  };
+  final seen = {for (final name in direct) name.toLowerCase()};
+  return [
+    ...direct,
+    for (final alias in filterNames(owner.keys, rawQuery))
+      if (seen.add(owner[alias]!.toLowerCase())) owner[alias]!,
+  ];
+}
+
 List<String> filterNames(Iterable<String> values, String rawQuery) {
   final exact = rawQuery.startsWith(' ');
   final query = (exact ? rawQuery.substring(1) : rawQuery).trim();

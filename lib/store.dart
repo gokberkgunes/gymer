@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'data/exercises_more.dart';
 import 'data/seed.dart';
 import 'logic/achievements.dart';
 import 'logic/circuits.dart';
@@ -95,7 +96,8 @@ class AppStore extends ChangeNotifier {
           final (low, high) = defaultRepRange(equipment: e.equipment, primary: e.primary, secondary: e.secondary);
           return e.copyWith(repMin: low, repMax: high);
         }(),
-    ];
+      ...moreExercises,
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     templates = seedTemplates();
     notifyListeners();
     await _persist();
