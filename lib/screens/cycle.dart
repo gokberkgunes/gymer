@@ -12,6 +12,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/warmup_background.dart' show DiagonalStripes;
 import 'history.dart';
+import 'progress.dart' show LineChartPainter;
 import 'home.dart';
 import 'cycle_summary.dart';
 

@@ -296,6 +296,11 @@ void main() {
       );
       expect(response['Back']!.percent, greaterThan(response['Chest']!.percent));
       expect(coach.summarizeCycle(real).response.map((r) => r.muscle), response.keys);
+      // Twelve weeks per muscle: completed sets each week and strength as a running percentage. Quads did three
+      // sets in each of the last three trained weeks and ended below where they began.
+      final quads = coach.muscleHistory('Quads');
+      expect((quads.sets.length, quads.sets.where((v) => v == 3).length, quads.strength!.last < -1), (12, 3, true));
+      expect(coach.muscleHistory('Neck').strength, isNull);
       // For next cycle: three weekly sets are under MEV for all four muscles here; nothing is at MRV or stalled.
       final review = coach.summarizeCycle(real);
       expect((review.underMev.length, review.atMrv.length, review.stalled.length), (4, 0, 0));

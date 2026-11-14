@@ -231,6 +231,30 @@ extension AppStoreCoach on AppStore {
   /// Latest sessions of [exercise] in a row without a gain in estimated 1RM; [stallSessions] or more is a stall.
   int stalledSessions(String exercise) => sessionsWithoutGain([for (final p in progress(exercise)) p.value]);
 
+  /// One muscle over the last [weeks] Monday-to-Sunday weeks, oldest first: the sets completed each week, and
+  /// its strength as a running percentage from the first week (each week's verdict compounded; a week without
+  /// a fair comparison leaves it where it was). [strength] is null when no week could be compared.
+  ({List<double> sets, List<double>? strength}) muscleHistory(String muscle, {int weeks = 12, DateTime? at}) {
+    useSensitivity(settings.coachSensitivity);
+    final byVolume = settings.coachCompare == 'volume';
+    final current = CoachPeriods.weeks.indexOf(at ?? DateTime.now());
+    final recent = history.where((s) => CoachPeriods.weeks.indexOf(s.startedAt) > current - weeks - 1).toList();
+    final training = recent.where((s) => s.phase != 'Deload' && s.doneSets > 0).toList();
+    final sets = <double>[], strength = <double>[];
+    var index = 1.0, judged = false;
+    for (var week = current - weeks + 1; week <= current; week++) {
+      final done = performedVolume(recent.where((s) => CoachPeriods.weeks.indexOf(s.startedAt) == week), musclesOf);
+      sets.add(done[muscle]?.countedSets(includePartialSets: settings.includePartialSets) ?? 0);
+      final verdict = muscleVerdicts(training, CoachPeriods.weeks, week, musclesOf, byVolume: byVolume)[muscle];
+      if (verdict != null) {
+        index *= 1 + verdict.percent / 100;
+        judged = true;
+      }
+      strength.add((index - 1) * 100);
+    }
+    return (sets: sets, strength: judged ? strength : null);
+  }
+
   /// Net coach change to the working sets of [template] in the running mesocycle, for the Train card.
   int coachSetDelta(WorkoutTemplate template) =>
       activeCycle?.setAdjustments.where((a) => a.templateId == template.id).fold<int>(0, (n, a) => n + a.delta) ?? 0;

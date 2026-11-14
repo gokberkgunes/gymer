@@ -89,6 +89,7 @@ class CoachScreen extends StatelessWidget {
                     muscle: m,
                     sets: sets(m),
                     goal: report.cycle?.muscleGoals[m],
+                    charts: true,
                     personal: report.personal[m],
                     feel: report.feel[m],
                     changes: report.changeLog[m] ?? const [],
@@ -345,7 +346,8 @@ class _TrendRow extends StatelessWidget {
                   Text(v.muscle, style: t.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
                   InfoDot(
                     tooltip: 'Details',
-                    onTap: () => showLandmarkInfo(context, v.muscle, sets: sets, setsLabel: setsLabel, verdict: v),
+                    onTap: () =>
+                        showLandmarkInfo(context, v.muscle, sets: sets, setsLabel: setsLabel, verdict: v, charts: true),
                   ),
                 ),
                 Text(
@@ -431,6 +433,12 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
         'progressing, flat holding, down falling. Only external loads with the same logging context are compared; '
         'deloads and warm-ups never are. A muscle needs two comparable workouts before it gets an arrow. Tap a '
         'muscle for the exercises.',
+  ),
+  (
+    'Twelve weeks',
+    'Tapping a muscle shows two small charts: its strength over the last twelve weeks, built from the weekly '
+        'arrows so it keeps working when exercises rotate, and the sets you completed each week over the '
+        'landmark bands.',
   ),
   (
     'Your own range',

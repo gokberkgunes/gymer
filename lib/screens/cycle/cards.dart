@@ -460,10 +460,12 @@ void showLandmarkInfo(
   PersonalRange? personal,
   String? feel,
   List<String> changes = const [],
+  bool charts = false,
 }) {
   final l = rpLandmarks[muscle];
   final store = StoreScope.read(context);
   final partialSets = store.settings.includePartialSets;
+  final past = charts ? store.muscleHistory(muscle) : null;
   showDialog<void>(
     context: context,
     builder: (c) => AlertDialog(
@@ -552,6 +554,42 @@ void showLandmarkInfo(
                   style: Theme.of(c).textTheme.bodySmall,
                 ),
               ],
+              const SizedBox(height: 16),
+            ],
+            if (past != null && past.sets.any((v) => v > 0)) ...[
+              if (past.strength case final strength?) ...[
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('Strength, last 12 weeks', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    Text(
+                      fmtTrend(strength.last),
+                      style: TextStyle(color: trendColor(Theme.of(c).colorScheme, trendOf(strength.last))),
+                    ),
+                  ],
+                ),
+                SizedBox(
+                  height: 56,
+                  width: double.infinity,
+                  child: CustomPaint(
+                    painter: LineChartPainter(values: strength, color: Theme.of(c).colorScheme.primary, fill: false),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              const Text('Completed sets per week', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 56,
+                width: double.infinity,
+                child: CustomPaint(painter: _WeeklySetsBars(past.sets, l, Theme.of(c).colorScheme)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Oldest week on the left. The tinted band is MEV to the top of MAV; above it is the MRV range.',
+                style: Theme.of(c).textTheme.bodySmall,
+              ),
               const SizedBox(height: 16),
             ],
             if (changes.isNotEmpty) ...[
@@ -670,6 +708,9 @@ class MuscleVolumeRow extends StatefulWidget {
 
   /// A short warning after the name, such as too many sets for the muscle in one workout.
   final String? warning;
+
+  /// Show the muscle's twelve-week strength and weekly-sets charts in the tap dialog.
+  final bool charts;
   const MuscleVolumeRow({
     super.key,
     required this.muscle,
@@ -685,6 +726,7 @@ class MuscleVolumeRow extends StatefulWidget {
     this.feel,
     this.changes = const [],
     this.warning,
+    this.charts = false,
   });
 
   @override
@@ -734,6 +776,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
           personal: widget.personal,
           feel: widget.feel,
           changes: widget.changes,
+          charts: widget.charts,
         ),
         onHighlightChanged: (pressed) {
           if (_pressed != pressed) setState(() => _pressed = pressed);
@@ -931,4 +974,48 @@ class _LandmarkBar extends CustomPainter {
       old.numberStyle != numberStyle ||
       old.textScaler != textScaler ||
       old.pressed != pressed;
+}
+
+/// Completed weekly sets of one muscle as bars, oldest week first, over its landmark bands: MEV to the top of
+/// MAV tinted with the accent, the MRV range above it with the warning colour.
+class _WeeklySetsBars extends CustomPainter {
+  final List<double> sets;
+  final Landmark? landmark;
+  final ColorScheme colors;
+  const _WeeklySetsBars(this.sets, this.landmark, this.colors);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final mev = landmark?.mevRange, mav = landmark?.mavRange, mrv = landmark?.mrvRange;
+    final top = [...sets, mrv?.$2 ?? mav?.$2 ?? 0.0].reduce(math.max) * 1.05;
+    if (top <= 0) return;
+    double y(double v) => size.height - v / top * size.height;
+    if (mav != null) {
+      canvas.drawRect(
+        Rect.fromLTRB(0, y(mav.$2), size.width, y(mev?.$1 ?? mav.$1)),
+        Paint()..color = colors.primary.withValues(alpha: 0.12),
+      );
+    }
+    if (mrv != null) {
+      canvas.drawRect(
+        Rect.fromLTRB(0, y(mrv.$2), size.width, y(mrv.$1)),
+        Paint()..color = colors.warning.withValues(alpha: 0.14),
+      );
+    }
+    final slot = size.width / sets.length;
+    for (final (i, v) in sets.indexed) {
+      if (v <= 0) continue;
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTRB(i * slot + slot * 0.2, y(v), (i + 1) * slot - slot * 0.2, size.height),
+          topLeft: const Radius.circular(2),
+          topRight: const Radius.circular(2),
+        ),
+        Paint()..color = colors.onSurface.withValues(alpha: 0.7),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WeeklySetsBars old) => old.sets != sets || old.landmark != landmark || old.colors != colors;
 }
