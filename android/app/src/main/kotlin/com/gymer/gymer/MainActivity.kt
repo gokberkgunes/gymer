@@ -72,6 +72,10 @@ class MainActivity : FlutterActivity() {
                     LiveTimer.clear(this)
                     result.success(null)
                 }
+                "todayWidget" -> {
+                    TodayWidget.store(this, call.arguments as? String ?: "{}")
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }

@@ -291,6 +291,16 @@ void main() {
     a.active!.exercises.first.sets.first.weight = 42.5;
     a.saveCycle(Mesocycle(id: 'c', start: DateTime(2026, 1, 5), weekRir: {2: 1}));
     await a.flush();
+    // The home-screen widget gets each coming day's workout and cycle week; days outside the cycle are absent.
+    final legsId = a.templates.firstWhere((t) => t.name == 'Legs').id;
+    a.activeCycle!.schedule = {1: legsId};
+    final widget = a.widgetPlan(from: DateTime(2026, 1, 12), days: 2)['days'] as Map;
+    expect(widget, {
+      '2026-01-12': {'workout': 'Legs', 'week': 'W2 · Build'},
+      '2026-01-13': {'workout': '', 'week': 'W2 · Build'},
+    });
+    expect((a.widgetPlan(from: DateTime(2025, 12, 1), days: 3)['days'] as Map).isEmpty, isTrue);
+    a.activeCycle!.schedule = {};
 
     // CSV export: one row per completed set, quoted where needed, in the workout's own unit.
     final csv = AppStore()

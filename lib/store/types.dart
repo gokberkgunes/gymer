@@ -25,6 +25,9 @@ abstract class Alerts {
   }) {}
   void clearLiveRest() {}
 
+  /// The plan for the coming days as JSON, for the Android home-screen widget.
+  void todayWidget(String plan) {}
+
   /// Whether the app is on screen; the live timer is only shown outside the app.
   void setForeground(bool foreground) {}
 

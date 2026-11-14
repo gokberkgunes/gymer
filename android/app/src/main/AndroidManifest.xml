@@ -17,6 +17,13 @@
         </provider>
         <!-- Switches the status-bar rest timer to counting overtime when rest ends (LiveTimer.kt). -->
         <receiver android:name=".OvertimeReceiver" android:exported="false" />
+        <!-- Home-screen widget with today's planned workout (TodayWidget.kt). -->
+        <receiver android:name=".TodayWidget" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/today_widget_info" />
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"

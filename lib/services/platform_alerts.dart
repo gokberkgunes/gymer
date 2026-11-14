@@ -72,6 +72,15 @@ class PlatformAlerts extends Alerts {
     );
   }
 
+  String? _widgetPlan;
+
+  @override
+  void todayWidget(String plan) {
+    if (kIsWeb || !Platform.isAndroid || plan == _widgetPlan) return;
+    _widgetPlan = plan;
+    unawaited(_live.invokeMethod<void>('todayWidget', plan).catchError((_) {}));
+  }
+
   @override
   void scheduleRest(DateTime at, String exercise) => _alarm(() => _schedule(at, exercise, _alarmRequest));
 

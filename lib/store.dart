@@ -218,6 +218,8 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> flush() async {
+    // Leaving the app is when the home-screen widget needs the current plan.
+    alerts.todayWidget(jsonEncode(widgetPlan()));
     _saveDebounce?.cancel();
     await _persist();
   }

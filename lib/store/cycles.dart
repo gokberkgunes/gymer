@@ -12,6 +12,33 @@ extension AppStoreCycles on AppStore {
     return st.running ? (c, st) : null;
   }
 
+  /// What the home-screen widget shows on each of the next [days] days: the workout still due that day (empty
+  /// on a rest day) and the cycle week. Days outside a running mesocycle are left out, and the widget then
+  /// shows its neutral text.
+  Map<String, dynamic> widgetPlan({DateTime? from, int days = 14}) {
+    final cycle = activeCycle;
+    final start = dateOnly(from ?? DateTime.now());
+    final plan = <String, Map<String, String>>{};
+    if (cycle != null) {
+      final byDate = {for (final d in calendarDays(cycle, history)) dateKey(d.date): d};
+      for (var i = 0; i < days; i++) {
+        final date = addDays(start, i);
+        final status = cycleStatus(cycle, date);
+        final day = byDate[dateKey(date)];
+        if (!status.running || day == null) continue;
+        final due = [
+          if (day.templateId != null && day.status == 'planned') day.templateId!,
+          for (final (_, id) in day.incoming) id,
+        ].map((id) => template(id)?.name).nonNulls;
+        plan[dateKey(date)] = {
+          'workout': due.join(' + '),
+          'week': '${cycle.periodShort}${status.currentMicro} · ${status.phase}',
+        };
+      }
+    }
+    return {'days': plan};
+  }
+
   /// Plans (or re-plans) the cycle's set ramp for the microcycles still ahead; past and running weeks keep
   /// what they had. Called whenever the cycle's settings are saved.
   void _planRamp(Mesocycle c) {
