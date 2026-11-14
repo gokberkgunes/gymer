@@ -37,6 +37,13 @@ class _DataSettings extends StatelessWidget {
           ),
           _row(
             context,
+            'Export sets as CSV',
+            Icon(Icons.table_rows_outlined, color: cs.onSurfaceVariant),
+            subtitle: 'Every logged set, for spreadsheets; not a backup',
+            onTap: () => exportCsv(context),
+          ),
+          _row(
+            context,
             'Restore backup',
             Icon(Icons.restore_rounded, color: cs.onSurfaceVariant),
             subtitle: 'Replace all data from a JSON backup',

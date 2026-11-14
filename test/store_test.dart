@@ -292,6 +292,32 @@ void main() {
     a.saveCycle(Mesocycle(id: 'c', start: DateTime(2026, 1, 5), weekRir: {2: 1}));
     await a.flush();
 
+    // CSV export: one row per completed set, quoted where needed, in the workout's own unit.
+    final csv = AppStore()
+      ..history = [
+        Session(
+          id: 's',
+          templateId: null,
+          name: 'Push, "heavy"',
+          unit: 'lb',
+          startedAt: DateTime(2026, 3, 4, 18),
+          exercises: [
+            SessionExercise(
+              name: 'Bench',
+              sets: [
+                SetEntry(weight: 225, reps: 5, rir: 1, done: true, note: 'felt\ngood'),
+                SetEntry(weight: 225, reps: 4),
+              ],
+            ),
+          ],
+        ),
+      ];
+    addTearDown(csv.dispose);
+    expect(csv.historyCsv().split('\r\n'), [
+      'date,workout,exercise,set,type,weight,unit,reps,rir,method,note',
+      '2026-03-04,"Push, ""heavy""",Bench,1,Normal,225,lb,5,1,Straight,"felt\ngood"',
+      '',
+    ]);
     // Progress photos sit beside the data file by date, never inside the saved data.
     expect((AppStore().photosAvailable, a.photosAvailable, (await a.progressPhotos()).length), (false, true, 0));
     expect(await a.addProgressPhoto([1, 2, 3], 'PNG', DateTime(2026, 2, 1)), isNull);

@@ -58,6 +58,17 @@ Future<void> exportBackup(BuildContext context) async {
   if (uri != null && context.mounted) _say(context, 'Backup saved.');
 }
 
+/// A spreadsheet copy of the logged sets; not a backup, and it cannot be restored.
+Future<void> exportCsv(BuildContext context) async {
+  final store = StoreScope.read(context);
+  final uri = await FilePicker.saveFile(
+    fileName: 'gymer-sets-${dateKey(DateTime.now())}.csv',
+    bytes: utf8.encode(store.historyCsv()),
+    mimeType: 'text/csv',
+  );
+  if (uri != null && context.mounted) _say(context, 'CSV saved.');
+}
+
 Future<void> restoreBackup(BuildContext context) async {
   final store = StoreScope.read(context);
   final ok = await confirm(

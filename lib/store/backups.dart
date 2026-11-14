@@ -69,6 +69,38 @@ extension AppStoreBackups on AppStore {
     changed();
   }
 
+  /// Every completed set of the history as CSV for spreadsheets, oldest workout first: one row per set with
+  /// the workout's own unit. Fields with commas, quotes or line breaks are quoted (RFC 4180).
+  String historyCsv() {
+    String cell(Object? value) {
+      final text = value == null ? '' : '$value';
+      return RegExp('[",\r\n]').hasMatch(text) ? '"${text.replaceAll('"', '""')}"' : text;
+    }
+
+    String number(double? v) => v == null ? '' : formatNumber(v, NumKind.load);
+    final rows = <List<Object?>>[
+      ['date', 'workout', 'exercise', 'set', 'type', 'weight', 'unit', 'reps', 'rir', 'method', 'note'],
+      for (final session in history.reversed)
+        for (final exercise in session.exercises)
+          for (final (i, set) in exercise.sets.indexed)
+            if (set.done)
+              [
+                dateKey(session.startedAt),
+                session.name,
+                exercise.name,
+                i + 1,
+                set.type,
+                number(set.weight),
+                session.unit,
+                set.reps,
+                set.rir,
+                exercise.method,
+                set.note,
+              ],
+    ];
+    return '${rows.map((row) => row.map(cell).join(',')).join('\r\n')}\r\n';
+  }
+
   /// Progress photos live next to the data file, in the app's private storage, named by their date. They are
   /// deliberately outside the JSON data: backups, exports and restores never contain or touch them, and
   /// uninstalling the app removes them.
