@@ -122,6 +122,30 @@ extension AppStoreHistory on AppStore {
     ), () => _progress(exercise));
   }
 
+  /// Other views of one exercise per session, oldest first, in the display unit: 'weight' the heaviest
+  /// completed working set, 'reps' the total reps at that heaviest weight, 'volume' load × reps of the sets
+  /// that count as volume. External loads only.
+  List<(DateTime, double)> exerciseMetric(String exercise, String metric) {
+    final points = <(DateTime, double)>[];
+    for (final s in history.reversed) {
+      final sets = [
+        for (final e in s.exercises)
+          if (sameExercise(e.name, exercise) && e.loadMode == 'external')
+            for (final set in e.sets)
+              if (countsAsVolume(e, set) && (set.weight ?? 0) > 0 && (set.reps ?? 0) > 0) set,
+      ];
+      if (sets.isEmpty) continue;
+      final top = sets.map((x) => x.weight!).reduce(math.max);
+      final value = switch (metric) {
+        'weight' => convertWeight(top, s.unit, settings.unit),
+        'reps' => sets.where((x) => x.weight == top).fold(0, (n, x) => n + x.reps!).toDouble(),
+        _ => convertWeight(sets.fold(0.0, (sum, x) => sum + setVolume(x)), s.unit, settings.unit),
+      };
+      points.add((s.startedAt, value));
+    }
+    return points..sort((a, b) => a.$1.compareTo(b.$1));
+  }
+
   List<ExercisePoint> _progress(String exercise) {
     final points = <ExercisePoint>[];
     final combined = usesBodyweightProgress(exercise);

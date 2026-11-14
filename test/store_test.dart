@@ -318,6 +318,21 @@ void main() {
       '2026-03-04,"Push, ""heavy""",Bench,1,Normal,225,lb,5,1,Straight,"felt\ngood"',
       '',
     ]);
+    // Other chart views of the same sessions: heaviest set, reps at that weight, and volume.
+    csv.history.single.exercises.single.sets.addAll([
+      SetEntry(weight: 225, reps: 3, done: true),
+      SetEntry(weight: 185, reps: 8, done: true),
+    ]);
+    expect(
+      [
+        for (final m in ['weight', 'reps', 'volume']) csv.exerciseMetric('bench', m).single.$2,
+      ],
+      [
+        closeTo(102.058, 0.001), // 225 lb shown in the display unit, kg
+        8,
+        closeTo((225 * 8 + 185 * 8) / 2.2046226218, 1e-6),
+      ],
+    );
     // Progress photos sit beside the data file by date, never inside the saved data.
     expect((AppStore().photosAvailable, a.photosAvailable, (await a.progressPhotos()).length), (false, true, 0));
     expect(await a.addProgressPhoto([1, 2, 3], 'PNG', DateTime(2026, 2, 1)), isNull);

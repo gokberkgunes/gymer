@@ -131,6 +131,93 @@ class ExerciseProgressList extends StatelessWidget {
   }
 }
 
+/// The exercise's chart: estimated 1RM (or combined load) by default, with a quiet choice of other views of
+/// the same sessions for external loads.
+class _MetricChart extends StatefulWidget {
+  final String name;
+  final List<ExercisePoint> points;
+  final bool switchable;
+  const _MetricChart({required this.name, required this.points, required this.switchable});
+
+  @override
+  State<_MetricChart> createState() => _MetricChartState();
+}
+
+class _MetricChartState extends State<_MetricChart> {
+  String _metric = 'e1rm';
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final series = _metric == 'e1rm'
+        ? [for (final p in widget.points) (p.date, p.value)]
+        : store.exerciseMetric(widget.name, _metric);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(
+          children: [
+            if (widget.switchable)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+                      textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+                    ),
+                    segments: const [
+                      ButtonSegment(value: 'e1rm', label: Text('Est. 1RM')),
+                      ButtonSegment(value: 'weight', label: Text('Top weight')),
+                      ButtonSegment(value: 'reps', label: Text('Reps')),
+                      ButtonSegment(value: 'volume', label: Text('Volume')),
+                    ],
+                    selected: {_metric},
+                    onSelectionChanged: (v) => setState(() => _metric = v.first),
+                  ),
+                ),
+              )
+            else
+              const SizedBox(height: 8),
+            SizedBox(
+              height: 180,
+              child: series.isEmpty
+                  ? null
+                  : CustomPaint(
+                      size: Size.infinite,
+                      painter: LineChartPainter(
+                        values: [for (final (_, v) in series) v],
+                        dates: [for (final (d, _) in series) d],
+                        color: cs.primary,
+                        grid: cs.outlineVariant,
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 8),
+            if (series.isNotEmpty)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(fmtShortDate(series.first.$1), style: t.labelSmall),
+                  // What the latest point is, so the chosen view explains itself without a caption.
+                  Text(switch (_metric) {
+                    'reps' => '${fmtNum(series.last.$2)} reps at the top weight',
+                    'e1rm' => fmtShortDate(series.last.$1),
+                    _ => '${fmtNum(series.last.$2.roundToDouble())} ${store.settings.unit}',
+                  }, style: t.labelSmall),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ExerciseProgressScreen extends StatelessWidget {
   final String name;
   const ExerciseProgressScreen({super.key, required this.name});
@@ -204,35 +291,7 @@ class ExerciseProgressScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 20, 12, 12),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 180,
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        painter: LineChartPainter(
-                          values: [for (final p in points) p.value],
-                          dates: [for (final p in points) p.date],
-                          color: cs.primary,
-                          grid: cs.outlineVariant,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(fmtShortDate(points.first.date), style: t.labelSmall),
-                        Text(fmtShortDate(points.last.date), style: t.labelSmall),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _MetricChart(name: name, points: points, switchable: !combined),
             if (!combined) ...[const SectionLabel('Rep maxes'), _RepMaxTable(e1rm: points.last.value, unit: unit)],
             const SectionLabel('Exercise history'),
             for (final (sess, ex) in [
