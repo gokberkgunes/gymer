@@ -62,6 +62,14 @@ void main() {
     expect(keys.toSet(), hasLength(14));
     expect(keys.last, '2026-11-01');
     expect(cycleStatus(c, DateTime(2026, 10, 26, 0, 30)).currentMicro, 2);
+    // Starter programs reuse the saved workouts by name and are left out when one is missing.
+    WorkoutTemplate named(String name) => WorkoutTemplate(id: 'id-$name', name: name, exercises: []);
+    final all = [
+      for (final n in ['Full Body A', 'Full Body B', 'Upper Body', 'Lower Body', 'push', 'Pull']) named(n),
+    ];
+    expect(starterPrograms(all).map((p) => p.name), ['Full body, 3 days', 'Upper / lower, 4 days']);
+    expect(starterPrograms(all).first.schedule, {1: 'id-Full Body A', 3: 'id-Full Body B', 5: 'id-Full Body A'});
+    expect(starterPrograms([...all, named('Legs')]).last.schedule.length, 6);
   });
 
   test(

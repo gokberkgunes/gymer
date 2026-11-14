@@ -461,3 +461,34 @@ Map<String, WeeklyVolume> plannedWeeklyVolume(
       ),
   };
 }
+
+/// A ready weekly schedule built from saved workouts.
+typedef StarterProgram = ({String name, String summary, Map<int, String> schedule});
+
+/// The starter programs that can be offered: each names the workouts it needs (as seeded on a fresh install)
+/// and is left out when any of them is missing, so nothing is duplicated or created. Days are Monday = 1.
+List<StarterProgram> starterPrograms(Iterable<WorkoutTemplate> templates) {
+  final ids = {for (final t in templates) t.name.trim().toLowerCase(): t.id};
+  const plans = <(String, String, Map<int, String>)>[
+    (
+      'Full body, 3 days',
+      'Mon, Wed, Fri. Every muscle three times a week; the simplest place to start.',
+      {1: 'Full Body A', 3: 'Full Body B', 5: 'Full Body A'},
+    ),
+    (
+      'Upper / lower, 4 days',
+      'Mon, Tue, Thu, Fri. Every muscle twice a week with more room per session.',
+      {1: 'Upper Body', 2: 'Lower Body', 4: 'Upper Body', 5: 'Lower Body'},
+    ),
+    (
+      'Push / pull / legs, 6 days',
+      'Mon to Sat. Every muscle twice a week in shorter, focused sessions.',
+      {1: 'Push', 2: 'Pull', 3: 'Legs', 4: 'Push', 5: 'Pull', 6: 'Legs'},
+    ),
+  ];
+  return [
+    for (final (name, summary, days) in plans)
+      if (days.values.every((workout) => ids.containsKey(workout.toLowerCase())))
+        (name: name, summary: summary, schedule: {for (final e in days.entries) e.key: ids[e.value.toLowerCase()]!}),
+  ];
+}

@@ -28,6 +28,43 @@ class _Empty extends StatelessWidget {
               },
               child: const Text('Create mesocycle'),
             ),
+            if (starterPrograms(store.templates) case final programs when programs.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  final chosen = await showDialog<StarterProgram>(
+                    context: context,
+                    builder: (c) => SimpleDialog(
+                      title: const Text('Starter programs'),
+                      children: [
+                        for (final p in programs)
+                          ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                            title: Text(p.name),
+                            subtitle: Text(p.summary),
+                            onTap: () => Navigator.pop(c, p),
+                          ),
+                      ],
+                    ),
+                  );
+                  if (chosen == null || !context.mounted) return;
+                  // Weeks start on Monday, so the schedule's days mean what the program says.
+                  final today = dateOnly(DateTime.now());
+                  editCycle(
+                    context,
+                    Mesocycle(
+                      id: 'C${DateTime.now().microsecondsSinceEpoch}',
+                      name: chosen.name,
+                      start: addDays(today, 1 - today.weekday),
+                      schedule: Map.of(chosen.schedule),
+                    ),
+                    isNew: true,
+                    onCreated: store.beginCycleSetup,
+                  );
+                },
+                child: const Text('Starter programs'),
+              ),
+            ],
             const SizedBox(height: 8),
             OutlinedButton(onPressed: store.openDemoCycle, child: const Text('Open demo cycle')),
           ],
