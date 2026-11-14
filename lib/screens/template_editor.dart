@@ -460,63 +460,79 @@ class _TemplateEditorState extends State<TemplateEditor> {
           ),
           _PlannedWork(report: store.templateVolume(_d)),
           const SectionLabel('Exercises'),
-          for (final (i, e) in _d.exercises.indexed) ...[
-            _ExerciseCard(
-              key: ObjectKey(e),
-              exercise: e,
-              weekly: weekly,
-              invalidName: _missingName.contains(e),
-              restLocked: restLocked,
-              groupsLocked: _groupsLocked,
-              circuitLabel: _circuitLabel(e),
-              onCircuit: () => _editCircuit(e),
-              onChanged: () => setState(() {}),
-              onChoose: () => _chooseExercise(e),
-              onDetails: () async {
-                if (e.name.isEmpty) return _chooseExercise(e);
-                final store = StoreScope.read(context);
-                final old = e.name;
-                final before = {for (final x in store.exercises) x.name};
-                final oldContext = store.exercise(old)?.context;
-                await openExerciseEditor(context, old);
-                if (!mounted) return;
-                // The editor changes the stored templates; this screen edits a copy, so follow its changes.
-                final now = store.exercise(old);
-                final renamed = now == null
-                    ? store.exercises.map((x) => x.name).where((n) => !before.contains(n)).firstOrNull
-                    : null;
-                if (renamed != null) {
-                  renameCircuitExercise(_d.circuits, old, renamed);
-                  for (final x in _d.exercises.where((x) => x.name == old)) {
-                    x.name = renamed;
-                  }
-                }
-                final current = store.exercise(renamed ?? old);
-                if (oldContext != null && current != null && current.context != oldContext) {
-                  for (final x in _d.exercises.where((x) => x.name == current.name)) {
-                    for (final set in x.sets.where((set) => set.context == null)) {
-                      set
-                        ..weight = null
-                        ..reps = null;
+          // Drag an exercise by its handle to reorder; the arrow buttons stay for precise moves.
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            buildDefaultDragHandles: false,
+            itemCount: _d.exercises.length,
+            onReorderItem: (from, to) => setState(() {
+              _d.exercises.insert(to, _d.exercises.removeAt(from));
+              reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
+            }),
+            itemBuilder: (context, i) {
+              final e = _d.exercises[i];
+              return Padding(
+                key: ObjectKey(e),
+                padding: EdgeInsets.only(bottom: context.style.sp(10)),
+                child: _ExerciseCard(
+                  dragIndex: _d.exercises.length > 1 ? i : null,
+                  exercise: e,
+                  weekly: weekly,
+                  invalidName: _missingName.contains(e),
+                  restLocked: restLocked,
+                  groupsLocked: _groupsLocked,
+                  circuitLabel: _circuitLabel(e),
+                  onCircuit: () => _editCircuit(e),
+                  onChanged: () => setState(() {}),
+                  onChoose: () => _chooseExercise(e),
+                  onDetails: () async {
+                    if (e.name.isEmpty) return _chooseExercise(e);
+                    final store = StoreScope.read(context);
+                    final old = e.name;
+                    final before = {for (final x in store.exercises) x.name};
+                    final oldContext = store.exercise(old)?.context;
+                    await openExerciseEditor(context, old);
+                    if (!mounted) return;
+                    // The editor changes the stored templates; this screen edits a copy, so follow its changes.
+                    final now = store.exercise(old);
+                    final renamed = now == null
+                        ? store.exercises.map((x) => x.name).where((n) => !before.contains(n)).firstOrNull
+                        : null;
+                    if (renamed != null) {
+                      renameCircuitExercise(_d.circuits, old, renamed);
+                      for (final x in _d.exercises.where((x) => x.name == old)) {
+                        x.name = renamed;
+                      }
                     }
-                  }
-                }
-                setState(() {});
-              },
-              onMove: (delta) => setState(() {
-                final j = (i + delta).clamp(0, _d.exercises.length - 1);
-                _d.exercises.insert(j, _d.exercises.removeAt(i));
-                reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
-              }),
-              onRemove: () => setState(() {
-                _d.exercises.removeAt(i);
-                reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
-              }),
-              onAddGroup: () => _addGroup(e),
-              onEditContext: (s) => _editContext(e, s),
-            ),
-            SizedBox(height: context.style.sp(10)),
-          ],
+                    final current = store.exercise(renamed ?? old);
+                    if (oldContext != null && current != null && current.context != oldContext) {
+                      for (final x in _d.exercises.where((x) => x.name == current.name)) {
+                        for (final set in x.sets.where((set) => set.context == null)) {
+                          set
+                            ..weight = null
+                            ..reps = null;
+                        }
+                      }
+                    }
+                    setState(() {});
+                  },
+                  onMove: (delta) => setState(() {
+                    final j = (i + delta).clamp(0, _d.exercises.length - 1);
+                    _d.exercises.insert(j, _d.exercises.removeAt(i));
+                    reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
+                  }),
+                  onRemove: () => setState(() {
+                    _d.exercises.removeAt(i);
+                    reconcileCircuits(_d.circuits, _d.exercises.map((e) => e.name));
+                  }),
+                  onAddGroup: () => _addGroup(e),
+                  onEditContext: (s) => _editContext(e, s),
+                ),
+              );
+            },
+          ),
           OutlinedButton.icon(
             onPressed: _addExercise,
             icon: const Icon(Icons.add_rounded),

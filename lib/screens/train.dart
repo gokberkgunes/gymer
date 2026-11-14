@@ -70,17 +70,31 @@ class TrainScreen extends StatelessWidget {
         const SectionLabel('Workouts'),
         if (workouts.isEmpty)
           const Padding(padding: EdgeInsets.all(20), child: Text('No workouts yet. Create one with +.')),
-        for (final w in workouts)
-          Padding(
+        // Drag a workout by its handle to reorder; today's workout always stays on top.
+        ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          buildDefaultDragHandles: false,
+          itemCount: workouts.length,
+          onReorderItem: (from, to) {
+            if (to == from) return;
+            final rest = [...workouts]..removeAt(from);
+            store.moveTemplate(workouts[from].id, after: to == 0 ? null : rest[to - 1].id);
+          },
+          itemBuilder: (context, i) => Padding(
+            key: ValueKey(workouts[i].id),
             padding: const EdgeInsets.only(bottom: 10),
             child: _WorkoutTile(
-              template: w,
-              featured: w.id == featured,
+              template: workouts[i],
+              featured: workouts[i].id == featured,
               label: label,
               cycleRir: cycleRir,
-              last: lastDone[w.id],
+              last: lastDone[workouts[i].id],
+              dragIndex: workouts.length > 1 ? i : null,
             ),
           ),
+        ),
       ],
     );
   }
@@ -138,12 +152,16 @@ class _WorkoutTile extends StatefulWidget {
   final String label;
   final int? cycleRir;
   final DateTime? last;
+
+  /// Position in the reorderable list; null hides the drag handle.
+  final int? dragIndex;
   const _WorkoutTile({
     required this.template,
     required this.featured,
     required this.label,
     required this.cycleRir,
     required this.last,
+    this.dragIndex,
   });
 
   @override
@@ -328,6 +346,18 @@ class _WorkoutTileState extends State<_WorkoutTile> with TickerProviderStateMixi
                   ),
                 ),
               ],
+              if (widget.dragIndex case final index?)
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Tooltip(
+                    message: 'Drag to reorder',
+                    child: SizedBox(
+                      width: 28,
+                      height: 24,
+                      child: Icon(Icons.drag_indicator_rounded, size: 20, color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                ),
               const SizedBox(width: 4),
               SizedBox(
                 width: 28,

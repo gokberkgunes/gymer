@@ -318,6 +318,16 @@ void main() {
       '2026-03-04,"Push, ""heavy""",Bench,1,Normal,225,lb,5,1,Straight,"felt\ngood"',
       '',
     ]);
+    // Workouts can be reordered on Train: after another workout, or to the top.
+    final order = AppStore()
+      ..templates = [
+        for (final n in ['A', 'B', 'C']) WorkoutTemplate(id: n, name: n, exercises: []),
+      ];
+    addTearDown(order.dispose);
+    order.moveTemplate('A', after: 'C');
+    order.moveTemplate('C');
+    order.moveTemplate('missing', after: 'A');
+    expect(order.templates.map((t) => t.id), ['C', 'B', 'A']);
     // Other chart views of the same sessions: heaviest set, reps at that weight, and volume.
     csv.history.single.exercises.single.sets.addAll([
       SetEntry(weight: 225, reps: 3, done: true),

@@ -310,6 +310,16 @@ extension AppStoreCatalog on AppStore {
   /// The cycle keeps the deleted workout's days and shows them as missing (a red "?") until another workout
   /// is chosen: silently turning them into rest days would hide a hole in the plan. Readers of a schedule
   /// must therefore expect an id with no workout behind it ([template] returns null).
+  /// Moves a saved workout to just after [after] in the Train list, or to the top when [after] is null.
+  void moveTemplate(String id, {String? after}) {
+    final moved = templates.where((t) => t.id == id).firstOrNull;
+    if (moved == null || id == after) return;
+    final rest = templates.where((t) => t.id != id).toList();
+    final at = after == null ? 0 : rest.indexWhere((t) => t.id == after) + 1;
+    templates = [...rest.take(at), moved, ...rest.skip(at)];
+    changed();
+  }
+
   void deleteTemplate(String id) {
     templates.removeWhere((t) => t.id == id);
     changed();

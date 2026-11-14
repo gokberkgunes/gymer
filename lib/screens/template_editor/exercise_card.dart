@@ -98,10 +98,13 @@ class _ExerciseCard extends StatelessWidget {
   /// Weekly sets per muscle with the draft, when Settings shows them on exercises; null otherwise.
   final Map<String, double>? weekly;
 
+  /// Position in the editor's reorderable list; null hides the drag handle.
+  final int? dragIndex;
+
   const _ExerciseCard({
-    super.key,
     required this.exercise,
     this.weekly,
+    this.dragIndex,
     required this.invalidName,
     required this.restLocked,
     required this.groupsLocked,
@@ -259,6 +262,21 @@ class _ExerciseCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                if (dragIndex case final index?)
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Tooltip(
+                      message: 'Drag to reorder',
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: SizedBox(
+                          width: 24,
+                          height: 44,
+                          child: Icon(Icons.drag_indicator_rounded, size: 20, color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: OutlinedButton(
                     style: OutlinedButton.styleFrom(
