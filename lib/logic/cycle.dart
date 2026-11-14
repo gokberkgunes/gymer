@@ -352,9 +352,16 @@ int setAdjustmentFor(Mesocycle c, String templateId, String exercise, {int? micr
 
 /// The saved workout with this cycle's set adjustments applied: added sets copy the last working set, removed
 /// ones come off the end, and one working set always remains. The saved workout itself is never changed.
+/// Exercises swapped for the cycle ([Mesocycle.swaps]) appear under their replacement, without the original's
+/// load and rep defaults, in the exercise list and in any superset.
 WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t, {int? micro}) {
-  if (!c.setAdjustments.any((a) => a.templateId == t.id && a.delta != 0)) return t;
+  final swaps = {
+    for (final x in c.swaps)
+      if (x.templateId == t.id) x.from.trim().toLowerCase(): x.to,
+  };
+  if (swaps.isEmpty && !c.setAdjustments.any((a) => a.templateId == t.id && a.delta != 0)) return t;
   final used = <String>{};
+  String nameOf(String name) => swaps[name.trim().toLowerCase()] ?? name;
   return WorkoutTemplate(
     id: t.id,
     name: t.name,
@@ -363,20 +370,35 @@ WorkoutTemplate plannedTemplate(Mesocycle c, WorkoutTemplate t, {int? micro}) {
     setOverhead: t.setOverhead,
     transition: t.transition,
     sessionOverhead: t.sessionOverhead,
-    circuits: t.circuits,
+    circuits: swaps.isEmpty
+        ? t.circuits
+        : [
+            for (final g in t.circuits)
+              ExerciseCircuit(id: g.id, exercises: [for (final n in g.exercises) nameOf(n)], rest: g.rest),
+          ],
     exercises: [
       for (final e in t.exercises)
         () {
-          final delta = used.add(e.name.toLowerCase()) ? setAdjustmentFor(c, t.id, e.name, micro: micro) : 0;
-          if (delta == 0 || e.workSets == 0) return e;
-          final sets = [for (final s in e.sets) s.copy()];
+          final name = nameOf(e.name), swapped = name != e.name;
+          final delta = used.add(name.toLowerCase()) ? setAdjustmentFor(c, t.id, name, micro: micro) : 0;
+          if (!swapped && (delta == 0 || e.workSets == 0)) return e;
+          final sets = [
+            for (final s in e.sets)
+              swapped
+                  ? (s.copy()
+                      ..weight = null
+                      ..reps = null
+                      ..context = null)
+                  : s.copy(),
+          ];
+          if (e.workSets == 0) return TemplateExercise(name: name, method: e.method, sets: sets);
           for (var i = 0; i < delta; i++) {
             sets.add(sets.last.copy()..groupStart = false);
           }
           for (var i = 0; i > delta && sets.where((s) => !isWarmup(s.type)).length > 1; i--) {
             sets.removeLast();
           }
-          return TemplateExercise(name: e.name, method: e.method, sets: sets);
+          return TemplateExercise(name: name, method: e.method, sets: sets);
         }(),
     ],
   );

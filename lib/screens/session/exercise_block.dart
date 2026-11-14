@@ -64,9 +64,33 @@ class _ExerciseBlockState extends State<_ExerciseBlock> {
       if (e.sets.any((s) => s.done)) {
         return notify(context, 'Substitute before completing sets for this exercise.');
       }
-      final name = await pickExercise(context, inWorkout: session.exercises.map((x) => x.name));
+      // Start on the same muscle: that is nearly always what a substitute is for.
+      final name = await pickExercise(
+        context,
+        inWorkout: session.exercises.map((x) => x.name),
+        muscle: info?.primary.firstOrNull,
+      );
       if (name == null || !context.mounted) return;
-      final error = store.substituteExercise(e, name);
+      var forCycle = false;
+      if (session.cycleId != null && session.templateId != null && session.phase != 'Deload') {
+        final choice = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: Text('Use $name how long?'),
+            content: Text(
+              'Just today, or in this workout for the rest of the mesocycle. The saved workout keeps ${e.name} '
+              'either way.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Just today')),
+              FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Rest of mesocycle')),
+            ],
+          ),
+        );
+        if (choice == null || !context.mounted) return;
+        forCycle = choice;
+      }
+      final error = store.substituteExercise(e, name, forCycle: forCycle);
       if (error != null) notify(context, error);
     }
 

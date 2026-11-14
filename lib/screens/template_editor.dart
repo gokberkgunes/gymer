@@ -153,8 +153,19 @@ class _TemplateEditorState extends State<TemplateEditor> {
     Navigator.pop(context);
   }
 
+  /// Muscles whose weekly sets with this draft are still under their minimum effective volume, lowest first:
+  /// the exercise picker offers these filters first.
+  List<String> _underMev() {
+    final weekly = _store.editorWeeklySets(_d).after;
+    final gaps = <(String, double)>[
+      for (final MapEntry(key: muscle, value: landmark) in rpLandmarks.entries)
+        if (landmark.mevRange case (final mev, _) when (weekly[muscle] ?? 0) < mev) (muscle, weekly[muscle] ?? 0),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    return [for (final (muscle, _) in gaps) muscle];
+  }
+
   Future<void> _addExercise() async {
-    final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name));
+    final name = await pickExercise(context, inWorkout: _d.exercises.map((x) => x.name), musclesFirst: _underMev());
     if (name == null || !mounted) return;
     if (_d.exercises.any((x) => sameExercise(x.name, name))) {
       return notify(context, '$name is already in this workout.');

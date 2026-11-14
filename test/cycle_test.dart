@@ -609,6 +609,18 @@ void main() {
       coach.undoSuggestion(report.suggestions.first);
       coach.cycles.single.schedule[3] = 'P';
       expect(coach.coachReport().suggestions.map((s) => s.muscle), ['Quads']);
+      // A substitute chosen for the rest of the mesocycle: the workout starts with it from then on, the saved
+      // workout keeps the original, and going back to the original forgets the swap.
+      coach.startSession(plan);
+      expect(coach.substituteExercise(coach.active!.exercises.last, 'Cable Row', forCycle: true), isNull);
+      coach.discardSession();
+      expect(plannedTemplate(real, plan).exercises.map((e) => e.name), ['Bench', 'Squat', 'Curl', 'Cable Row']);
+      expect((plan.exercises.last.name, Mesocycle.fromJson(real.toJson()).swaps.single.to), ('Row', 'Cable Row'));
+      coach.startSession(plan);
+      expect((coach.active!.exercises.last.name, coach.templateChanged()), ('Cable Row', false));
+      expect(coach.substituteExercise(coach.active!.exercises.last, 'Row', forCycle: true), isNull);
+      coach.discardSession();
+      expect(real.swaps, isEmpty);
       // Outside a cycle: completed sets of the last seven days, arrows by calendar week, falling muscles listed.
       coach.cycles = [];
       final free = coach.coachReport();

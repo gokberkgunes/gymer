@@ -70,6 +70,25 @@ class SetAdjustment {
   }
 }
 
+/// An exercise replaced in one workout for the rest of a mesocycle (a busy machine, a sore joint). The saved
+/// workout keeps the original.
+class ExerciseSwap {
+  String templateId;
+  String from;
+  String to;
+  ExerciseSwap({required this.templateId, required this.from, required this.to});
+
+  Map<String, dynamic> toJson() => {'template': templateId, 'from': from, 'to': to};
+
+  static ExerciseSwap? tryJson(Object? j) {
+    if (j is! Map) return null;
+    final template = j['template'], from = j['from'], to = j['to'];
+    return template is String && from is String && to is String
+        ? ExerciseSwap(templateId: template, from: from, to: to)
+        : null;
+  }
+}
+
 class Mesocycle {
   final String id;
   String name;
@@ -104,6 +123,9 @@ class Mesocycle {
   /// Planned set ramp: 0 off, 1 adds a set per muscle every microcycle of the build, 2 every second one.
   int setRamp;
 
+  /// Exercises substituted for the rest of this cycle.
+  List<ExerciseSwap> swaps;
+
   /// The microcycle in which the coach's early-deload hint was dismissed; it stays hidden for that one.
   int? deloadHintDismissed;
   Map<int, String> schedule;
@@ -135,12 +157,14 @@ class Mesocycle {
     Map<String, String>? muscleGoals,
     this.diet = '',
     this.setRamp = 0,
+    List<ExerciseSwap>? swaps,
     this.deloadHintDismissed,
     Map<int, String>? schedule,
     Map<String, DayEvent>? events,
   }) : startingLoads = startingLoads ?? {},
        setAdjustments = setAdjustments ?? [],
        muscleGoals = muscleGoals ?? {},
+       swaps = swaps ?? [],
        weekRir = weekRir ?? {},
        schedule = schedule ?? {},
        events = events ?? {};
@@ -178,6 +202,7 @@ class Mesocycle {
     if (muscleGoals.isNotEmpty) 'muscleGoals': muscleGoals,
     if (diet.isNotEmpty) 'diet': diet,
     if (setRamp != 0) 'setRamp': setRamp,
+    if (swaps.isNotEmpty) 'swaps': swaps.map((x) => x.toJson()).toList(),
     if (setAdjustments.isNotEmpty) 'setAdjustments': setAdjustments.map((x) => x.toJson()).toList(),
     'schedule': {for (final e in schedule.entries) '${e.key}': e.value},
     'events': {for (final e in events.entries) e.key: e.value.toJson()},
@@ -214,6 +239,7 @@ class Mesocycle {
     deloadHintDismissed: _int(j['deloadHintDismissed']),
     diet: const {'maintain', 'cut'}.contains(j['diet']) ? j['diet'] as String : '',
     setRamp: (_int(j['setRamp']) ?? 0).clamp(0, 2),
+    swaps: [for (final x in j['swaps'] as List? ?? []) ?ExerciseSwap.tryJson(x)],
     muscleGoals: {
       for (final e in (j['muscleGoals'] as Map? ?? {}).entries)
         if (e.key is String && (e.value == 'maintain' || e.value == 'priority')) e.key as String: e.value as String,

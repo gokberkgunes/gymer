@@ -1,21 +1,50 @@
 import 'package:flutter/material.dart';
 
+import '../logic/cycle.dart' show rpLandmarks;
 import 'common.dart';
 import '../store.dart';
 
 /// [inWorkout]: exercises already in the workout being edited. They stay listed (and selectable, so the caller can
 /// explain why it cannot be added again) but are dimmed on a different background.
-Future<String?> pickExercise(BuildContext context, {Iterable<String> inWorkout = const []}) {
+///
+/// One row of filter chips narrows the list to a primary muscle or an equipment type; [muscle] starts with that
+/// muscle selected (substitutions) and [musclesFirst] puts those muscles at the front of the row (the workout
+/// editor passes the ones still under their minimum effective volume).
+Future<String?> pickExercise(
+  BuildContext context, {
+  Iterable<String> inWorkout = const [],
+  String? muscle,
+  List<String> musclesFirst = const [],
+}) {
   final store = StoreScope.read(context);
   final present = {for (final name in inWorkout) name.trim().toLowerCase()};
+  final used = {for (final e in store.exercises) ...e.primary};
+  final muscles = [
+    for (final m in musclesFirst)
+      if (used.contains(m)) m,
+    for (final m in [...rpLandmarks.keys, ...used.where((m) => !rpLandmarks.containsKey(m))])
+      if (used.contains(m) && !musclesFirst.contains(m)) m,
+  ];
+  final equipment = {
+    for (final e in store.exercises)
+      if (e.equipment.isNotEmpty) e.equipment,
+  }.toList()..sort();
   return pickName(
     context,
     title: 'Exercise',
     present: (name) => present.contains(name.trim().toLowerCase()),
     values: () => [for (final e in store.exercises) e.name],
+    filters: [...muscles, ...equipment],
+    initialFilter: muscles.contains(muscle) ? muscle : null,
+    matchesFilter: (name, filter) {
+      final e = store.exercise(name);
+      return e != null && (e.primary.contains(filter) || e.equipment == filter);
+    },
     subtitle: (name) {
       final e = store.exercise(name);
-      return e == null || e.primary.isEmpty ? null : e.primary.join(' · ');
+      if (e == null) return null;
+      final parts = [...e.primary, if (e.equipment.isNotEmpty) e.equipment];
+      return parts.isEmpty ? null : parts.join(' · ');
     },
     onAdd: (name) => store.addExercise(name).name,
     isFavourite: (name) => store.exercise(name)?.favourite ?? false,
@@ -35,6 +64,9 @@ Future<String?> pickName(
   void Function(String)? toggleFavourite,
   List<String> Function()? recent,
   bool Function(String)? present,
+  List<String> filters = const [],
+  String? initialFilter,
+  bool Function(String name, String filter)? matchesFilter,
 }) {
   return showModalBottomSheet<String>(
     context: context,
@@ -49,6 +81,9 @@ Future<String?> pickName(
       toggleFavourite: toggleFavourite,
       recent: recent,
       present: present,
+      filters: filters,
+      initialFilter: initialFilter,
+      matchesFilter: matchesFilter,
     ),
   );
 }
@@ -62,6 +97,9 @@ class _Picker extends StatefulWidget {
   final void Function(String)? toggleFavourite;
   final List<String> Function()? recent;
   final bool Function(String)? present;
+  final List<String> filters;
+  final String? initialFilter;
+  final bool Function(String name, String filter)? matchesFilter;
   const _Picker({
     required this.title,
     required this.values,
@@ -71,6 +109,9 @@ class _Picker extends StatefulWidget {
     this.toggleFavourite,
     this.recent,
     this.present,
+    this.filters = const [],
+    this.initialFilter,
+    this.matchesFilter,
   });
 
   @override
@@ -79,6 +120,7 @@ class _Picker extends StatefulWidget {
 
 class _PickerState extends State<_Picker> {
   final _query = TextEditingController();
+  late String? _filter = widget.initialFilter;
 
   @override
   void dispose() {
@@ -91,7 +133,11 @@ class _PickerState extends State<_Picker> {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final raw = _query.text;
-    final matches = filterNames(widget.values(), raw);
+    final filter = _filter;
+    final matches = [
+      for (final name in filterNames(widget.values(), raw))
+        if (filter == null || (widget.matchesFilter?.call(name, filter) ?? true)) name,
+    ];
     final addable = (raw.startsWith(' ') ? raw.substring(1) : raw).trim();
     final canAdd =
         widget.onAdd != null &&
@@ -174,17 +220,36 @@ class _PickerState extends State<_Picker> {
                 controller: _query,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(hintText: 'Search', prefixIcon: Icon(Icons.search_rounded)),
+                decoration: const InputDecoration(
+                  hintText: 'Search · a leading space for exact text',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
                 onChanged: (_) => setState(() {}),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 2, 20, 8),
-              child: Text(
-                'Fuzzy search · start with a space for exact text',
-                style: t.bodySmall?.copyWith(fontStyle: FontStyle.italic, color: cs.onSurfaceVariant),
-              ),
-            ),
+            if (widget.filters.isNotEmpty)
+              SizedBox(
+                height: 44,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
+                  children: [
+                    for (final f in widget.filters)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          label: Text(f),
+                          showCheckmark: false,
+                          visualDensity: VisualDensity.compact,
+                          selected: _filter == f,
+                          onSelected: (on) => setState(() => _filter = on ? f : null),
+                        ),
+                      ),
+                  ],
+                ),
+              )
+            else
+              const SizedBox(height: 8),
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.only(bottom: 24),

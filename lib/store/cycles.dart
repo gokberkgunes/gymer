@@ -173,6 +173,7 @@ extension AppStoreCycles on AppStore {
       ..['events'] = <String, dynamic>{}
       ..remove('endedAt')
       ..remove('setAdjustments')
+      ..remove('swaps')
       ..remove('deloadHintDismissed')
       ..remove('startingLoads');
     final draft = Mesocycle.fromJson(json);

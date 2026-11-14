@@ -120,13 +120,25 @@ extension AppStoreSessionEdits on AppStore {
     return null;
   }
 
-  String? substituteExercise(SessionExercise e, String newName) {
+  /// [forCycle] also remembers the replacement on the session's mesocycle, so this workout starts with it until
+  /// the cycle ends; the saved workout keeps the original.
+  String? substituteExercise(SessionExercise e, String newName, {bool forCycle = false}) {
     if (e.sets.any((s) => s.done)) return 'Substitute before completing sets for this exercise.';
     final s = active!;
     if (s.exercises.any((x) => x != e && sameExercise(x.name, newName))) {
       return 'That exercise is already in the current workout.';
     }
     final info = addExercise(newName);
+    final cycle = cycles.where((c) => c.id == s.cycleId).firstOrNull;
+    if (forCycle && cycle != null && s.templateId != null) {
+      // Follow a chain back to the saved workout's exercise, and drop the swap when it returns to it.
+      final earlier = cycle.swaps.where((x) => x.templateId == s.templateId && sameExercise(x.to, e.name)).firstOrNull;
+      final from = earlier?.from ?? e.name;
+      cycle.swaps.removeWhere((x) => x.templateId == s.templateId && sameExercise(x.from, from));
+      if (!sameExercise(from, info.name)) {
+        cycle.swaps.add(ExerciseSwap(templateId: s.templateId!, from: from, to: info.name));
+      }
+    }
     renameCircuitExercise(s.circuits, e.name, info.name);
     s.warmupExercises.removeWhere((warmup) => warmup.name == e.name);
     _finishWarmupPhase();

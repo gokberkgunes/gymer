@@ -180,6 +180,10 @@ extension AppStoreCatalog on AppStore {
         for (final a in c.setAdjustments) {
           if (sameExercise(a.exercise, from)) a.exercise = updated.name;
         }
+        for (final swap in c.swaps) {
+          if (sameExercise(swap.from, from)) swap.from = updated.name;
+          if (sameExercise(swap.to, from)) swap.to = updated.name;
+        }
         for (final plan in c.startingLoads.values) {
           for (final e in plan) {
             if (sameExercise(e.name, from)) e.name = updated.name;
