@@ -23,13 +23,6 @@ class _DataSettings extends StatelessWidget {
         _group([
           _row(
             context,
-            'Import from old Gymer',
-            Icon(Icons.download_rounded, color: cs.onSurfaceVariant),
-            subtitle: 'Backup ZIP exported by the Flet app',
-            onTap: () => importFletBackup(context),
-          ),
-          _row(
-            context,
             'Export backup',
             Icon(Icons.upload_rounded, color: cs.onSurfaceVariant),
             subtitle: 'Everything as one JSON file',

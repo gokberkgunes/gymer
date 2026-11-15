@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../logic/legacy_import.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets/common.dart';
@@ -13,41 +12,6 @@ void _say(BuildContext context, String text) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
-}
-
-Future<void> importFletBackup(BuildContext context) async {
-  final store = StoreScope.read(context);
-  final ok = await confirm(
-    context,
-    'Import from old Gymer',
-    'Replaces all workouts, history, mesocycles and settings here with the backup\'s contents.'
-        ' Your current data is backed up first.'
-        '${store.active != null ? ' The workout in progress is discarded.' : ''}',
-    action: 'Choose ZIP',
-  );
-  if (!ok) return;
-  final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['zip']);
-  if (file == null || !context.mounted) return;
-  try {
-    final data = convertLegacy(readBackupZip(await file.readAsBytes()));
-    if (!context.mounted) return;
-    final lines = await store.importLegacy(data);
-    if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Import complete'),
-        content: Text(lines.join('\n\n')),
-        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
-      ),
-    );
-  } on FormatException catch (e) {
-    if (context.mounted) _say(context, e.message);
-  } on FileSystemException catch (e) {
-    if (context.mounted) _say(context, e.message);
-  } catch (e) {
-    if (context.mounted) _say(context, 'Could not read this backup: $e');
-  }
 }
 
 Future<void> exportBackup(BuildContext context) async {

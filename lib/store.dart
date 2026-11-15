@@ -15,7 +15,6 @@ import 'logic/coach.dart';
 import 'logic/cycle.dart';
 import 'logic/cycle_review.dart';
 import 'logic/estimate.dart';
-import 'logic/legacy_import.dart';
 import 'logic/methods.dart';
 import 'logic/numbers.dart';
 import 'logic/plates.dart';

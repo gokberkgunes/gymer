@@ -2,40 +2,6 @@ part of '../store.dart';
 
 /// Import, export and automatic backups.
 extension AppStoreBackups on AppStore {
-  /// Replaces all data with a Flet backup's contents, after saving a safety copy.
-  Future<List<String>> importLegacy(LegacyData d) async {
-    final known = {for (final e in d.exercises) e.name.toLowerCase()};
-    final missing = <String>{
-      for (final t in d.templates)
-        for (final e in t.exercises) e.name,
-      for (final s in d.history)
-        for (final e in s.exercises) e.name,
-    }.where((n) => !known.contains(n.toLowerCase()));
-    final newExercises = [...d.exercises, for (final n in missing) Exercise(name: n, loadMode: defaultLoadModeFor(n))]
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final newSettings = Settings.fromJson(settings.toJson());
-    d.applySettings(newSettings);
-    await _backupBeforeReplace();
-    exercises = newExercises;
-    templates = d.templates.isEmpty ? seedTemplates() : d.templates;
-    history = d.history;
-    _seenAchievements = {
-      for (final p in achievementProgress(history))
-        if (p.earned) p.achievement.id,
-    };
-    cycles = d.cycles;
-    settings = newSettings;
-    active = null;
-    rest = null;
-    _writesBlocked = false; // the user chose what to keep
-    _syncAlerts();
-    changed();
-    return [
-      'Imported ${d.templates.length} workouts, ${d.history.length} sessions and ${d.cycles.length} mesocycles.',
-      ...d.notes,
-    ];
-  }
-
   Future<void> importJson(String text) async {
     final Object? j;
     try {
