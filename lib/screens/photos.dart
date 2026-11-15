@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../services/files.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -26,7 +26,13 @@ class _ProgressPhotosScreenState extends State<ProgressPhotosScreen> {
 
   Future<void> _add() async {
     final store = StoreScope.read(context);
-    final picked = await FilePicker.pickFile(type: FileType.image);
+    final PickedFile? picked;
+    try {
+      picked = await pickFile(image: true);
+    } catch (e) {
+      if (mounted) notify(context, 'Could not read that image.');
+      return;
+    }
     if (picked == null || !mounted) return;
     final day = await showDatePicker(
       context: context,
@@ -38,7 +44,7 @@ class _ProgressPhotosScreenState extends State<ProgressPhotosScreen> {
     if (day == null || !mounted) return;
     final String? error;
     try {
-      error = await store.addProgressPhoto(await picked.readAsBytes(), picked.extension ?? 'jpg', day);
+      error = await store.addProgressPhoto(picked.bytes, picked.extension ?? 'jpg', day);
     } catch (e) {
       if (mounted) notify(context, 'Could not read that image.');
       return;

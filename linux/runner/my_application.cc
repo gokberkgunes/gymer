@@ -10,9 +10,55 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* files_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// The app's file dialogs (lib/services/files.dart): "pick" and "save" open the desktop's own dialog and
+// answer with the chosen path, or null when it was cancelled. Dart reads or writes the file itself.
+static void files_method_cb(FlMethodChannel* channel, FlMethodCall* call,
+                            gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(call);
+  const gboolean save = g_strcmp0(method, "save") == 0;
+  if (!save && g_strcmp0(method, "pick") != 0) {
+    fl_method_call_respond_not_implemented(call, nullptr);
+    return;
+  }
+  FlValue* args = fl_method_call_get_args(call);
+  const gboolean has_args =
+      args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP;
+
+  g_autoptr(GtkFileChooserNative) dialog = gtk_file_chooser_native_new(
+      save ? "Save" : "Open", GTK_WINDOW(user_data),
+      save ? GTK_FILE_CHOOSER_ACTION_SAVE : GTK_FILE_CHOOSER_ACTION_OPEN,
+      nullptr, nullptr);
+  GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
+  if (save) {
+    gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
+    FlValue* name = has_args ? fl_value_lookup_string(args, "name") : nullptr;
+    if (name != nullptr && fl_value_get_type(name) == FL_VALUE_TYPE_STRING) {
+      gtk_file_chooser_set_current_name(chooser, fl_value_get_string(name));
+    }
+  } else {
+    FlValue* image = has_args ? fl_value_lookup_string(args, "image") : nullptr;
+    if (image != nullptr && fl_value_get_type(image) == FL_VALUE_TYPE_BOOL &&
+        fl_value_get_bool(image)) {
+      GtkFileFilter* filter = gtk_file_filter_new();
+      gtk_file_filter_set_name(filter, "Images");
+      gtk_file_filter_add_mime_type(filter, "image/*");
+      gtk_file_chooser_add_filter(chooser, filter);
+    }
+  }
+
+  g_autofree gchar* path = nullptr;
+  if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+    path = gtk_file_chooser_get_filename(chooser);
+  }
+  g_autoptr(FlValue) result =
+      path != nullptr ? fl_value_new_string(path) : fl_value_new_null();
+  fl_method_call_respond_success(call, result, nullptr);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -75,6 +121,14 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_clear_object(&self->files_channel);
+  self->files_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)), "gymer/files",
+      FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->files_channel,
+                                            files_method_cb, window, nullptr);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -121,6 +175,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->files_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

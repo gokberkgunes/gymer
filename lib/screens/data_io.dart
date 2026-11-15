@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../services/files.dart';
 import '../store.dart';
 import '../widgets/common.dart';
 
@@ -18,19 +18,26 @@ Future<void> exportBackup(BuildContext context) async {
   final store = StoreScope.read(context);
   final bytes = utf8.encode(const JsonEncoder.withIndent(' ').convert(store.toJson()));
   final name = 'gymer-${dateKey(DateTime.now())}.json';
-  final uri = await FilePicker.saveFile(fileName: name, bytes: bytes, mimeType: 'application/json');
-  if (uri != null && context.mounted) _say(context, 'Backup saved.');
+  try {
+    if (await saveFile(name, bytes, 'application/json') && context.mounted) _say(context, 'Backup saved.');
+  } catch (e) {
+    if (context.mounted) _say(context, 'Could not save the backup: $e');
+  }
 }
 
 /// A spreadsheet copy of the logged sets; not a backup, and it cannot be restored.
 Future<void> exportCsv(BuildContext context) async {
   final store = StoreScope.read(context);
-  final uri = await FilePicker.saveFile(
-    fileName: 'gymer-sets-${dateKey(DateTime.now())}.csv',
-    bytes: utf8.encode(store.historyCsv()),
-    mimeType: 'text/csv',
-  );
-  if (uri != null && context.mounted) _say(context, 'CSV saved.');
+  try {
+    final saved = await saveFile(
+      'gymer-sets-${dateKey(DateTime.now())}.csv',
+      utf8.encode(store.historyCsv()),
+      'text/csv',
+    );
+    if (saved && context.mounted) _say(context, 'CSV saved.');
+  } catch (e) {
+    if (context.mounted) _say(context, 'Could not save the CSV: $e');
+  }
 }
 
 Future<void> restoreBackup(BuildContext context) async {
@@ -45,12 +52,12 @@ Future<void> restoreBackup(BuildContext context) async {
     destructive: true,
   );
   if (!ok) return;
-  final file = await FilePicker.pickFile();
-  if (file == null || !context.mounted) return;
   try {
+    final file = await pickFile();
+    if (file == null || !context.mounted) return;
     final String text;
     try {
-      text = utf8.decode(await file.readAsBytes());
+      text = utf8.decode(file.bytes);
     } on FormatException {
       throw const FormatException('This file is not a Gymer backup.');
     }
@@ -93,12 +100,8 @@ Future<void> reportUnreadableData(BuildContext context) async {
   if (!save) return;
   try {
     final bytes = await File(path).readAsBytes();
-    final uri = await FilePicker.saveFile(
-      fileName: 'gymer-unreadable-${dateKey(DateTime.now())}.json',
-      bytes: bytes,
-      mimeType: 'application/json',
-    );
-    if (uri != null && context.mounted) _say(context, 'Copy saved.');
+    final saved = await saveFile('gymer-unreadable-${dateKey(DateTime.now())}.json', bytes, 'application/json');
+    if (saved && context.mounted) _say(context, 'Copy saved.');
   } catch (e) {
     if (context.mounted) _say(context, 'Could not save the copy: $e');
   }

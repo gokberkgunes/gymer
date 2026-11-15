@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -16,6 +18,10 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var keepScreenAwake = false
+
+    // The one file dialog that is open, if any: who to answer, and what a save dialog is to write.
+    private var filesResult: MethodChannel.Result? = null
+    private var saveBytes: ByteArray? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         keepScreenAwake = savedInstanceState?.getBoolean(KEEP_AWAKE_STATE) ?: false
@@ -48,6 +54,38 @@ class MainActivity : FlutterActivity() {
                 } else {
                     WorkoutSharing.share(this, png, call.argument<String>("title") ?: "Workout", result)
                 }
+            }
+        }
+        // Android's own document picker (lib/services/files.dart). "pick" answers with the file's name and
+        // content, "save" writes the given bytes where the user chose; both answer null when cancelled.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymer/files").setMethodCallHandler { call, result ->
+            if (filesResult != null) {
+                result.error("files", "Another file dialog is already open.", null)
+                return@setMethodCallHandler
+            }
+            when (call.method) {
+                "pick" -> {
+                    val image = call.argument<Boolean>("image") == true
+                    openFileDialog(
+                        Intent(if (image) Intent.ACTION_GET_CONTENT else Intent.ACTION_OPEN_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType(if (image) "image/*" else "*/*"),
+                        PICK_FILE,
+                        result,
+                    )
+                }
+                "save" -> {
+                    saveBytes = call.argument<ByteArray>("bytes")
+                    openFileDialog(
+                        Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType(call.argument<String>("mime") ?: "application/octet-stream")
+                            .putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "gymer"),
+                        SAVE_FILE,
+                        result,
+                    )
+                }
+                else -> result.notImplemented()
             }
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymer/live_timer").setMethodCallHandler { call, result ->
@@ -129,6 +167,67 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun openFileDialog(intent: Intent, request: Int, result: MethodChannel.Result) {
+        filesResult = result
+        try {
+            startActivityForResult(intent, request)
+        } catch (_: ActivityNotFoundException) {
+            filesResult = null
+            saveBytes = null
+            result.error("files", "No app on this phone can choose files.", null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_FILE && requestCode != SAVE_FILE) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val result = filesResult ?: return
+        val bytes = saveBytes
+        filesResult = null
+        saveBytes = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            result.success(null)
+            return
+        }
+        // Off the main thread: a photo or a long history takes a moment to copy.
+        Thread {
+            try {
+                val answer: Any = if (requestCode == PICK_FILE) {
+                    val content = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw java.io.IOException("The file could not be opened.")
+                    mapOf("name" to displayName(uri), "bytes" to content)
+                } else {
+                    (contentResolver.openOutputStream(uri) ?: throw java.io.IOException("The file could not be created."))
+                        .use { it.write(bytes ?: ByteArray(0)) }
+                    true
+                }
+                runOnUiThread { result.success(answer) }
+            } catch (e: Exception) {
+                // Do not leave an empty file behind where a save failed.
+                if (requestCode == SAVE_FILE) {
+                    try {
+                        DocumentsContract.deleteDocument(contentResolver, uri)
+                    } catch (_: Exception) {
+                    }
+                }
+                runOnUiThread { result.error("files", e.message ?: "The file could not be used.", null) }
+            }
+        }.start()
+    }
+
+    private fun displayName(uri: Uri): String {
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) return c.getString(0)
+            }
+        } catch (_: Exception) {
+        }
+        return uri.lastPathSegment ?: ""
+    }
+
     private fun openSettings(intent: Intent) {
         try {
             startActivity(intent)
@@ -138,6 +237,8 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val PICK_FILE = 4101
+        private const val SAVE_FILE = 4102
         private const val KEEP_AWAKE_STATE = "gymer.keep_screen_awake"
     }
 }
