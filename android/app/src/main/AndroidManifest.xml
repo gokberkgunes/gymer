@@ -17,6 +17,8 @@
         </provider>
         <!-- Switches the status-bar rest timer to counting overtime when rest ends (LiveTimer.kt). -->
         <receiver android:name=".OvertimeReceiver" android:exported="false" />
+        <!-- Posts the optional "Rest over" alarm when rest ends (RestAlarm.kt). -->
+        <receiver android:name=".RestAlarmReceiver" android:exported="false" />
         <!-- Home-screen widget with today's planned workout (TodayWidget.kt). -->
         <receiver android:name=".TodayWidget" android:exported="false">
             <intent-filter>
@@ -51,7 +53,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

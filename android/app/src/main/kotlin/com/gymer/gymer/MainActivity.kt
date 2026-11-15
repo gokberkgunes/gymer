@@ -1,6 +1,14 @@
 package com.gymer.gymer
 
+import android.Manifest
+import android.app.NotificationManager
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -73,12 +81,59 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "filesDir" -> result.success(filesDir.path)
+                "alarm" -> {
+                    val at = call.argument<Number>("at")?.toLong()
+                    if (at == null) {
+                        result.error("rest_alarm", "No alarm time was provided.", null)
+                        return@setMethodCallHandler
+                    }
+                    RestAlarm.schedule(this, at, call.argument<String>("title") ?: "Rest over", call.argument<String>("text") ?: "")
+                    result.success(null)
+                }
+                "cancelAlarm" -> {
+                    RestAlarm.cancel(this)
+                    result.success(null)
+                }
+                "exactAllowed" -> result.success(RestAlarm.canScheduleExact(this))
+                "requestExact" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        openSettings(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+                    }
+                    result.success(null)
+                }
+                "notificationsEnabled" ->
+                    result.success(getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() ?: false)
+                "notificationSettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        openSettings(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
+                        )
+                    }
+                    result.success(null)
+                }
+                "askNotifications" -> {
+                    // Android shows its prompt at most twice; afterwards this does nothing.
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+                    }
+                    result.success(null)
+                }
                 "todayWidget" -> {
                     TodayWidget.store(this, call.arguments as? String ?: "{}")
                     result.success(null)
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun openSettings(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            // Some Android builds lack the page; there is nothing else to open.
         }
     }
 

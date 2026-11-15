@@ -3,64 +3,46 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
 
 import '../store.dart';
 
 /// Keep-awake and the rest-over notification that fires on a locked phone.
 class PlatformAlerts extends Alerts {
-  static const _restId = 1;
   static const _live = MethodChannel('gymer/live_timer');
   String? _liveKey;
-  final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
   bool _asked = false;
 
-  bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _android => !kIsWeb && Platform.isAndroid;
 
   Future<void> init() async {
-    if (!_mobile) return;
+    if (!_android) return;
     // A timer posted before Android stopped the app is unknown to this run, so it could never be removed:
     // it stayed up in the foreground and its backup alarm still announced "Rest over" after the set began.
-    if (Platform.isAndroid) unawaited(_live.invokeMethod<void>('clear').catchError((_) {}));
-    _ready =
-        await _plugin.initialize(
-          settings: const InitializationSettings(
-            // Status-bar icons must be monochrome; the coloured launcher icon would show as a blob.
-            android: AndroidInitializationSettings('@drawable/ic_stat_timer'),
-            iOS: DarwinInitializationSettings(
-              requestAlertPermission: false,
-              requestBadgePermission: false,
-              requestSoundPermission: false,
-            ),
-          ),
-        ) ??
-        false;
+    unawaited(_live.invokeMethod<void>('clear').catchError((_) {}));
+    _ready = true;
   }
 
-  AndroidFlutterLocalNotificationsPlugin? get _android =>
-      _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-
+  /// Android's notification prompt, once per run. It does not wait for the answer.
   Future<void> _askOnce() async {
     if (_asked) return;
     _asked = true;
-    await _android?.requestNotificationsPermission();
-    await _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()?.requestPermissions(
-      alert: true,
-      sound: true,
-    );
+    await _live.invokeMethod<void>('askNotifications');
   }
 
   /// Whether Android lets us fire at the exact second (null off Android).
-  Future<bool?> canScheduleExact() async => _android?.canScheduleExactNotifications();
+  Future<bool?> canScheduleExact() async => _android ? _live.invokeMethod<bool>('exactAllowed') : null;
 
-  Future<void> requestExact() async => _android?.requestExactAlarmsPermission();
+  Future<void> requestExact() async {
+    if (_android) await _live.invokeMethod<void>('requestExact');
+  }
 
   /// Null on platforms where Android notification settings are unavailable.
-  Future<bool?> notificationsEnabled() async => _android?.areNotificationsEnabled();
+  Future<bool?> notificationsEnabled() async => _android ? _live.invokeMethod<bool>('notificationsEnabled') : null;
 
-  Future<void> openNotificationSettings() async => _android?.openAppNotificationSettings();
+  Future<void> openNotificationSettings() async {
+    if (_android) await _live.invokeMethod<void>('notificationSettings');
+  }
 
   @override
   void keepAwake(bool on) {
@@ -100,32 +82,14 @@ class PlatformAlerts extends Alerts {
   Future<void> _schedule(DateTime at, String exercise, int request) async {
     if (!_ready || request != _alarmRequest) return;
     await _askOnce();
-    final exact = await canScheduleExact() ?? true;
-    await _plugin.cancel(id: _restId);
+    await _live.invokeMethod<void>('cancelAlarm');
     if (request != _alarmRequest || !at.isAfter(DateTime.now())) return;
-    await _plugin.zonedSchedule(
-      id: _restId,
-      title: 'Rest over',
-      body: exercise.isEmpty ? 'Time for the next set.' : 'Next set: $exercise',
-      scheduledDate: tz.TZDateTime.from(at.toUtc(), tz.UTC),
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'rest',
-          'Rest timer',
-          channelDescription: 'Alerts when a rest period ends',
-          importance: Importance.max,
-          priority: Priority.high,
-          category: AndroidNotificationCategory.alarm,
-          enableVibration: true,
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          interruptionLevel: InterruptionLevel.timeSensitive,
-        ),
-      ),
-      androidScheduleMode: exact ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.inexactAllowWhileIdle,
-    );
+    // Android's alarm clock takes the instant itself; no timezone is involved.
+    await _live.invokeMethod<void>('alarm', {
+      'at': at.millisecondsSinceEpoch,
+      'title': 'Rest over',
+      'text': exercise.isEmpty ? 'Time for the next set.' : 'Next set: $exercise',
+    });
   }
 
   @override
@@ -144,7 +108,7 @@ class PlatformAlerts extends Alerts {
 
   @override
   void cancelRest() {
-    if (_ready) _alarm(() => _plugin.cancel(id: _restId));
+    if (_ready) _alarm(() => _live.invokeMethod<void>('cancelAlarm'));
   }
 
   /// The live timer is only posted while the app is in the background; inside the app the in-app timer
@@ -163,7 +127,7 @@ class PlatformAlerts extends Alerts {
     bool vibrate = false,
   }) {
     if (kIsWeb || !Platform.isAndroid) return;
-    _askOnce(); // while the app is open, so the permission prompt can appear
+    unawaited(_askOnce().catchError((_) {})); // while the app is open, so the permission prompt can appear
     _pending = (
       key: '${endsAt.millisecondsSinceEpoch}|$exercise|$endAtZero|$icon|$overtimeIcon|$chipText|$vibrate',
       args: {
