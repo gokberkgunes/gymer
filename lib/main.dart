@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'screens/home.dart';
+import 'services/app_dir.dart';
 import 'services/platform_alerts.dart';
 import 'models.dart';
 import 'store.dart';
@@ -12,7 +12,7 @@ import 'widgets/common.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final dir = await getApplicationSupportDirectory();
+  final dir = await appDataDirectory();
   final alerts = PlatformAlerts();
   // Notifications are optional: a failure here must never keep the app on the splash screen.
   try {

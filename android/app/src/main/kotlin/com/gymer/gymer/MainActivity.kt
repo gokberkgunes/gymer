@@ -72,6 +72,7 @@ class MainActivity : FlutterActivity() {
                     LiveTimer.clear(this)
                     result.success(null)
                 }
+                "filesDir" -> result.success(filesDir.path)
                 "todayWidget" -> {
                     TodayWidget.store(this, call.arguments as? String ?: "{}")
                     result.success(null)
