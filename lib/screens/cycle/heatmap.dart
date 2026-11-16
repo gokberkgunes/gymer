@@ -83,6 +83,8 @@ class CycleHeatmap extends StatelessWidget {
       for (var i = 0; i < cells.length; i += perRow) cells.sublist(i, math.min(i + perRow, cells.length)),
     ];
     final labels = [for (var r = 0; r < tileRows.length; r++) '${cycle.periodShort}${r + 1}'];
+    // The microcycle each label names; tapping the label opens that one's summary.
+    final labelMicro = <int?>[for (var r = 0; r < tileRows.length; r++) r + 1];
     if (weekly && days.first.date.weekday != DateTime.monday) {
       // Calendar weeks straddle two microcycles: label each with the one it mostly holds, and when two
       // neighbouring rows would share a label, keep it on the row holding more of that microcycle.
@@ -98,14 +100,13 @@ class CycleHeatmap extends StatelessWidget {
       ];
       for (var r = 0; r < tileRows.length; r++) {
         labels[r] = '${cycle.periodShort}${majority[r]}';
+        labelMicro[r] = majority[r];
       }
       for (var r = 0; r + 1 < tileRows.length; r++) {
         if (majority[r] != majority[r + 1]) continue;
-        if (count(r, majority[r]) < count(r + 1, majority[r])) {
-          labels[r] = '';
-        } else {
-          labels[r + 1] = '';
-        }
+        final dropped = count(r, majority[r]) < count(r + 1, majority[r]) ? r : r + 1;
+        labels[dropped] = '';
+        labelMicro[dropped] = null;
       }
     }
 
@@ -151,7 +152,17 @@ class CycleHeatmap extends StatelessWidget {
             children: [
               SizedBox(
                 width: 28,
-                child: Text(labels[r], style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                height: cell,
+                child: labelMicro[r] == null
+                    ? null
+                    : InkWell(
+                        borderRadius: BorderRadius.circular(2),
+                        onTap: () => _weekSummary(context, store, days, labelMicro[r]!),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(labels[r], style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
               ),
               for (final d in row)
                 Padding(padding: const EdgeInsets.only(right: 4), child: d == null ? outside(cell) : tile(d, cell)),
@@ -172,6 +183,76 @@ class CycleHeatmap extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+
+  /// One microcycle at a glance: its effort target, workouts done against planned, and sets per muscle.
+  void _weekSummary(BuildContext context, AppStore store, List<CycleDay> days, int micro) {
+    final own = days.where((d) => d.micro == micro).toList();
+    if (own.isEmpty) return;
+    final deload = micro > cycleStatus(cycle).buildMicro;
+    final planned = own.where((d) => d.templateId != null).length;
+    final done = own.where((d) => d.status == 'done' || d.status == 'moved_done').length;
+    final sessions = {
+      for (final d in own)
+        for (final s in d.sessions) s.id: s,
+    }.values;
+    final partial = store.settings.includePartialSets;
+    final completed = performedVolume(sessions, store.musclesOf, weeks: math.max(1, cycle.microDays) / 7);
+    // A deload trims the plan by a share of each exercise, which the weekly plan does not model: show what was
+    // done only.
+    final plan = deload
+        ? const <String, WeeklyVolume>{}
+        : plannedWeeklyVolume(cycle, {for (final t in store.templates) t.id: t}, store.musclesOf, micro: micro);
+    double of(Map<String, WeeklyVolume> volume, String m) => volume[m]?.countedSets(includePartialSets: partial) ?? 0;
+    final muscles = [
+      for (final m in {...rpLandmarks.keys, ...plan.keys, ...completed.keys})
+        if (of(plan, m) > 0 || of(completed, m) > 0) m,
+    ];
+    showDialog<void>(
+      context: context,
+      builder: (c) {
+        final t = Theme.of(c).textTheme;
+        final cs = Theme.of(c).colorScheme;
+        final number = t.bodyMedium?.copyWith(fontFeatures: tabular);
+        Widget row(String label, String value) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              Expanded(child: Text(label)),
+              const SizedBox(width: 12),
+              Text(value, style: number),
+            ],
+          ),
+        );
+        return AlertDialog(
+          title: Text('${cycle.microDays == 7 ? 'Week' : 'Microcycle'} $micro${deload ? ' · Deload' : ''}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row('Target RIR', '${rirForWeek(cycle, micro)}'),
+                row('Workouts', '$done of $planned'),
+                if (muscles.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    deload ? 'Sets completed' : 'Sets completed of planned',
+                    style: t.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 4),
+                  for (final m in muscles)
+                    row(
+                      m,
+                      deload ? fmtSets(of(completed, m)) : '${fmtSets(of(completed, m))} of ${fmtSets(of(plan, m))}',
+                    ),
+                ],
+              ],
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+        );
+      },
     );
   }
 
