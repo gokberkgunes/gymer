@@ -1,4 +1,4 @@
-// Working loads stay stable in the 7–13 rep / 0–4 RIR window.
+// Suggested reps stay within the configured range at the next RIR target.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gymer/logic/progression.dart';
 import 'package:gymer/models.dart';
@@ -18,7 +18,7 @@ void main() {
       [
         'hold',
         100.0,
-        [12, 12, 13],
+        [12, 12, 12],
       ],
     );
 
@@ -70,8 +70,8 @@ void main() {
       recommend(previous: missed, method: 'Straight', targetRir: 2, unit: 'kg', perSet: true)!.setWeights,
       isEmpty,
     );
-    // Boundary combinations plus the ordinary working sets above cover the stable window.
-    for (final reps in [7, 13]) {
+    // Fit the next effort target before deciding to keep the weight, including both former grace edges.
+    for (final reps in [7, 8, 12, 13]) {
       for (final actualRir in [0, 4]) {
         for (final targetRir in [0, 4]) {
           final result = recommend(
@@ -80,11 +80,17 @@ void main() {
             targetRir: targetRir,
             unit: 'kg',
           )!;
-          expect(
-            (result.action, result.weight, result.targetReps),
-            ('hold', 100, reps + actualRir - targetRir),
-            reason: '$reps reps @ $actualRir → $targetRir RIR',
-          );
+          if (result.applyWeight) {
+            expect(result.setRepTargets, everyElement(inInclusiveRange(8, 12)));
+            expect(
+              setOneRm(result.weight, result.targetReps, targetRir)!,
+              lessThanOrEqualTo(setOneRm(100, reps, actualRir)! + 1e-6),
+              reason: '$reps reps @ $actualRir → $targetRir RIR',
+            );
+          } else {
+            expect(result.setRepTargets, isEmpty);
+            expect(result.reason, contains('manually'));
+          }
         }
       }
     }
@@ -104,12 +110,12 @@ void main() {
     expect(light.reason, contains('goes up once every set reaches'));
     // A 1.25 kg step on a 5 kg raise is 25 %: the range widens, and the load moves exactly one step once every
     // set has out-repped that jump, instead of never (the 10 % limit) or at the top of the normal range.
-    final earn = repsToEarnStep(5, 6.25, 7, 2);
+    final earn = repsToEarnStep(5, 6.25, 8, 2);
     expect(earn, inInclusiveRange(15, 22));
     final building = rec(sets([(5, earn - 1, 2), (5, earn - 1, 2)]), inc: 1.25);
     expect((building.action, building.weight), ('hold', 5.0));
     final earned = rec(sets([(5, earn, 2), (5, earn, 2)]), inc: 1.25);
-    expect((earned.action, earned.weight, earned.setRepTargets.every((reps) => reps >= 7)), ('increase', 6.25, true));
+    expect((earned.action, earned.weight, earned.setRepTargets.every((reps) => reps >= 8)), ('increase', 6.25, true));
     Recommendation lightRepsOnly(int reps) => recommend(
       previous: [for (var i = 0; i < 2; i++) SetEntry(weight: 5, reps: reps, done: true)],
       method: 'Straight',
@@ -118,7 +124,7 @@ void main() {
       increment: 1.25,
       rirTracked: false,
     )!;
-    final lightEarn = repsToEarnStep(5, 6.25, 7, 0);
+    final lightEarn = repsToEarnStep(5, 6.25, 8, 0);
     expect(
       (lightRepsOnly(14).action, lightRepsOnly(lightEarn - 1).action, lightRepsOnly(lightEarn).action),
       ('hold', 'hold', 'increase'),
@@ -131,10 +137,10 @@ void main() {
       increment: 5,
       rirTracked: false,
     )!;
-    expect((repsOnly([(100, 12), (100, 12)]).action, repsOnly([(100, 12), (100, 12)]).weight), ('hold', 100.0));
+    expect((repsOnly([(100, 12), (100, 12)]).action, repsOnly([(100, 12), (100, 12)]).weight), ('increase', 105.0));
     expect((repsOnly([(100, 14), (100, 14)]).action, repsOnly([(100, 14), (100, 14)]).weight), ('increase', 105.0));
     expect(repsOnly([(100, 10), (100, 9)]).setRepTargets, [10, 9]);
-    expect(repsOnly([(100, 7), (100, 9)]).weight, 100.0);
+    expect(repsOnly([(100, 7), (100, 9)]).weight, 95.0);
     expect(repsOnly([(100, 6), (100, 9)]).weight, 95.0);
     // With RIR tracked, a blank RIR still holds.
     final blank = recommend(
@@ -192,15 +198,15 @@ void main() {
     expect((wide.action, wide.weight, wide.targetReps), ('hold', 100, 14));
 
     for (final (method, anchor, continuation, reps) in [
-      ('AMRAP', 'AMRAP', 'AMRAP', 13),
+      ('AMRAP', 'AMRAP', 'AMRAP', 12),
       ('Drop Set', 'Activation', 'Drop Set', 3),
       ('Myo-Reps', 'Activation', 'Myo-set', 3),
       ('Rest-Pause', 'Activation', 'Rest-Pause', 3),
-      ('Myo-Rep Match', 'Activation', 'Myo-Rep Match', 13),
+      ('Myo-Rep Match', 'Activation', 'Myo-Rep Match', 12),
     ]) {
       final result = recommend(
         previous: [
-          SetEntry(type: anchor, weight: 100, reps: 13, rir: 2, done: true),
+          SetEntry(type: anchor, weight: 100, reps: 12, rir: 2, done: true),
           SetEntry(type: continuation, weight: method == 'Drop Set' ? 75 : 100, reps: reps, rir: 2, done: true),
         ],
         method: method,
@@ -208,7 +214,7 @@ void main() {
         unit: 'kg',
         increment: 2.5,
       )!;
-      expect((result.weight, result.targetReps), (100, 13), reason: method);
+      expect((result.weight, result.targetReps), (100, 12), reason: method);
     }
     Recommendation amrap(List<SetEntry> rows) =>
         recommend(previous: rows, method: 'AMRAP', targetRir: 2, unit: 'kg', increment: 2.5)!;
@@ -231,8 +237,8 @@ void main() {
     // Reps/RIR, increment and rep minimum → rounded load and attainable goal.
     for (final (reps, rir, step, minimum, load, goal) in [
       (6, 2, 2.5, 8, 92.5, 8), // Uses the estimate, not a single-increment reduction.
-      (2, 2, 2.5, 14, 90.0, 5), // A capped reduction must lower the rep goal too.
-      (2, 2, 25.0, 14, 100.0, 2), // No available increment fits the 10% limit.
+      (2, 2, 2.5, 14, 90.0, null), // A capped reduction cannot support the range: decline automatic targets.
+      (2, 2, 25.0, 14, 100.0, null), // No available increment fits the 10% limit.
       (14, 2, 2.5, 8, 110.0, 9), // Increase only outside the working window.
       (6, 8, 2.5, 8, 100.0, 8), // An inflated RIR counts as at most four.
     ]) {
@@ -247,11 +253,15 @@ void main() {
         repMax: minimum == 14 ? 18 : 12,
       )!;
       expect(
-        (result.weight, result.targetReps),
+        (result.weight, result.applyWeight ? result.targetReps : null),
         (load, goal),
         reason: '$reps reps @ $rir, step $step, minimum $minimum',
       );
-      expect(setOneRm(result.weight, result.targetReps, result.targetRir)!, lessThanOrEqualTo(source.e1rm! + 1e-6));
+      if (result.applyWeight) {
+        expect(setOneRm(result.weight, result.targetReps, result.targetRir)!, lessThanOrEqualTo(source.e1rm! + 1e-6));
+      } else {
+        expect(result.setRepTargets, isEmpty);
+      }
     }
   });
 }

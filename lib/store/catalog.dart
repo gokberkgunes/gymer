@@ -257,7 +257,7 @@ extension AppStoreCatalog on AppStore {
 
   /// Plates for [target] on [name]'s bar: its own bar weight, else none for plate-loaded machines (the
   /// sled is usually not counted) and the default bar for barbells.
-  PlatePlan plates(double target, {String? name}) {
+  PlatePlan plates(double target, {String? name, bool roundDown = false}) {
     final unit = settings.unit;
     final e = name == null ? null : exercise(name);
     final own = unit == 'lb' ? e?.barLb : e?.barKg;
@@ -265,9 +265,9 @@ extension AppStoreCatalog on AppStore {
     final pairs = settings.platePairs;
     // The inline bar asks on every rebuild; plans are pure, so remember the latest few.
     final key =
-        '$target|$bar|${settings.plates.join(',')}|${pairs?.entries.map((e) => '${e.key}x${e.value}').join(',')}';
+        '$target|$bar|$roundDown|${settings.plates.join(',')}|${pairs?.entries.map((e) => '${e.key}x${e.value}').join(',')}';
     final cached = _planCache.remove(key);
-    final plan = cached ?? planPlates(target, bar, settings.plates, pairs: pairs);
+    final plan = cached ?? planPlates(target, bar, settings.plates, pairs: pairs, roundDown: roundDown);
     _planCache[key] = plan; // re-insert: most recently used last
     if (_planCache.length > 64) _planCache.remove(_planCache.keys.first);
     return plan;
@@ -278,7 +278,7 @@ extension AppStoreCatalog on AppStore {
   /// Rep Max targets so a suggested load is one the user can put on.
   double loadableAtOrBelow(String name, double target) {
     if (platesApply(name)) {
-      final plan = plates(target, name: name);
+      final plan = plates(target, name: name, roundDown: true);
       return plan.exact?.total ?? plan.below?.total ?? plan.above?.total ?? target;
     }
     final step = incrementFor(name, settings.unit) ?? practicalWeightStep(target, settings.unit, null);

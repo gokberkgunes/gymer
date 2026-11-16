@@ -49,6 +49,8 @@ void main() {
     expect((unavailable.below!.total, unavailable.above!.total), (90, 120));
     // Heavy loads stay cheap to plan, and ties prefer the heavier plate.
     expect(planPlates(310, 20, [20, 10, 5, 2.5, 1.25]).exact!.perSide, [...List.filled(7, 20.0), 5.0]);
+    // A capacity estimate just below an achievable load must round down, not up on the drawing's grid.
+    expect(planPlates(99.967, 20, [20, 10, 5, 2.5, 1.25], roundDown: true).below!.total, 97.5);
   });
 
   test('damaged optional entries and numeric settings never make a backup unreadable', () async {

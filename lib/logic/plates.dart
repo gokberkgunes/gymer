@@ -100,7 +100,13 @@ class _PlateStack {
 /// Fewest plates per side; ties prefer heavier plates. [pairs] limits the available pairs of each size
 /// (missing sizes mean zero). Null retains the gym default of unlimited pairs.
 /// Inexact targets give the nearest achievable loads either side.
-PlatePlan planPlates(double target, double bar, List<double> plates, {Map<double, int>? pairs}) {
+PlatePlan planPlates(
+  double target,
+  double bar,
+  List<double> plates, {
+  Map<double, int>? pairs,
+  bool roundDown = false,
+}) {
   final available = <int, int>{};
   for (final plate in plates.toSet()) {
     if (!plate.isFinite || plate <= 0) continue;
@@ -110,7 +116,8 @@ PlatePlan planPlates(double target, double bar, List<double> plates, {Map<double
     if (count > 0) available[size] = (available[size] ?? 0) + count;
   }
   final sizes = available.keys.toList()..sort((a, b) => b.compareTo(a));
-  final goal = ((target - bar) / 2 * _grid).round();
+  final rawGoal = (target - bar) / 2 * _grid;
+  final goal = roundDown ? (rawGoal + 1e-9).floor() : rawGoal.round();
   if (goal < 0) {
     return PlatePlan(target, bar, above: PlateLoad(bar, const []));
   }

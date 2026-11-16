@@ -110,7 +110,7 @@ void main() {
     for (final (reps, rir, automatic, load, goal) in <(int, int?, bool, double?, int?)>[
       (9, 2, true, 100, 9),
       (6, 2, true, 92.5, 8),
-      (6, null, true, 100, 6),
+      (6, null, true, null, null),
       (6, 2, false, null, null),
     ]) {
       final store = suggestionStore(reps, rir);
@@ -121,7 +121,7 @@ void main() {
       expect((store.active!.cycleId, exercise.calibrate), (null, false));
       expect(
         exercise.sets.map((s) => (s.weight, s.targetReps, s.targetRir, s.rir, s.prescribed)),
-        everyElement((load, goal, automatic ? rir : null, null, automatic)),
+        everyElement((load, goal, automatic ? rir : null, null, load != null)),
         reason: '$reps reps @ $rir, auto=$automatic',
       );
       expect(store.fallbackValue(exercise, 0, 'reps'), goal ?? reps);
@@ -147,12 +147,13 @@ void main() {
     expect((s.cycleId, s.microcycle, s.phase, s.targetRir, s.rirLocked), ('c', 2, 'Build', 2, true));
     final set = s.exercises.first.sets.first;
     // The progression load is filled in; actual RIR stays blank (only the target is set).
-    expect((set.weight, set.targetReps, set.rir, set.targetRir, set.hintReps), (100, 13, null, 2, null));
-    expect(store.fallbackValue(s.exercises.first, 0, 'reps'), 13);
+    expect((set.weight, set.targetReps, set.rir, set.targetRir, set.hintReps), (110, 8, null, 2, null));
+    expect(store.fallbackValue(s.exercises.first, 0, 'reps'), 8);
 
     // Baseline reps/RIR and next effort/range → first-day and later build targets.
     for (final (reps, rir, target, minimum, maximum, load, goal) in [
-      (9, 1, 3, 14, 18, 100.0, 7),
+      (17, 1, 3, 14, 18, 100.0, 15),
+      (9, 1, 3, 8, 12, 97.5, 8),
       (6, 2, 2, 8, 12, 92.5, 8),
       (9, 2, 3, 8, 12, 100.0, 8),
     ]) {
@@ -544,8 +545,12 @@ void main() {
       store.startSession(store.templates.single, at: DateTime(2026, 1, 2));
       expect(
         store.active!.exercises.single.sets.map((s) => (s.weight, s.targetReps, s.targetRir)),
-        everyElement((expected, reps, 2)),
+        everyElement(limited ? (null, null, null) : (expected, reps, 2)),
       );
+      if (limited) {
+        expect(store.active!.exercises.single.sets.map((s) => s.hintWeight), everyElement(expected));
+        expect(store.active!.exercises.single.advice.join(), contains('manually'));
+      }
       if (limited) expect(store.plates(expected, name: 'Press').exact, isNotNull);
       expect(jsonEncode(store.history.single.toJson()), history);
     }

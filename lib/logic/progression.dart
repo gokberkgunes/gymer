@@ -17,8 +17,6 @@ const clusterHighReps = 5;
 const clusterTargetReps = 3;
 const defaultDropRatio = 0.75;
 const maxAutomaticChange = 0.10;
-const stableRepMin = 7;
-const stableRepMax = 13;
 
 class Recommendation {
   final String method;
@@ -294,8 +292,8 @@ Recommendation? _straight(
   var action = 'hold';
   var apply = true;
   target ??= rirTracked && sets.first.rir != null ? sets.first.rir!.clamp(0, maxCountedRir) : null;
-  final holdLow = math.min(low, stableRepMin);
-  var holdHigh = math.max(high, stableRepMax);
+  final holdLow = low;
+  final holdHigh = high;
   String reason;
   // A single increment above the automatic-change limit: widen the range instead of never (or wildly)
   // stepping. The load goes up by exactly that increment once every set has earned it.
@@ -305,7 +303,6 @@ Recommendation? _straight(
   final widened = bigStep
       ? ' One increment is more than 10 % of this load, so it goes up once every set reaches $earnReps reps.'
       : '';
-  if (bigStep && !rirTracked) holdHigh = math.max(holdHigh, earnReps - 1);
 
   final contextError = contextProblem(planned, currentPlan?.where((r) => isStraightType(r.type)).toList());
   if (contextError != null) {
@@ -322,18 +319,19 @@ Recommendation? _straight(
     reason = 'Working loads differ; preserve the individual loads and choose progression manually.';
   } else if (!rirTracked) {
     // Without effort observations use reps alone, keeping the same stable window.
-    if (sets.every((s) => s.reps! > holdHigh)) {
+    if (sets.every((s) => s.reps! >= holdHigh && (!bigStep || s.reps! >= earnReps))) {
       weight = loadAtOrBelow?.call(current + step) ?? current + step;
       action = weight > current ? 'increase' : 'hold';
       targets = List.filled(planned.length, low);
-      reason = 'Every planned set exceeded $holdHigh reps; add one increment.';
+      reason = 'Every planned set reached $holdHigh reps; add one increment.';
     } else if (sets.any((s) => s.reps! < holdLow)) {
       final lower = loadAtOrBelow?.call(current - step) ?? current - step;
       if (lower > 0 && lower < current) {
         weight = lower;
         action = 'decrease';
+        targets = List.filled(planned.length, low);
       }
-      reason = 'A working set fell below $holdLow reps; repeat the observed reps at a lighter load.';
+      reason = 'A working set fell below $holdLow reps; aim for $low–$high reps at a lighter load.';
     } else {
       reason = 'Keep the load while working reps remain within $holdLow–$holdHigh.$widened';
     }
@@ -343,12 +341,11 @@ Recommendation? _straight(
     reason = 'Actual RIR is unknown for a working set; record effort before progressing.';
   } else {
     final estimates = [for (final s in sets) setOneRm(s.weight, s.reps, s.rir)!];
-    final stable = sets.every((s) => s.reps! >= holdLow && s.reps! <= holdHigh && s.rir! <= maxCountedRir);
+    final atTarget = [for (final oneRm in estimates) supportedReps(oneRm, weight, target) ?? 0];
     reason = 'Keep the load and adjust reps to $target RIR.';
-    if (!stable &&
-        (sets.any((s) => s.reps! < holdLow) ||
-            sets.every((s) => s.reps! > holdHigh) ||
-            sets.every((s) => s.rir! > maxCountedRir))) {
+    if (atTarget.any((reps) => reps < holdLow) ||
+        atTarget.every((reps) => reps > holdHigh) ||
+        sets.every((s) => s.rir! > maxCountedRir)) {
       final raw = estimates.reduce(math.min) * wathanPercent(low + target) / 100;
       (weight, action, reason) = _estimatedLoad(
         current,
@@ -370,12 +367,19 @@ Recommendation? _straight(
       }
     }
     final fitted = [for (final oneRm in estimates) supportedReps(oneRm, weight, target)];
-    apply = fitted.every((reps) => reps != null);
+    apply = fitted.every((reps) => reps != null && reps >= low);
     if (apply) {
-      targets = [for (final reps in fitted) reps!];
+      targets = [for (final reps in fitted) math.min(reps!, high)];
     } else {
-      reason = 'No available load supports a rep at $target RIR; choose a suitable load manually.';
+      targets = [];
+      reason = 'No automatic load supports $low–$high reps at $target RIR; choose a suitable load manually.';
     }
+  }
+  // Never prescribe historical reps outside the configured range when effort or a complete baseline is missing.
+  if (targets.any((reps) => reps < low || reps > high)) {
+    apply = false;
+    targets = [];
+    reason += ' Choose a load for $low–$high reps before progressing.';
   }
   // Earlier branches (a missed set, a changed plan) can be reached with mixed loads too; never apply one load then.
   if (sets.any((s) => (s.weight! - current).abs() > 1e-6)) apply = false;
@@ -482,8 +486,8 @@ String? _qualityProblem(
   return null;
 }
 
-/// Protocols use their anchor's capacity and the exercise's rep range, while
-/// preserving the 7–13 rep stable window. Cluster keeps its own fixed window.
+/// Protocols fit their anchor to the exercise's rep range at the next effort target.
+/// Cluster keeps its own fixed window; continuation segments keep their protocol targets.
 Recommendation? _method(
   List<SetEntry> rows,
   String method,
@@ -554,7 +558,6 @@ Recommendation? _method(
       if ((s.weight ?? 0) > 0 && (s.reps ?? 0) > 0 && (s.rir != null || !rirTracked))
         setOneRm(s.weight, s.reps, s.rir ?? target)!,
   ];
-  final repsForWindow = method == 'AMRAP' ? work.map((w) => w.reps ?? 0).reduce(math.min) : anchorReps;
   var weight = loadAtOrBelow?.call(current) ?? current;
   var action = 'hold';
   var apply = problem == null;
@@ -563,34 +566,35 @@ Recommendation? _method(
     reason = 'Hold $method load: $problem.';
   } else if (oneRm == null) {
     reason = "The anchor's actual RIR is unknown; do not infer failure or increase load.";
-  } else if (anchors.every(
-    (s) => s.reps! >= stableRepMin && s.reps! <= stableRepMax && (s.rir ?? target!) <= maxCountedRir,
-  )) {
-    reason = 'Keep the load and adjust reps to $target RIR.';
-  } else if (repsForWindow > math.max(high, stableRepMax) ||
-      anchors.any((s) => s.reps! < math.min(low, stableRepMin)) ||
-      anchors.every((s) => (s.rir ?? target!) > maxCountedRir)) {
-    final raw = estimates.reduce(math.min) * wathanPercent(low + target!) / 100;
-    (weight, action, reason) = _estimatedLoad(
-      current,
-      raw,
-      step,
-      'Load estimated from the $method anchor capacity at $target RIR.',
-      loadAtOrBelow,
-    );
   } else {
-    reason = 'The $method anchor remains inside the $low-$high rep window.';
+    final atTarget = [for (final estimate in estimates) supportedReps(estimate, weight, target!) ?? 0];
+    reason = 'Keep the load and adjust reps to $target RIR.';
+    if (atTarget.any((reps) => reps < low) ||
+        atTarget.every((reps) => reps > high) ||
+        anchors.every((s) => (s.rir ?? target!) > maxCountedRir)) {
+      final raw = estimates.reduce(math.min) * wathanPercent(low + target!) / 100;
+      (weight, action, reason) = _estimatedLoad(
+        current,
+        raw,
+        step,
+        'Load estimated from the $method anchor capacity at $target RIR.',
+        loadAtOrBelow,
+      );
+    }
   }
   final goals = <int>[];
   for (final s in work) {
     if (calibrationAnchor(method, s.type) && apply && target != null) {
       final estimate = setOneRm(s.weight, s.reps, s.rir ?? (rirTracked ? null : target));
       final goal = estimate == null ? null : supportedReps(estimate, weight, target);
-      if (goal == null) apply = false;
-      goals.add(goal ?? s.reps ?? low);
+      if (goal == null || goal < low) apply = false;
+      goals.add(math.min(goal ?? low, high));
     } else {
       goals.add(s.reps ?? low);
     }
+  }
+  if (problem == null && !apply) {
+    reason = 'No automatic load supports $low–$high reps at $target RIR; choose a suitable load manually.';
   }
   if (method == 'Myo-Rep Match' && goals.isNotEmpty) {
     for (var i = 1; i < goals.length; i++) {
@@ -724,13 +728,14 @@ Calibration? calibrationRecommendation({
   final target = targetRir ?? rir.clamp(0, maxCountedRir);
   if (target < 0) return null;
   final goal = calibrationTargetReps.clamp(repMin, math.max(repMin, repMax)).toInt();
-  final stable = reps >= stableRepMin && reps <= stableRepMax && rir <= maxCountedRir;
+  final atTarget = supportedReps(oneRm, weight, target);
+  final stable = atTarget != null && atTarget >= repMin && atTarget <= repMax && rir <= maxCountedRir;
   final step = practicalWeightStep(weight, unit, increment);
   final suggested = stable
       ? loadAtOrBelow?.call(weight) ?? weight
       : _estimatedLoad(weight, oneRm * wathanPercent(goal + target) / 100, step, '', loadAtOrBelow).$1;
   final fitted = supportedReps(oneRm, suggested, target);
-  return fitted == null ? null : Calibration(suggested, fitted, target, true);
+  return fitted == null || fitted < repMin ? null : Calibration(suggested, math.min(fitted, repMax), target, true);
 }
 
 /// Seeds later segments right after a first-session calibration.
