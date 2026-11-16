@@ -492,6 +492,7 @@ void showLandmarkInfo(
   double? sets,
   String setsLabel = 'Planned weekly sets',
   double? performed,
+  (double, double)? span,
   MuscleVerdict? verdict,
   bool goalEditable = false,
   PersonalRange? personal,
@@ -557,6 +558,17 @@ void showLandmarkInfo(
                     const Expanded(child: Text('Completed so far this week')),
                     const SizedBox(width: 12),
                     Text(fmtSets(performed), style: Theme.of(c).textTheme.titleLarge?.copyWith(fontFeatures: tabular)),
+                  ],
+                ),
+              if (span != null)
+                Row(
+                  children: [
+                    const Expanded(child: Text('First to last build week')),
+                    const SizedBox(width: 12),
+                    Text(
+                      '${fmtSets(span.$1)} → ${fmtSets(span.$2)}',
+                      style: Theme.of(c).textTheme.titleLarge?.copyWith(fontFeatures: tabular),
+                    ),
                   ],
                 ),
               const SizedBox(height: 16),
@@ -731,6 +743,10 @@ class MuscleVolumeRow extends StatefulWidget {
   /// Sets completed so far this week, drawn as a second, solid mark beside the planned one.
   final double? performed;
 
+  /// Planned sets in the first and the last build week of the running cycle, where they differ: a thin faint
+  /// line along the top of the track between the two.
+  final (double, double)? span;
+
   /// The coach goal of this muscle in the running cycle ('maintain', 'priority' or null), named after the
   /// muscle; [goalEditable] lets the tap dialog change it.
   final String? goal;
@@ -757,6 +773,7 @@ class MuscleVolumeRow extends StatefulWidget {
     this.verdict,
     this.setsLabel = 'Planned weekly sets',
     this.performed,
+    this.span,
     this.goal,
     this.goalEditable = false,
     this.personal,
@@ -808,6 +825,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
           sets: widget.sets,
           setsLabel: widget.setsLabel,
           performed: widget.performed,
+          span: widget.span,
           verdict: widget.verdict,
           goalEditable: widget.goalEditable,
           personal: widget.personal,
@@ -881,6 +899,7 @@ class _MuscleVolumeRowState extends State<MuscleVolumeRow> {
                       painter: _LandmarkBar(
                         sets: widget.sets,
                         performed: widget.performed,
+                        span: widget.span,
                         personal: widget.personal,
                         landmark: l,
                         colors: cs,
@@ -908,6 +927,7 @@ class _LandmarkBar extends CustomPainter {
   static const trackHeight = 14.0;
   final double sets;
   final double? performed;
+  final (double, double)? span;
   final PersonalRange? personal;
   final Landmark landmark;
   final ColorScheme colors;
@@ -917,6 +937,7 @@ class _LandmarkBar extends CustomPainter {
   const _LandmarkBar({
     required this.sets,
     this.performed,
+    this.span,
     this.personal,
     required this.landmark,
     required this.colors,
@@ -931,7 +952,7 @@ class _LandmarkBar extends CustomPainter {
     // The scale ends exactly at the top of MRV, so its number sits at the bar's right end. Planned sets beyond it
     // stretch the scale a little past the mark; without an MRV, the track runs a quarter past MAV.
     final end = mrv?.$2 ?? mav.$2 * 1.25;
-    final most = math.max(math.max(sets, performed ?? 0), personal?.low ?? 0);
+    final most = [sets, performed ?? 0, personal?.low ?? 0, span?.$1 ?? 0, span?.$2 ?? 0].reduce(math.max);
     final top = most > end ? most * 1.04 : end;
     double x(double v) => (v / top).clamp(0.0, 1.0) * size.width;
     TextPainter text(String s, TextStyle style) => TextPainter(
@@ -980,6 +1001,17 @@ class _LandmarkBar extends CustomPainter {
         Paint()..color = colors.info,
       );
     }
+    // The build weeks' planned sets, first to last: a thin faint line along the top of the track.
+    if (span case (final first, final last)?) {
+      final from = x(math.min(first, last)), to = x(math.max(first, last));
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(math.min(from, size.width - 2), mid - 6, math.max(to, from + 2), mid - 4.5),
+          const Radius.circular(0.75),
+        ),
+        Paint()..color = colors.onSurface.withValues(alpha: 0.4),
+      );
+    }
     // Completed sets: a short solid mark inside the track, under the longer faint planned tick.
     if (performed case final done?) {
       canvas.drawRRect(
@@ -1005,6 +1037,7 @@ class _LandmarkBar extends CustomPainter {
   bool shouldRepaint(_LandmarkBar old) =>
       old.sets != sets ||
       old.performed != performed ||
+      old.span != span ||
       old.personal != personal ||
       old.landmark != landmark ||
       old.colors != colors ||

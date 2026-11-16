@@ -10,6 +10,10 @@ class CoachReport {
 
   /// Sets completed so far in the running microcycle, per seven days like the plan; null outside a cycle.
   final Map<String, WeeklyVolume>? performed;
+
+  /// The plan of the first and of the last build microcycle, when the cycle has at least two: a set ramp or
+  /// applied changes make them differ, and the bar draws the stretch between them.
+  final ({Map<String, WeeklyVolume> first, Map<String, WeeklyVolume> last})? buildSpan;
   final Map<String, MuscleVerdict> verdicts;
   final List<SetSuggestion> suggestions;
 
@@ -45,6 +49,7 @@ class CoachReport {
     required this.planned,
     required this.volume,
     this.performed,
+    this.buildSpan,
     required this.verdicts,
     required this.suggestions,
     this.deload = const [],
@@ -81,9 +86,16 @@ extension AppStoreCoach on AppStore {
     var sincePrevious = false;
     final changeLog = <String, List<String>>{};
     Map<String, WeeklyVolume>? performed;
+    ({Map<String, WeeklyVolume> first, Map<String, WeeklyVolume> last})? buildSpan;
     final Map<String, WeeklyVolume> volume;
     if (cycle != null && status!.running) {
       volume = plannedWeeklyVolume(cycle, byId, musclesOf);
+      if (status.buildMicro > 1) {
+        buildSpan = (
+          first: plannedWeeklyVolume(cycle, byId, musclesOf, micro: 1),
+          last: plannedWeeklyVolume(cycle, byId, musclesOf, micro: status.buildMicro),
+        );
+      }
       final sessions = _cycleSessions(
         cycle,
       ).where((s) => (s.phase ?? cycleStatus(cycle, s.startedAt).phase) == 'Build').toList();
@@ -183,6 +195,7 @@ extension AppStoreCoach on AppStore {
       planned: cycle != null,
       volume: volume,
       performed: performed,
+      buildSpan: buildSpan,
       verdicts: verdicts,
       // A deload answers whole-body fatigue; set-by-set changes wait until it is taken or dismissed.
       suggestions: deload.isEmpty ? suggestions : suggestions.where((s) => s.applied != null).toList(),

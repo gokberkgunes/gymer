@@ -27,6 +27,16 @@ class CoachScreen extends StatelessWidget {
     ];
     double sets(String muscle) =>
         volume[muscle]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0;
+    // Planned sets in the first and the last build week, where they differ.
+    (double, double)? span(String muscle) {
+      final plan = report.buildSpan;
+      if (plan == null) return null;
+      double of(Map<String, WeeklyVolume> week) =>
+          week[muscle]?.countedSets(includePartialSets: store.settings.includePartialSets) ?? 0;
+      final first = of(plan.first), last = of(plan.last);
+      return (first - last).abs() < 1e-9 ? null : (first, last);
+    }
+
     // Falling muscles already answered by a set change are not listed twice.
     final suggested = {for (final s in report.suggestions) s.muscle};
     final changes = [
@@ -88,6 +98,7 @@ class CoachScreen extends StatelessWidget {
                   MuscleVolumeRow(
                     muscle: m,
                     sets: sets(m),
+                    span: span(m),
                     goal: report.cycle?.muscleGoals[m],
                     charts: true,
                     personal: report.personal[m],
@@ -439,6 +450,12 @@ void _coachInfo(BuildContext context) => showInfoSections(context, 'How the coac
     'Tapping a muscle shows two small charts: its strength over the last twelve weeks, built from the weekly '
         'arrows so it keeps working when exercises rotate, and the sets you completed each week over the '
         'landmark bands.',
+  ),
+  (
+    'Build weeks',
+    'When the plan changes over the mesocycle, through a set ramp or the changes you applied, a thin faint line '
+        'along the top of a bar runs from the planned sets of the first build week to those of the last. The '
+        'tick is the running week.',
   ),
   (
     'Your own range',

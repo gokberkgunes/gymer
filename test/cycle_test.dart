@@ -512,6 +512,11 @@ void main() {
         [3, 4, 7],
       );
       expect(Mesocycle.fromJson(ramped.toJson()).setAdjustments.every((a) => a.ramp), isTrue);
+      // The Coach bar's span runs from the first build week's plan to the last one's.
+      real.setAdjustments.addAll(steps);
+      final span = coach.coachReport().buildSpan!;
+      expect((span.first['Chest']!.sets, span.last['Chest']!.sets), (3, 7));
+      real.setAdjustments.removeWhere(steps.contains);
       expect({for (final a in ramp(Mesocycle.fromJson(real.toJson())..setRamp = 2)) a.micro}, {3, 5});
       expect(
         ramp(
