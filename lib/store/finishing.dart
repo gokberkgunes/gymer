@@ -79,10 +79,13 @@ extension AppStoreFinishing on AppStore {
     }
     // Records compare against earlier sessions, so collect them first.
     final alreadyEarned = {
-      for (final p in achievementProgress(history))
+      for (final p in achievementProgress(history, cycles: cycles))
         if (p.earned) p.achievement.id,
     };
-    final earned = achievementProgress([...history, s]).where((p) => p.earned).toList();
+    // Linked to its planned day first, so a mesocycle achievement sees this workout as done.
+    final c = cycles.where((c) => c.id == s.cycleId).firstOrNull ?? activeCycle;
+    if (c != null) linkSession(c, s);
+    final earned = achievementProgress([...history, s], cycles: cycles).where((p) => p.earned).toList();
     final unlocked = [
       for (final p in earned)
         if (!alreadyEarned.contains(p.achievement.id) && !_seenAchievements.contains(p.achievement.id)) p,
@@ -90,8 +93,6 @@ extension AppStoreFinishing on AppStore {
     _seenAchievements.addAll(earned.map((p) => p.achievement.id));
     final summary = summarizeSession(s, achievements: unlocked);
     history = [s, ...history];
-    final c = cycles.where((c) => c.id == s.cycleId).firstOrNull ?? activeCycle;
-    if (c != null) linkSession(c, s);
     snapshot();
     active = null;
     rest = null;

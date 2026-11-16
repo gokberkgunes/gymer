@@ -1,5 +1,6 @@
 // Expected statuses come from the Flet app's storage.mesocycle_status().
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gymer/logic/achievements.dart';
 import 'package:gymer/logic/bodyweight.dart';
 import 'package:gymer/logic/coach.dart';
 import 'package:gymer/logic/cycle.dart';
@@ -54,6 +55,45 @@ void main() {
     expect(days['2026-01-06']!.status, 'rest');
     expect(days['2026-01-12']!.status, 'missed');
     expect(days['2026-01-14']!.status, 'planned');
+
+    // Mesocycle achievements: finished once every microcycle has a workout, full attendance when no planned
+    // day is open, stronger everywhere when at least three compared lifts all rose.
+    final short = Mesocycle(id: 'c', start: DateTime(2026, 3, 2), length: 2, deloadMicro: 0, schedule: {1: 'A'});
+    Session week(int n, double load, {List<String> lifts = const ['Squat', 'Bench', 'Row']}) {
+      final at = DateTime(2026, 3, 2 + 7 * (n - 1), 18);
+      return s('w$n', at, 'A')
+        ..finishedAt = at
+        ..microcycle = n
+        ..exercises.addAll([
+          for (final name in lifts)
+            SessionExercise(
+              name: name,
+              sets: [SetEntry(weight: load, reps: 8, rir: 2, done: true)],
+            ),
+        ]);
+    }
+
+    Set<String> earned(List<Session> history) => {
+      for (final p in achievementProgress(history, cycles: [short]))
+        if (p.earned && p.achievement.kind.index >= AchievementKind.cycles.index) p.achievement.id,
+    };
+    expect(earned([week(1, 100)]), isEmpty);
+    expect(earned([week(1, 100), week(2, 105)]), {'cycles_1', 'attendance_1', 'stronger_1'});
+    expect(earned([week(1, 100), week(2, 100)]), {'cycles_1', 'attendance_1'}, reason: 'no lift rose');
+    short.schedule[3] = 'B';
+    expect(
+      earned([
+        week(1, 100),
+        week(2, 105, lifts: ['Squat']),
+      ]),
+      {'cycles_1'},
+      reason: 'B never done, one lift',
+    );
+    expect(
+      achievementProgress([week(1, 100), week(2, 105)]).where((p) => p.earned).map((p) => p.achievement.id),
+      ['workouts_1', 'weeks_2', 'load_50', 'load_100'],
+      reason: 'without cycles only the history achievements count',
+    );
   });
 
   test('calendar days stay distinct across a DST change', () {

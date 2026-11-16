@@ -1,10 +1,12 @@
 import 'dart:math' as math;
 
 import '../models.dart';
+import 'cycle.dart';
+import 'cycle_review.dart';
 import 'numbers.dart';
 import 'progression.dart';
 
-enum AchievementKind { workouts, sets, weeks, load }
+enum AchievementKind { workouts, sets, weeks, load, cycles, attendance, stronger }
 
 class Achievement {
   final String id, title;
@@ -18,6 +20,9 @@ class Achievement {
     AchievementKind.weeks => '$target weeks in a row',
     AchievementKind.load =>
       '${formatNumber(convertWeight(target.toDouble(), 'kg', unit), NumKind.weight)} $unit logged',
+    AchievementKind.cycles => '$target ${target == 1 ? 'mesocycle' : 'mesocycles'} finished',
+    AchievementKind.attendance => 'A mesocycle without a missed workout',
+    AchievementKind.stronger => 'Every lift up in one mesocycle',
   };
 
   String get explanation => switch (kind) {
@@ -28,6 +33,15 @@ class Achievement {
       'Train at least once each week, Monday to Sunday. Rest days are welcome. Progress shows your best streak.',
     AchievementKind.load =>
       'Complete a working set at this load or higher. Uses the weight you logged, never an estimated max. Bodyweight, assisted, per-side and per-implement loads are excluded.',
+    AchievementKind.cycles =>
+      'Train in every week (or microcycle) of a mesocycle, from the first to the last, deload included. It counts '
+          'with the workout that fills the last one.',
+    AchievementKind.attendance =>
+      'Finish a mesocycle with every scheduled workout done. A workout moved to another day and done there counts; '
+          'a missed one, or one whose saved workout was deleted, does not.',
+    AchievementKind.stronger =>
+      'Finish a mesocycle in which every exercise the cycle review compares, at least three, ended with a higher '
+          'estimated 1RM than it started with. Straight sets with an external load in the build weeks are compared.',
   };
 }
 
@@ -49,6 +63,11 @@ const achievements = [
   Achievement('load_100', 'Triple digits', AchievementKind.load, 100),
   Achievement('load_150', 'Raising the bar', AchievementKind.load, 150),
   Achievement('load_200', 'Built over time', AchievementKind.load, 200),
+  Achievement('cycles_1', 'Full circle', AchievementKind.cycles, 1),
+  Achievement('cycles_3', 'Block by block', AchievementKind.cycles, 3),
+  Achievement('cycles_6', 'Seasoned', AchievementKind.cycles, 6),
+  Achievement('attendance_1', 'Never missed', AchievementKind.attendance, 1),
+  Achievement('stronger_1', 'Stronger everywhere', AchievementKind.stronger, 1),
 ];
 
 class AchievementProgress {
@@ -71,7 +90,8 @@ class AchievementProgress {
 }
 
 /// History is the source of truth. Read-only, independent of display units, and never includes an active session.
-List<AchievementProgress> achievementProgress(Iterable<Session> history) {
+/// [cycles] feed the mesocycle achievements; without them those simply stay unearned.
+List<AchievementProgress> achievementProgress(Iterable<Session> history, {List<Mesocycle> cycles = const []}) {
   final sessions =
       {
         for (final s in history)
@@ -117,6 +137,44 @@ List<AchievementProgress> achievementProgress(Iterable<Session> history) {
       final tolerance = achievement.kind == AchievementKind.load ? 0.01 : 0;
       if (values[achievement.kind]! + tolerance >= achievement.target) {
         earned.putIfAbsent(achievement.id, () => (session.finishedAt!, session.id));
+      }
+    }
+  }
+  // Mesocycles: each counts with the workout that completed it, in the order they were completed.
+  final counted = [
+    for (final s in sessions)
+      if (s.exercises.any((e) => e.sets.any((x) => x.done && !x.warmup && (x.reps ?? 0) > 0))) s,
+  ];
+  final events = {
+    for (final kind in [AchievementKind.cycles, AchievementKind.attendance, AchievementKind.stronger])
+      kind: <(DateTime, String)>[],
+  };
+  for (final c in cycles) {
+    if (!c.setupComplete) continue;
+    final own = counted.where((s) => s.cycleId == c.id).toList();
+    final days = math.max(1, c.microDays);
+    final covered = <int>{};
+    Session? completedBy;
+    for (final s in own) {
+      covered.add(s.microcycle ?? daysBetween(c.start, s.startedAt) ~/ days + 1);
+      if (completedBy == null && [for (var m = 1; m <= c.length; m++) m].every(covered.contains)) completedBy = s;
+    }
+    if (completedBy == null) continue;
+    events[AchievementKind.cycles]!.add((completedBy.finishedAt!, completedBy.id));
+    final last = (own.last.finishedAt!, own.last.id);
+    final planned = calendarDays(c, sessions).where((d) => d.templateId != null);
+    if (planned.isNotEmpty && planned.every((d) => d.status == 'done' || d.status == 'moved_done')) {
+      events[AchievementKind.attendance]!.add(last);
+    }
+    final lifts = cycleStrengthChanges(c, own, 'kg');
+    if (lifts.length >= 3 && lifts.every((x) => x.change > 0)) events[AchievementKind.stronger]!.add(last);
+  }
+  for (final MapEntry(key: kind, value: list) in events.entries) {
+    list.sort((a, b) => a.$1.compareTo(b.$1));
+    values[kind] = list.length.toDouble();
+    for (final achievement in achievements) {
+      if (achievement.kind == kind && list.length >= achievement.target) {
+        earned[achievement.id] = list[achievement.target - 1];
       }
     }
   }

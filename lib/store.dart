@@ -134,7 +134,7 @@ class AppStore extends ChangeNotifier {
     final newSeen = seen is List
         ? seen.whereType<String>().toSet()
         : {
-            for (final p in achievementProgress(newHistory))
+            for (final p in achievementProgress(newHistory, cycles: newCycles))
               if (p.earned) p.achievement.id,
           };
     settings = newSettings;

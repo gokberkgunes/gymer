@@ -21,7 +21,7 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
     final store = StoreScope.of(context);
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final progress = achievementProgress(store.history);
+    final progress = achievementProgress(store.history, cycles: store.cycles);
     final earned = progress.where((p) => p.earned).length;
     final visible = switch (_filter) {
       'earned' => progress.where((p) => p.earned).toList()..sort((a, b) => b.earnedAt!.compareTo(a.earnedAt!)),

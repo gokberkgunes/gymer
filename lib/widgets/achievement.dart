@@ -9,6 +9,9 @@ IconData achievementIcon(AchievementKind kind) => switch (kind) {
   AchievementKind.sets => Icons.layers_outlined,
   AchievementKind.weeks => Icons.local_fire_department_outlined,
   AchievementKind.load => Icons.fitness_center_rounded,
+  AchievementKind.cycles => Icons.event_repeat_rounded,
+  AchievementKind.attendance => Icons.event_available_rounded,
+  AchievementKind.stronger => Icons.trending_up_rounded,
 };
 
 class AchievementEmblem extends StatelessWidget {
