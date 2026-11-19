@@ -318,6 +318,8 @@ class _SetRow extends StatelessWidget {
               ? NumField(
                   value: s.rir?.toDouble(),
                   kind: NumKind.rir,
+                  // The target is only a ghost: completing a blank box records unknown RIR, never the target.
+                  placeholder: s.targetRir?.toString(),
                   completed: s.done,
                   fill: fieldFill,
                   align: TextAlign.center,
