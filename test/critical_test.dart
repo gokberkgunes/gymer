@@ -165,6 +165,9 @@ void main() {
     ];
     final plan = jsonDecode(jsonEncode(store.templates.single.toJson()));
     store.startSession(store.templates.single);
+    expect(store.finishSession(), isNull);
+    expect(store.active, isNotNull);
+    expect(store.history, isEmpty);
     store.settings.updateFollowingDefaults = true;
     expect(store.startWarmups(), isNull);
     final ramp = store.active!.activeWarmup!;
@@ -182,6 +185,17 @@ void main() {
     expect(resumed.toggleSet(resumed.active!.activeWarmup!, 2).ok, isTrue);
     expect(resumed.active!.warmingUp, isFalse);
     expect(resumed.active!.doneSets, 0);
+    expect(resumed.finishSession(), isNull);
+    // Legacy plans could keep warm-ups among the working exercise's rows.
+    resumed.active!.exercises.single.sets.insert(0, SetEntry(type: 'Warm-up', weight: 20, reps: 8, done: true));
+    expect(resumed.finishSession(), isNull);
+    final empty = resumed.active!;
+    resumed.saveHistorySession(empty);
+    final calendar = Mesocycle(id: 'empty', start: DateTime(2026, 1, 1));
+    resumed.saveCalendarSession(calendar, '2026-01-01', empty);
+    expect(calendar.events, isEmpty);
+    expect(resumed.history, isEmpty);
+    resumed.active!.exercises.single.sets.removeAt(0);
     final working = resumed.active!.exercises.single;
     expect(resumed.toggleSet(working, 0).ok, isTrue);
     expect(resumed.rest!.warmup, isFalse);

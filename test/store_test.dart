@@ -106,6 +106,97 @@ void main() {
   });
 
   test('next-session prescriptions preserve effort, manual choices and one-tap completion', () async {
+    // Historical RIR may be absent: reuse loads without inventing effort or progressing an incomplete session.
+    for (final kind in ['empty', 'partial', 'warmup', 'invalid', 'context', 'method', 'mode', 'future', 'deload']) {
+      for (final inCycle in [false, true]) {
+        final recovered = suggestionStore(8, null);
+        final plan = recovered.templates.single;
+        for (final set in plan.exercises.single.sets) {
+          set.weight = null;
+        }
+        final recent = Session.fromJson({...recovered.history.single.toJson(), 'id': 'recent'})
+          ..startedAt = DateTime(2026, 1, 2);
+        final rows = recent.exercises.single.sets;
+        switch (kind) {
+          case 'partial':
+            rows.first
+              ..done = false
+              ..weight = null
+              ..reps = null;
+          case 'empty' || 'warmup':
+            for (final row in rows) {
+              row
+                ..done = false
+                ..weight = null
+                ..reps = null;
+            }
+            if (kind == 'warmup') {
+              rows.insert(0, SetEntry(type: 'Warm-up', weight: 20, reps: 8, done: true));
+            }
+          case 'invalid':
+            for (final row in rows) {
+              row.weight = null;
+            }
+          case 'context':
+            for (final row in rows) {
+              row
+                ..weight = 300
+                ..context = const SetContext(setup: 'other machine');
+            }
+          case 'method':
+            recent.exercises.single.method = 'AMRAP';
+          case 'mode':
+            recent.exercises.single.loadMode = 'assistance';
+          case 'future':
+            recent.startedAt = DateTime(2026, 1, 5);
+          case 'deload':
+            recent.phase = 'Deload';
+        }
+        recovered.history.insert(0, recent);
+        if (inCycle) recovered.saveCycle(Mesocycle(id: 'new', start: DateTime(2026, 1, 3)));
+        final history = jsonEncode(recovered.history.map((s) => s.toJson()).toList());
+        recovered.startSession(plan, at: DateTime(2026, 1, 3));
+        expect(
+          recovered.active!.exercises.single.work.map((s) => s.weight ?? s.hintWeight),
+          everyElement(100.0),
+          reason: '$kind history, cycle=$inCycle',
+        );
+        expect(jsonEncode(recovered.history.map((s) => s.toJson()).toList()), history);
+      }
+    }
+
+    // Same-workout history takes priority; another workout can fill positions it never logged.
+    final recovered = suggestionStore(8, null);
+    final plan = recovered.templates.single;
+    for (final set in plan.exercises.single.sets) {
+      set.weight = null;
+    }
+    final other = Session.fromJson({...recovered.history.single.toJson(), 'id': 'other', 'template': 'other'});
+    recovered.history.single.exercises.single.sets.last
+      ..done = false
+      ..weight = null;
+    other.startedAt = DateTime(2026, 1, 2);
+    for (final row in other.exercises.single.work) {
+      row.weight = 110;
+    }
+    recovered.history.insert(0, other);
+    recovered.startSession(plan, at: DateTime(2026, 1, 3));
+    expect(recovered.active!.exercises.single.work.map((s) => s.weight ?? s.hintWeight), [100, 100, 110]);
+    expect(recovered.active!.exercises.single.work.map((s) => s.rir), everyElement(isNull));
+
+    // The last workout is the reference: a recent increase is kept, older lighter workouts do not pull it back.
+    final increased = suggestionStore(8, 2);
+    final latest = Session.fromJson({...increased.history.single.toJson(), 'id': 'latest'})
+      ..startedAt = DateTime(2026, 1, 2);
+    for (final row in latest.exercises.single.work) {
+      row
+        ..weight = 105
+        ..reps = 10;
+    }
+    increased.history.insert(0, latest);
+    increased.startSession(increased.templates.single, at: DateTime(2026, 1, 3));
+    expect(increased.active!.exercises.single.work.map((s) => s.weight), everyElement(105.0));
+
     // Recorded reps/RIR and automatic mode → next load and rep goal.
     for (final (reps, rir, automatic, load, goal) in <(int, int?, bool, double?, int?)>[
       (9, 2, true, 100, 9),
@@ -176,11 +267,16 @@ void main() {
       );
       store.saveCycle(cycle);
       store.startSession(store.templates.single, at: cycle.start);
+      // An earlier set is the baseline: the first cycle workout progresses from it instead of calibrating.
+      final first = store.active!.exercises.single;
+      expect(first.calibrate, isFalse);
+      expect(first.work.take(2).map((s) => (s.weight, s.targetReps, s.targetRir)), everyElement((load, goal, target)));
+      // Only another setup was logged: calibration remains, without borrowing that load.
+      store.history = [wrong];
+      store.startSession(store.templates.single, at: cycle.start);
       final exercise = store.active!.exercises.single;
-      final calibration = store.calibrationFor('Press', 'Straight', store.active!)!;
       expect(exercise.calibrate, isTrue);
-      expect((calibration.weight, calibration.targetReps, calibration.targetRir), (load, goal, target));
-      expect((exercise.sets.first.hintWeight, store.fallbackValue(exercise, 0, 'reps')), (load, goal));
+      expect(store.calibrationFor('Press', 'Straight', store.active!), isNull);
       exercise.sets[1]
         ..weight = 80
         ..reps = 11

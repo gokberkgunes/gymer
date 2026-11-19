@@ -3,6 +3,7 @@ part of '../store.dart';
 /// Saved workouts, calendar logging and read-only queries.
 extension AppStoreHistory on AppStore {
   void saveHistorySession(Session edited) {
+    if (edited.doneSets == 0) return;
     final i = history.indexWhere((s) => s.id == edited.id);
     if (i >= 0 && edited.cycleId != null && dateKey(history[i].startedAt) != dateKey(edited.startedAt)) {
       _relabelForDate(edited);
@@ -80,6 +81,7 @@ extension AppStoreHistory on AppStore {
 
   /// Saves a calendar-logged past workout and links it to its planned day.
   void saveCalendarSession(Mesocycle c, String plannedKey, Session s, {bool unplanned = false}) {
+    if (s.doneSets == 0) return;
     final st = cycleStatus(c, s.startedAt);
     s
       ..cycleId = c.id

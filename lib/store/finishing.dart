@@ -50,10 +50,10 @@ extension AppStoreFinishing on AppStore {
             jsonEncode(t.circuits.map((c) => c.toJson()).toList());
   }
 
-  /// Saves the workout; returns null when nothing was completed.
+  /// Saves the workout; warm-ups alone do not make a completed workout.
   FinishSummary? finishSession({bool saveStructure = false}) {
     final s = active;
-    if (s == null || s.doneAll == 0) return null;
+    if (s == null || s.doneSets == 0) return null;
     final t = template(s.templateId);
     if (t != null && s.phase != 'Deload') {
       if (saveStructure) {

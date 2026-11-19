@@ -169,7 +169,7 @@ class _SessionScreenState extends State<SessionScreen> {
     final s = store.active!;
     final violation = store.setOrderViolation();
     if (violation != null) return notify(context, violation);
-    if (s.doneAll == 0) return notify(context, 'No completed sets. Mark at least one set first.');
+    if (s.doneSets == 0) return notify(context, 'Complete at least one working set before finishing.');
     // Finishing cannot be undone, so a stray tap mid-workout must not end it.
     final open = s.exercises.fold(0, (n, e) => n + s.visibleSetsFor(e).where((x) => !x.done).length);
     if (open > 0) {

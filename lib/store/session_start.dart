@@ -32,16 +32,20 @@ extension AppStoreSessionStart on AppStore {
     changed();
   }
 
-  /// Latest completed session of this exercise and method, preferring the
-  /// same workout (latest_completed_*_session).
-  List<SetEntry>? _latestMethodSession(String exercise, String method, Session session) {
+  /// The last workout of this exercise and method with a completed working set in a planned
+  /// context, preferring the same workout. It is the baseline for progression.
+  List<SetEntry>? _latestMethodSession(SessionExercise planned, Session session) {
+    final contexts = {for (final set in planned.work) set.context};
     List<SetEntry>? fallback;
     for (final s in history) {
       if (s.phase == 'Deload' || !s.startedAt.isBefore(session.startedAt)) continue;
       final e = s.exercises
-          .where((e) => sameExercise(e.name, exercise) && e.method == method && e.loadMode == 'external')
+          .where((e) => sameExercise(e.name, planned.name) && e.method == planned.method && e.loadMode == 'external')
           .firstOrNull;
-      if (e == null || !e.sets.any((x) => x.done)) continue;
+      if (e == null ||
+          !e.work.any((x) => x.done && (x.weight ?? 0) > 0 && (x.reps ?? 0) > 0 && contexts.contains(x.context))) {
+        continue;
+      }
       final sets = [for (final x in e.sets) _inUnit(x, s.unit, session.unit)];
       if (s.templateId == session.templateId) return sets;
       fallback ??= sets;
@@ -49,30 +53,47 @@ extension AppStoreSessionStart on AppStore {
     return fallback;
   }
 
-  bool _calibrated(Mesocycle c, Session session, SessionExercise planned) {
-    final context = planned.sets.firstWhere((s) => calibrationAnchor(planned.method, s.type)).context;
-    for (final s in history) {
-      if (s.cycleId != c.id ||
-          s.templateId != session.templateId ||
-          s.phase == 'Deload' ||
-          !s.startedAt.isBefore(session.startedAt)) {
-        continue;
-      }
-      for (final e in s.exercises) {
-        if (!sameExercise(e.name, planned.name) || e.method != planned.method || e.loadMode != 'external') continue;
-        if (e.sets.any(
-          (x) =>
-              x.done &&
-              x.context == context &&
-              calibrationAnchor(planned.method, x.type) &&
-              (x.weight ?? 0) > 0 &&
-              (x.reps ?? 0) > 0,
-        )) {
-          return true;
+  /// The planned row's value from the last workout (this workout first), by role and position.
+  /// A position skipped there falls back to an older workout as a hint only: progression still
+  /// judges the last workout as a whole.
+  SetEntry? _lastPlannedSet(TemplateExercise plan, int index, Session current) {
+    final templateId = current.templateId;
+    final set = plan.sets[index];
+    final warmup = isWarmup(set.type);
+    final position = plan.sets.take(index).where((s) => isWarmup(s.type) == warmup).length;
+    final mode = exercise(plan.name)?.loadMode ?? defaultLoadModeFor(plan.name);
+    final context = contextFor(plan.name, set);
+    // Prefer this workout throughout its history, then try the same exercise in other workouts.
+    for (final sameWorkout in templateId == null ? [false] : [true, false]) {
+      for (final session in history) {
+        if (session.phase == 'Deload' ||
+            !session.startedAt.isBefore(current.startedAt) ||
+            (templateId != null && (session.templateId == templateId) != sameWorkout)) {
+          continue;
+        }
+        final previous = session.exercises.where(
+          (e) => sameExercise(e.name, plan.name) && e.method == canonicalMethod(plan.method) && e.loadMode == mode,
+        );
+        for (final exercise in previous) {
+          final rows = exercise.sets.where((s) => s.warmup == warmup).toList();
+          if (position >= rows.length) continue;
+          final candidate = rows[position];
+          final weight = candidate.weight;
+          // Bodyweight rows may have no load; an external load must be positive.
+          if (!candidate.done ||
+              (weight != null && (!weight.isFinite || weight < 0)) ||
+              (mode == 'external' && (weight ?? 0) <= 0) ||
+              (candidate.reps ?? 0) <= 0 ||
+              candidate.context != context ||
+              canonicalSetType(candidate.type) != canonicalSetType(set.type) ||
+              candidate.groupStart != set.groupStart) {
+            continue;
+          }
+          return _inUnit(candidate, session.unit, current.unit, plan.name);
         }
       }
     }
-    return false;
+    return null;
   }
 
   /// Historical reps stay hidden in mesocycles unless the setting opts in.
@@ -258,13 +279,11 @@ extension AppStoreSessionStart on AppStore {
     final info = exercise(te.name);
     final loadMode = info?.loadMode ?? defaultLoadModeFor(te.name);
     final method = canonicalMethod(te.method);
-    final latest = _latestSetValues(te.name, session.templateId) ?? const <SetEntry>[];
     final showReps = historicalRepsVisible(session);
     final sets = <SetEntry>[];
     for (final (i, ts) in te.sets.indexed) {
       final context = contextFor(te.name, ts);
-      var prev = i < latest.length ? latest[i] : null;
-      if (prev != null && (!prev.done || prev.context != context)) prev = null;
+      final prev = _lastPlannedSet(te, i, session);
       sets.add(
         SetEntry(
           type: ts.type,
@@ -281,7 +300,7 @@ extension AppStoreSessionStart on AppStore {
     final starting = _cycleStartingExercise(te.name, method, session);
     if (starting != null) {
       for (final (i, set) in e.sets.indexed) {
-        if (i < starting.sets.length) set.hintWeight = starting.sets[i].weight;
+        if (i < starting.sets.length) set.hintWeight = starting.sets[i].weight ?? set.hintWeight;
       }
     }
     _applyGuidance(e, session, cycle);
@@ -335,32 +354,30 @@ extension AppStoreSessionStart on AppStore {
     final method = e.method;
     final inBuild = cycle != null && session.phase == 'Build';
     final contextError = contextProblem(e.sets);
+    final starting = e.loadMode == 'external' ? _cycleStartingExercise(e.name, method, session) : null;
+    final previous = session.phase != 'Deload' && e.loadMode == 'external' && starting == null
+        ? _latestMethodSession(e, session)
+        : null;
     Recommendation? rec;
-    if (session.phase != 'Deload' && e.loadMode == 'external') {
-      final previous = _cycleStartingExercise(e.name, method, session) == null
-          ? _latestMethodSession(e.name, method, session)
-          : null;
-      final straightOk = method != 'Straight' || _straightGuidanceAllowed(e);
-      if (previous != null && straightOk) {
-        rec = recommend(
-          previous: previous,
-          planned: e.sets,
-          method: method,
-          targetRir: session.targetRir,
-          unit: session.unit,
-          increment: incrementFor(e.name, session.unit),
-          repMin: info?.repMin ?? lowRepLimit,
-          repMax: info?.repMax ?? highRepLimit,
-          auto: info?.autoProgression ?? true,
-          perSet: info?.perSet ?? false,
-          expectedWorkSets: method == 'Straight'
-              ? e.sets.where((s) => isStraightType(s.type)).length
-              : e.sets.where((s) => !s.warmup).length,
-          loadMode: e.loadMode,
-          rirTracked: settings.trackRir,
-          loadAtOrBelow: (target) => loadableAtOrBelow(e.name, target),
-        );
-      }
+    if (previous != null && (method != 'Straight' || _straightGuidanceAllowed(e))) {
+      rec = recommend(
+        previous: previous,
+        planned: e.sets,
+        method: method,
+        targetRir: session.targetRir,
+        unit: session.unit,
+        increment: incrementFor(e.name, session.unit),
+        repMin: info?.repMin ?? lowRepLimit,
+        repMax: info?.repMax ?? highRepLimit,
+        auto: info?.autoProgression ?? true,
+        perSet: info?.perSet ?? false,
+        expectedWorkSets: method == 'Straight'
+            ? e.sets.where((s) => isStraightType(s.type)).length
+            : e.sets.where((s) => !s.warmup).length,
+        loadMode: e.loadMode,
+        rirTracked: settings.trackRir,
+        loadAtOrBelow: (target) => loadableAtOrBelow(e.name, target),
+      );
     }
     var allow = method == 'Straight'
         ? _straightGuidanceAllowed(e) && (rec == null || rec.applyWeight)
@@ -374,7 +391,9 @@ extension AppStoreSessionStart on AppStore {
         method != 'Mechanical Drop Set' &&
         (method != 'Straight' || _straightGuidanceAllowed(e)) &&
         e.sets.any((s) => calibrationAnchor(method, s.type)) &&
-        !_calibrated(cycle, session, e);
+        // An earlier set (or a cycle starting load) is the baseline; calibrate only without one.
+        previous == null &&
+        starting == null;
 
     var workIndex = 0;
     var firstAnchor = true;
@@ -389,8 +408,6 @@ extension AppStoreSessionStart on AppStore {
           s.hintWeight = calibration?.weight ?? s.hintWeight;
           s.targetReps = calibration?.targetReps;
           s.targetRir = calibration?.targetRir ?? s.targetRir;
-        } else {
-          s.hintWeight = null;
         }
         continue;
       }

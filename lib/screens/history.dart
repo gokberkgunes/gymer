@@ -619,8 +619,8 @@ class _SessionEditorState extends State<SessionEditor> {
     }
     _s.name = _name.text.trim().isEmpty ? widget.original.name : _name.text.trim();
     reconcileCircuits(_s.circuits, _s.exercises.map((e) => e.name));
+    if (_s.doneSets == 0) return notify(context, 'Complete at least one working set before saving.');
     if (widget.draft) {
-      if (_s.doneAll == 0) return notify(context, 'Mark at least one set complete.');
       store.saveCalendarSession(widget.cycle!, widget.plannedKey!, _s, unplanned: widget.unplanned);
       notify(context, 'Workout saved.');
     } else {
