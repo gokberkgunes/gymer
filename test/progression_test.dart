@@ -42,7 +42,7 @@ void main() {
     );
 
     final down = rec(sets([(100, 6, 1), (100, 6, 1), (100, 5, 1)]), inc: 2.5);
-    expect((down.action, down.weight), ('decrease', 90.0));
+    expect((down.action, down.weight), ('decrease', 87.5));
 
     // Per-set progression: different loads across sets are expected, and each set follows the rules alone.
     final mixed = sets([(102.5, 8, 2), (100, 10, 2), (100, 9, 2)]);
@@ -70,6 +70,25 @@ void main() {
       recommend(previous: missed, method: 'Straight', targetRir: 2, unit: 'kg', perSet: true)!.setWeights,
       isEmpty,
     );
+    // A dropped-off last set (185 × 9, 9, 6 @ 1 RIR, or with its RIR blank) at 2 RIR: an 8–12 range lowers the
+    // load, 5–8 keeps it; goals never ask for more than each set showed, and nothing is declined.
+    for (final (lastRir, low, high, lighter) in <(int?, int, int, bool)>[
+      (1, 8, 12, true),
+      (null, 8, 12, true),
+      (1, 5, 8, false),
+    ]) {
+      final rdl = [
+        for (final (reps, rir) in [(9, 1), (9, 1), (6, lastRir)])
+          SetEntry(weight: 185, reps: reps, rir: rir, done: true),
+      ];
+      final result = recommend(previous: rdl, method: 'Straight', targetRir: 2, unit: 'lb', repMin: low, repMax: high)!;
+      expect((result.applyWeight, result.weight < 185), (true, lighter), reason: '$lastRir RIR, $low–$high');
+      for (final (i, set) in rdl.indexed) {
+        final capacity = setOneRm(set.weight, set.reps, set.rir ?? 2)!;
+        expect(result.setRepTargets[i], supportedReps(capacity, result.weight, 2)!.clamp(1, high));
+      }
+    }
+
     // Fit the next effort target before deciding to keep the weight, including both former grace edges.
     for (final reps in [7, 8, 12, 13]) {
       for (final actualRir in [0, 4]) {
@@ -81,7 +100,8 @@ void main() {
             unit: 'kg',
           )!;
           if (result.applyWeight) {
-            expect(result.setRepTargets, everyElement(inInclusiveRange(8, 12)));
+            // Never above the range; under it only when the capped lighter load still cannot reach it.
+            expect(result.setRepTargets, everyElement(inInclusiveRange(1, 12)));
             expect(
               setOneRm(result.weight, result.targetReps, targetRir)!,
               lessThanOrEqualTo(setOneRm(100, reps, actualRir)! + 1e-6),
@@ -97,38 +117,15 @@ void main() {
   });
 
   test('light loads stay stable too; reps alone decide without RIR using the same working window', () {
-    // Reaching 12 reps does not force a 25% jump from 20 to 25 kg.
-    final light = rec(sets([(20, 12, 2), (20, 12, 2)]));
-    expect(
-      [light.action, light.weight, light.setRepTargets],
-      [
-        'hold',
-        20.0,
-        [12, 12],
-      ],
-    );
-    expect(light.reason, contains('goes up once every set reaches'));
-    // A 1.25 kg step on a 5 kg raise is 25 %: the range widens, and the load moves exactly one step once every
-    // set has out-repped that jump, instead of never (the 10 % limit) or at the top of the normal range.
-    final earn = repsToEarnStep(5, 6.25, 8, 2);
-    expect(earn, inInclusiveRange(15, 22));
-    final building = rec(sets([(5, earn - 1, 2), (5, earn - 1, 2)]), inc: 1.25);
-    expect((building.action, building.weight), ('hold', 5.0));
-    final earned = rec(sets([(5, earn, 2), (5, earn, 2)]), inc: 1.25);
-    expect((earned.action, earned.weight, earned.setRepTargets.every((reps) => reps >= 8)), ('increase', 6.25, true));
-    Recommendation lightRepsOnly(int reps) => recommend(
-      previous: [for (var i = 0; i < 2; i++) SetEntry(weight: 5, reps: reps, done: true)],
+    // No cap on automatic changes: a load far too heavy goes straight to what the range needs.
+    final heavy = recommend(
+      previous: sets([(100, 2, 2)]),
       method: 'Straight',
-      targetRir: null,
+      targetRir: 2,
       unit: 'kg',
-      increment: 1.25,
-      rirTracked: false,
+      increment: 2.5,
     )!;
-    final lightEarn = repsToEarnStep(5, 6.25, 8, 0);
-    expect(
-      (lightRepsOnly(14).action, lightRepsOnly(lightEarn - 1).action, lightRepsOnly(lightEarn).action),
-      ('hold', 'hold', 'increase'),
-    );
+    expect((heavy.action, heavy.weight < 90, heavy.setRepTargets.single), ('decrease', true, 8));
     Recommendation repsOnly(List<(double, int)> v) => recommend(
       previous: [for (final (w, r) in v) SetEntry(weight: w, reps: r, done: true)],
       method: 'Straight',
@@ -237,9 +234,9 @@ void main() {
     // Reps/RIR, increment and rep minimum → rounded load and attainable goal.
     for (final (reps, rir, step, minimum, load, goal) in [
       (6, 2, 2.5, 8, 92.5, 8), // Uses the estimate, not a single-increment reduction.
-      (2, 2, 2.5, 14, 90.0, null), // A capped reduction cannot support the range: decline automatic targets.
-      (2, 2, 25.0, 14, 100.0, null), // No available increment fits the 10% limit.
-      (14, 2, 2.5, 8, 110.0, 9), // Increase only outside the working window.
+      (2, 2, 2.5, 14, 72.5, 14), // No cap: the load drops straight to what the range needs.
+      (2, 2, 25.0, 14, 75.0, 12), // Coarse increments still drop to the nearest available load.
+      (14, 2, 2.5, 8, 112.5, 8), // Increase only outside the working window, straight to the estimate.
       (6, 8, 2.5, 8, 100.0, 8), // An inflated RIR counts as at most four.
     ]) {
       final source = SetEntry(weight: 100, reps: reps, rir: rir, done: true);

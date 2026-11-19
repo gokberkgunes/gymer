@@ -421,7 +421,7 @@ class _ExerciseEditorState extends State<ExerciseEditor> {
           const SizedBox(height: 6),
           Text(
             'Keep rep targets within the range set here (8–12 by default), using your recorded capacity and target RIR. '
-            'Loads adjust when needed; if available loads or the 10% change limit cannot support the range, choose a load manually. '
+            'Loads adjust to what your last sets support, rounded down to loads you can make. '
             'Manual mode disables automatic load/calibration hints. Cluster sets keep their protocol window.',
             style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),

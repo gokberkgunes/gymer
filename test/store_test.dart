@@ -641,11 +641,12 @@ void main() {
       store.startSession(store.templates.single, at: DateTime(2026, 1, 2));
       expect(
         store.active!.exercises.single.sets.map((s) => (s.weight, s.targetReps, s.targetRir)),
-        everyElement(limited ? (null, null, null) : (expected, reps, 2)),
+        // With only an empty bar below, the current load fits the range better: hold with honest goals.
+        everyElement((expected, reps, 2)),
       );
       if (limited) {
         expect(store.active!.exercises.single.sets.map((s) => s.hintWeight), everyElement(expected));
-        expect(store.active!.exercises.single.advice.join(), contains('manually'));
+        expect(store.active!.exercises.single.advice.join(), contains('still under 8 reps'));
       }
       if (limited) expect(store.plates(expected, name: 'Press').exact, isNotNull);
       expect(jsonEncode(store.history.single.toJson()), history);

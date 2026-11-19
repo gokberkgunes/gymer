@@ -53,6 +53,17 @@ extension AppStoreSessionStart on AppStore {
     return fallback;
   }
 
+  /// Last time's reps as a hint, fitted to today's target RIR: never more than that set showed it can do
+  /// (a blank RIR counts as done at the target). Without a target or effort scale the observed reps stay.
+  int? _repsAtTarget(SetEntry? prev, String method, String type, String loadMode, int? target) {
+    if (prev == null || target == null || loadMode != 'external' || !methodSetUsesRir(method, type)) {
+      return prev?.reps;
+    }
+    final oneRm = setOneRm(prev.weight, prev.reps, prev.rir == null || prev.rir! < 0 ? target : prev.rir);
+    if (oneRm == null || (prev.weight ?? 0) <= 0) return prev.reps;
+    return supportedReps(oneRm, prev.weight!, target) ?? prev.reps;
+  }
+
   /// The planned row's value from the last workout (this workout first), by role and position.
   /// A position skipped there falls back to an older workout as a hint only: progression still
   /// judges the last workout as a whole.
@@ -291,7 +302,7 @@ extension AppStoreSessionStart on AppStore {
           groupStart: ts.groupStart,
           context: context,
           hintWeight: prev?.weight ?? ts.weight ?? (loadMode == 'bodyweight' ? 0 : null),
-          hintReps: showReps ? (prev?.reps ?? ts.reps) : null,
+          hintReps: showReps ? (_repsAtTarget(prev, method, ts.type, loadMode, session.targetRir) ?? ts.reps) : null,
           targetRir: methodSetUsesRir(method, ts.type) ? session.targetRir : null,
         ),
       );

@@ -16,7 +16,6 @@ const clusterLowReps = 2;
 const clusterHighReps = 5;
 const clusterTargetReps = 3;
 const defaultDropRatio = 0.75;
-const maxAutomaticChange = 0.10;
 
 class Recommendation {
   final String method;
@@ -87,8 +86,8 @@ int? supportedReps(double oneRm, double weight, int rir, {int limit = 999}) {
   return low > 0 ? low : null;
 }
 
-/// Apply the estimate, practical increments/inventory and the automatic-change
-/// limit together. The caller must fit rep targets to the returned load.
+/// The estimated load rounded down to a load the gym can make. There is no cap on the size of the change.
+/// The caller must fit rep targets to the returned load.
 (double, String, String) _estimatedLoad(
   double current,
   double raw,
@@ -96,47 +95,11 @@ int? supportedReps(double oneRm, double weight, int rir, {int limit = 999}) {
   String reason,
   double Function(double)? loadAtOrBelow,
 ) {
-  double round(double value) => loadAtOrBelow?.call(value) ?? _weightAtOrBelow(value, current, step);
-  final proposed = round(raw);
-  final intended = proposed > current + 1e-6
-      ? 'increase'
-      : proposed < current - 1e-6
-      ? 'decrease'
-      : 'hold';
-  final (bounded, _, why) = _boundedLoad(current, proposed, intended, step, reason);
-  final load = round(bounded);
-  if (load <= 0 || (load - current).abs() > current * maxAutomaticChange + 1e-6) {
-    return (current, 'hold', 'Keep the load; no available load fits the 10% automatic-change limit.');
+  final load = loadAtOrBelow?.call(raw) ?? _weightAtOrBelow(raw, current, step);
+  if (!load.isFinite || load <= 0) {
+    return (current, 'hold', 'No positive load fits the estimate; choose a load manually.');
   }
-  return (load, load > current + 1e-6 ? 'increase' : (load < current - 1e-6 ? 'decrease' : 'hold'), why);
-}
-
-/// Applies the 10% limit to estimate-driven load changes. Rep-only progression
-/// without effort observations uses its own single-increment rule.
-(double, String, String) _boundedLoad(double current, double proposed, String intended, double step, String reason) {
-  if (intended == 'hold') return (current, 'hold', reason);
-  final direction = intended == 'increase' ? 1 : -1;
-  final delta = proposed - current;
-  if (delta * direction <= 1e-9) {
-    return (
-      current,
-      'hold',
-      'The rep-based direction conflicts with the effort-based estimate or rounding; '
-          'keep the load and review the observation.',
-    );
-  }
-  final available = ((current * maxAutomaticChange + 1e-9) / step).floor();
-  if (available < 1) {
-    return (
-      current,
-      'hold',
-      'The smallest configured increment exceeds the 10% automatic-change limit; choose a suitable load manually.',
-    );
-  }
-  final bounded = current + direction * math.min(delta.abs(), available * step);
-  if (bounded <= 0) return (current, 'hold', 'No positive load fits this automatic change; choose manually.');
-  if ((bounded - proposed).abs() > 1e-9) reason += ' The change is capped at 10% using available increments.';
-  return (bounded, bounded > current ? 'increase' : 'decrease', reason);
+  return (load, load > current + 1e-6 ? 'increase' : (load < current - 1e-6 ? 'decrease' : 'hold'), reason);
 }
 
 List<double?> _descendingDropWeights(double anchor, List<double> ratios, String unit, double step) {
@@ -153,16 +116,6 @@ List<double?> _descendingDropWeights(double anchor, List<double> ratios, String 
     }
   }
   return values;
-}
-
-/// Reps needed at [current] before one increment up to [next] still leaves [low] reps at the same effort.
-/// This is the top of the widened range for an exercise whose single increment is a big jump: a 1.25 kg step
-/// on a 5 kg raise is 25 %, so the load waits until the lifter has out-repped that jump.
-int repsToEarnStep(double current, double next, int low, int rir) {
-  for (var reps = low; reps < 60; reps++) {
-    if ((supportedReps(setOneRm(current, reps, rir)!, next, rir) ?? 0) >= low) return reps;
-  }
-  return 60;
 }
 
 String _fmt(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
@@ -294,16 +247,8 @@ Recommendation? _straight(
   target ??= rirTracked && sets.first.rir != null ? sets.first.rir!.clamp(0, maxCountedRir) : null;
   final holdLow = low;
   final holdHigh = high;
+  var fittedToEffort = false;
   String reason;
-  // A single increment above the automatic-change limit: widen the range instead of never (or wildly)
-  // stepping. The load goes up by exactly that increment once every set has earned it.
-  final next = loadAtOrBelow?.call(current + step) ?? current + step;
-  final bigStep = next > current + 1e-6 && next - current > current * maxAutomaticChange + 1e-6;
-  final earnReps = bigStep ? repsToEarnStep(current, next, holdLow, rirTracked ? (target ?? 0) : 0) : 0;
-  final widened = bigStep
-      ? ' One increment is more than 10 % of this load, so it goes up once every set reaches $earnReps reps.'
-      : '';
-
   final contextError = contextProblem(planned, currentPlan?.where((r) => isStraightType(r.type)).toList());
   if (contextError != null) {
     apply = false;
@@ -319,7 +264,7 @@ Recommendation? _straight(
     reason = 'Working loads differ; preserve the individual loads and choose progression manually.';
   } else if (!rirTracked) {
     // Without effort observations use reps alone, keeping the same stable window.
-    if (sets.every((s) => s.reps! >= holdHigh && (!bigStep || s.reps! >= earnReps))) {
+    if (sets.every((s) => s.reps! >= holdHigh)) {
       weight = loadAtOrBelow?.call(current + step) ?? current + step;
       action = weight > current ? 'increase' : 'hold';
       targets = List.filled(planned.length, low);
@@ -333,19 +278,20 @@ Recommendation? _straight(
       }
       reason = 'A working set fell below $holdLow reps; aim for $low–$high reps at a lighter load.';
     } else {
-      reason = 'Keep the load while working reps remain within $holdLow–$holdHigh.$widened';
+      reason = 'Keep the load while working reps remain within $holdLow–$holdHigh.';
     }
   } else if (target == null) {
     reason = 'Target RIR is unknown; choose an effort target before automatic progression.';
-  } else if (sets.any((s) => s.rir == null || s.rir! < 0)) {
-    reason = 'Actual RIR is unknown for a working set; record effort before progressing.';
   } else {
-    final estimates = [for (final s in sets) setOneRm(s.weight, s.reps, s.rir)!];
+    // A blank RIR never proves failure and never raises the load: such a set counts as done at the target, so
+    // its reps alone decide. Reps under the range still lower the load.
+    final unknownRir = sets.any((s) => s.rir == null || s.rir! < 0);
+    final estimates = [for (final s in sets) setOneRm(s.weight, s.reps, s.rir == null || s.rir! < 0 ? target : s.rir)!];
     final atTarget = [for (final oneRm in estimates) supportedReps(oneRm, weight, target) ?? 0];
     reason = 'Keep the load and adjust reps to $target RIR.';
+    fittedToEffort = true;
     if (atTarget.any((reps) => reps < holdLow) ||
-        atTarget.every((reps) => reps > holdHigh) ||
-        sets.every((s) => s.rir! > maxCountedRir)) {
+        (!unknownRir && (atTarget.every((reps) => reps > holdHigh) || sets.every((s) => s.rir! > maxCountedRir)))) {
       final raw = estimates.reduce(math.min) * wathanPercent(low + target) / 100;
       (weight, action, reason) = _estimatedLoad(
         current,
@@ -355,28 +301,47 @@ Recommendation? _straight(
         loadAtOrBelow,
       );
     }
-    if (bigStep && action == 'hold') {
-      if (estimates.every((oneRm) => (supportedReps(oneRm, next, target!) ?? 0) >= holdLow)) {
-        weight = next;
-        action = 'increase';
-        reason =
-            'One increment is more than 10 % of this load; every set can now reach $holdLow reps at the heavier '
-            'load, so it goes up one step.';
-      } else {
-        reason = '$reason$widened';
+    if (unknownRir && weight > current + 1e-6) (weight, action) = (loadAtOrBelow?.call(current) ?? current, 'hold');
+    // Coarse loads can round a decrease far below the estimate; keep the current load when it fits the range better.
+    int miss(double load) {
+      final reps = [for (final oneRm in estimates) supportedReps(oneRm, load, target!) ?? 0];
+      return math.max(0, low - reps.reduce(math.min)) + math.max(0, reps.reduce(math.max) - high);
+    }
+
+    if (action == 'decrease') {
+      // Try every available load from the rounded estimate up to the current one; the lightest best fit wins.
+      var best = weight;
+      for (var k = 1; k < 200; k++) {
+        final candidate = loadAtOrBelow?.call(weight + k * step) ?? weight + k * step;
+        if (candidate > current + 1e-6) break;
+        if (miss(candidate) < miss(best)) best = candidate;
+      }
+      if ((best - weight).abs() > 1e-6) {
+        weight = best;
+        action = best < current - 1e-6 ? 'decrease' : 'hold';
+        if (action == 'hold') {
+          reason =
+              'No available lighter load fits $low–$high reps better; keep the load and adjust reps to $target RIR.';
+        }
       }
     }
+    // Every set's goal is what its own last result supports at the target, never more. A set still under the
+    // range after the lighter load keeps that honest goal; the next workout lowers the load again.
     final fitted = [for (final oneRm in estimates) supportedReps(oneRm, weight, target)];
-    apply = fitted.every((reps) => reps != null && reps >= low);
+    apply = fitted.every((reps) => reps != null);
     if (apply) {
       targets = [for (final reps in fitted) math.min(reps!, high)];
+      if (targets.any((reps) => reps < low)) {
+        reason += ' A set is still under $low reps at $target RIR; the load drops again next time if it stays there.';
+      }
     } else {
       targets = [];
-      reason = 'No automatic load supports $low–$high reps at $target RIR; choose a suitable load manually.';
+      reason = 'No automatic load supports a rep at $target RIR; choose a suitable load manually.';
     }
+    if (unknownRir) reason += ' A working set has no RIR, so its reps decide and the load cannot go up.';
   }
   // Never prescribe historical reps outside the configured range when effort or a complete baseline is missing.
-  if (targets.any((reps) => reps < low || reps > high)) {
+  if (!fittedToEffort && targets.any((reps) => reps < low || reps > high)) {
     apply = false;
     targets = [];
     reason += ' Choose a load for $low–$high reps before progressing.';
@@ -535,16 +500,15 @@ Recommendation? _method(
     } else {
       reason = 'Cluster reps remain inside the $clusterLowReps-$clusterHighReps working window.';
     }
-    final (weight, action, why) = _boundedLoad(current, suggested, intended, step, reason);
     return Recommendation(
       method: method,
-      action: action,
-      weight: weight,
+      action: intended,
+      weight: suggested,
       applyWeight: problem == null,
       setRepTargets: List.filled(work.length, clusterTargetReps),
       targetReps: clusterTargetReps,
       targetRir: null,
-      reason: why,
+      reason: reason,
       continuationRepRange: (clusterLowReps, clusterHighReps),
       step: step,
     );
